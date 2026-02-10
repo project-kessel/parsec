@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/httpfixture"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/httpfixture"
 )
 
 // setupTestJWKSFixture creates a JWKS fixture for testing

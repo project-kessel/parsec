@@ -10,7 +10,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
-	"github.com/alechenninger/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/clock"
 )
 
 func TestNewJWKSFixture(t *testing.T) {

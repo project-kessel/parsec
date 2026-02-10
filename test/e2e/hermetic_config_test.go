@@ -10,16 +10,16 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
-	parsecv1 "github.com/alechenninger/parsec/api/gen/parsec/v1"
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/datasource"
-	"github.com/alechenninger/parsec/internal/httpfixture"
-	"github.com/alechenninger/parsec/internal/issuer"
-	"github.com/alechenninger/parsec/internal/lua"
-	"github.com/alechenninger/parsec/internal/mapper"
-	"github.com/alechenninger/parsec/internal/server"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/httpfixture"
+	"github.com/project-kessel/parsec/internal/issuer"
+	"github.com/project-kessel/parsec/internal/lua"
+	"github.com/project-kessel/parsec/internal/mapper"
+	"github.com/project-kessel/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // TestHermeticTokenExchange demonstrates end-to-end testing of Parsec's external API
@@ -233,7 +233,7 @@ end`,
 		)
 
 		// WHEN: Call the external gRPC API
-		resp, err := exchangeServer.Exchange(ctx, &parsecv1.TokenExchangeRequest{
+		resp, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
 			GrantType:          "urn:ietf:params:oauth:grant-type:token-exchange",
 			Audience:           "prod.example.com",
 			RequestedTokenType: string(service.TokenTypeTransactionToken),
@@ -351,7 +351,7 @@ end`,
 		)
 
 		// WHEN: Call API with request_context
-		resp, err := exchangeServer.Exchange(ctx, &parsecv1.TokenExchangeRequest{
+		resp, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
 			GrantType:          "urn:ietf:params:oauth:grant-type:token-exchange",
 			Audience:           "prod.example.com",
 			RequestedTokenType: string(service.TokenTypeTransactionToken),

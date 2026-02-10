@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	luaservices "github.com/alechenninger/parsec/internal/lua"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	luaservices "github.com/project-kessel/parsec/internal/lua"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func TestLuaDataSource_WithRequestOptions(t *testing.T) {

@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // ClaimsFilterRegistry determines which request_context claims an actor is allowed to provide

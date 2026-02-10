@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/fs"
+	"github.com/project-kessel/parsec/internal/fs"
 	"github.com/google/uuid"
 )
 

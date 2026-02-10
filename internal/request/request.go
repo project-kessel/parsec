@@ -4,7 +4,7 @@
 // which are used by multiple packages including trust validation and token issuance.
 package request
 
-import "github.com/alechenninger/parsec/internal/claims"
+import "github.com/project-kessel/parsec/internal/claims"
 
 // RequestAttributes contains attributes about the incoming request
 // This is used for both token issuance context and validator filtering decisions

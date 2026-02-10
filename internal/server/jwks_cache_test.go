@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 func TestJWKSServerCaching(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	parsecv1 "github.com/alechenninger/parsec/api/gen/parsec/v1"
+	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
 )
 
 func TestFormMarshaler_Unmarshal(t *testing.T) {
@@ -13,7 +13,7 @@ func TestFormMarshaler_Unmarshal(t *testing.T) {
 	tests := []struct {
 		name    string
 		data    string
-		want    *parsecv1.TokenExchangeRequest
+		want    *parsecv1.ExchangeRequest
 		wantErr bool
 	}{
 		{
@@ -22,7 +22,7 @@ func TestFormMarshaler_Unmarshal(t *testing.T) {
 				"&subject_token=eyJhbGc.payload.signature" +
 				"&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt" +
 				"&audience=https%3A%2F%2Fexample.com",
-			want: &parsecv1.TokenExchangeRequest{
+			want: &parsecv1.ExchangeRequest{
 				GrantType:        "urn:ietf:params:oauth:grant-type:token-exchange",
 				SubjectToken:     "eyJhbGc.payload.signature",
 				SubjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
@@ -37,7 +37,7 @@ func TestFormMarshaler_Unmarshal(t *testing.T) {
 				"&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt" +
 				"&resource=https%3A%2F%2Fapi.example.com" +
 				"&scope=read%20write",
-			want: &parsecv1.TokenExchangeRequest{
+			want: &parsecv1.ExchangeRequest{
 				GrantType:        "urn:ietf:params:oauth:grant-type:token-exchange",
 				SubjectToken:     "token123",
 				SubjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
@@ -49,14 +49,14 @@ func TestFormMarshaler_Unmarshal(t *testing.T) {
 		{
 			name:    "invalid form data",
 			data:    "%ZZ%invalid",
-			want:    &parsecv1.TokenExchangeRequest{},
+			want:    &parsecv1.ExchangeRequest{},
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := &parsecv1.TokenExchangeRequest{}
+			got := &parsecv1.ExchangeRequest{}
 			err := marshaler.Unmarshal([]byte(tt.data), got)
 
 			if (err != nil) != tt.wantErr {
@@ -100,7 +100,7 @@ func TestFormMarshaler_Decoder(t *testing.T) {
 	reader := bytes.NewBufferString(formData)
 	decoder := marshaler.NewDecoder(reader)
 
-	req := &parsecv1.TokenExchangeRequest{}
+	req := &parsecv1.ExchangeRequest{}
 	err := decoder.Decode(req)
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)

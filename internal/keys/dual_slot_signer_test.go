@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/alechenninger/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/clock"
 )
 
 const testTokenType = "urn:ietf:params:oauth:token-type:txn_token"

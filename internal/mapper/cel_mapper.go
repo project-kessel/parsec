@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/cel-go/cel"
 
-	celhelpers "github.com/alechenninger/parsec/internal/cel"
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	celhelpers "github.com/project-kessel/parsec/internal/cel"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // CELMapper is a ClaimMapper that uses CEL (Common Expression Language) expressions

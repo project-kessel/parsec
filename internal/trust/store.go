@@ -3,7 +3,7 @@ package trust
 import (
 	"context"
 
-	"github.com/alechenninger/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/request"
 )
 
 // Store manages trust domains and their associated validators

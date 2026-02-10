@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/claims"
 )
 
 // Common validation errors

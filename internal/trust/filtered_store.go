@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/alechenninger/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/request"
 )
 
 // ValidatorFilter determines which validators an actor is allowed to use

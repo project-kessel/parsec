@@ -1,48 +1,36 @@
-FROM golang:1.24-alpine AS builder
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7-1769056855 AS builder
 
-WORKDIR /app
+ARG TARGETARCH
+USER root
+RUN microdnf install -y tar gzip make which gcc gcc-c++ cyrus-sasl-lib findutils git go-toolset
 
-# Copy go mod files first for better caching
+WORKDIR /workspace
+
 COPY go.mod go.sum ./
+
+ENV CGO_ENABLED 1
 RUN go mod download
 
-# Copy source code
-COPY cmd/ ./cmd/
-COPY internal/ ./internal/
-COPY api/ ./api/
+COPY cmd ./cmd
+COPY internal ./internal
+COPY api ./api
+COPY Makefile ./
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o parsec ./cmd/parsec
+ARG VERSION
+RUN VERSION=${VERSION} make build
 
-# Final stage
-FROM alpine:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7-1769056855
 
-# Install ca-certificates for HTTPS requests (needed for JWKS fetching)
-RUN apk --no-cache add ca-certificates
+COPY --from=builder /workspace/bin/parsec /usr/local/bin/
 
-# Create non-root user for OpenShift compatibility
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
-
-WORKDIR /home/appuser
-
-# Copy the binary from builder stage
-COPY --from=builder /app/parsec .
-
-# Copy default configuration (can be overridden with volume mount)
-COPY configs/ ./configs/
-
-# Set ownership and permissions
-RUN chown -R 1001:1001 /home/appuser && \
-    chmod +x /home/appuser/parsec
-
-USER 1001
-
-# Expose gRPC port (default parsec port)
 EXPOSE 9090
-
-# Expose HTTP gateway port (if enabled)
 EXPOSE 8080
 
-# Default command runs the serve subcommand
-CMD ["./parsec", "serve"]
+USER 1001
+ENV PATH="$PATH:/usr/local/bin"
+ENTRYPOINT ["parsec", "serve"]
+
+LABEL name="kessel-parsec" \
+      version="0.0.1" \
+      summary="Kessel parsec service" \
+      description="The Kessel parsec OAuth 2.0 Token Exchange and ext_authz service"

@@ -11,8 +11,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/clock"
 )
 
 // JWTValidator validates JWT tokens using JWKS

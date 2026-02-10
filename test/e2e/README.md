@@ -11,7 +11,7 @@ This test validates the **external API contract** of Parsec: the gRPC `TokenExch
 **External API Contract Testing**
 
 The e2e test focuses on:
-- ✅ **gRPC API Contract**: `Exchange(TokenExchangeRequest)` → `TokenExchangeResponse`
+- ✅ **gRPC API Contract**: `Exchange(ExchangeRequest)` → `ExchangeResponse`
 - ✅ **Observable Behavior**: Does the API succeed/fail appropriately? What's in the response?
 - ✅ **Production Configuration**: Uses realistic validators, datasources, and issuers
 - ✅ **Hermetic Fixtures**: All I/O (JWKS, HTTP, time) is controlled via fixtures
@@ -51,7 +51,7 @@ exchangeServer := server.NewExchangeServer(trustStore, tokenService, ...)
 
 // 4. Test the external API ONLY
 ctx := metadata.NewIncomingContext(..., "authorization", "Bearer "+actorToken)
-resp, err := exchangeServer.Exchange(ctx, &parsecv1.TokenExchangeRequest{
+resp, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
     GrantType: "urn:ietf:params:oauth:grant-type:token-exchange",
     SubjectToken: subjectToken,
     // ...
@@ -76,7 +76,7 @@ if claims["user_profile"]["department"] != "engineering" {
     *   Actor credentials passed via gRPC metadata (`authorization: Bearer <token>`)
     *   Subject credentials in the request body (`subject_token`)
     *   Request context as base64-encoded JSON (`request_context`)
-    *   Validates the `TokenExchangeResponse` structure
+    *   Validates the `ExchangeResponse` structure
     *   **Claims Verification**: Uses `UnsignedIssuer` to issue parseable tokens, allowing verification that:
         - Subject identity claims are included (sub, issuer, trust_domain, email, name)
         - Datasource data is fetched and included (user_profile with department, roles)
@@ -144,7 +144,7 @@ Expected output:
     ✓ Mismatched audience rejected: ...
 --- PASS: TestHermeticTokenExchange (0.08s)
 PASS
-ok      github.com/alechenninger/parsec/test/e2e    0.656s
+ok      github.com/project-kessel/parsec/test/e2e    0.656s
 ```
 
 ### Key Difference from Integration Tests

@@ -10,9 +10,9 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jws"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/keys"
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/keys"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // TransactionTokenIssuerConfig is the configuration for creating a transaction token issuer

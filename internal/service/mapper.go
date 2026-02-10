@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/request"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // ClaimMapper transforms inputs into claims for the token

@@ -10,9 +10,9 @@ import (
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/alechenninger/parsec/internal/issuer"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/issuer"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func TestAuthzServer_Check(t *testing.T) {

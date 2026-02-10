@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/claims"
 )
 
 func TestFilteredStore_ForActor(t *testing.T) {

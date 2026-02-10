@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/issuer"
-	"github.com/alechenninger/parsec/internal/keys"
-	"github.com/alechenninger/parsec/internal/server"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/issuer"
+	"github.com/project-kessel/parsec/internal/keys"
+	"github.com/project-kessel/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // TestJWKSEndpoint tests that the JWKS endpoint returns valid JSON Web Key Sets

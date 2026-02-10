@@ -4,7 +4,7 @@ import (
 	"context"
 	"maps"
 
-	"github.com/alechenninger/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/claims"
 )
 
 // StubClaimMapper is a simple stub claim mapper for testing

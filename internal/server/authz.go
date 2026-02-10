@@ -10,9 +10,9 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 
-	"github.com/alechenninger/parsec/internal/request"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // TokenTypeSpec specifies a token type to issue and how to deliver it

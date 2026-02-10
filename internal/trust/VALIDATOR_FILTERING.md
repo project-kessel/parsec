@@ -121,7 +121,7 @@ package main
 
 import (
     "context"
-    "github.com/alechenninger/parsec/internal/trust"
+    "github.com/project-kessel/parsec/internal/trust"
 )
 
 func main() {

@@ -4,11 +4,11 @@ package parsec.v1;
 
 import "google/api/annotations.proto";
 
-option go_package = "github.com/alechenninger/parsec/api/gen/parsec/v1;parsecv1";
+option go_package = "github.com/project-kessel/parsec/api/gen/parsec/v1;parsecv1";
 
 // JWKS provides JSON Web Key Set discovery per RFC 7517.
 // https://www.rfc-editor.org/rfc/rfc7517.html
-service JWKS {
+service JWKSService {
   // GetJWKS returns the JSON Web Key Set containing all public keys
   // from all configured issuers. This endpoint is typically used by
   // clients to verify signed tokens.

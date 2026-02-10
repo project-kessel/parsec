@@ -7,7 +7,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 
-	"github.com/alechenninger/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/request"
 )
 
 // ValidatorFilterLibrary creates a CEL library for filtering validators based on actor context.

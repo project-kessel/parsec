@@ -11,16 +11,16 @@ import (
 	"sync"
 	"time"
 
-	parsecv1 "github.com/alechenninger/parsec/api/gen/parsec/v1"
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/service"
+	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // JWKSServer implements the JWKS gRPC service
 // It serves JSON Web Key Sets containing public keys from all configured issuers
 // The response is cached and periodically refreshed for efficiency
 type JWKSServer struct {
-	parsecv1.UnimplementedJWKSServer
+	parsecv1.UnimplementedJWKSServiceServer
 
 	issuerRegistry  service.Registry
 	clock           clock.Clock

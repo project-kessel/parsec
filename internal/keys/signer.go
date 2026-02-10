@@ -5,7 +5,7 @@ import (
 	"crypto"
 	"errors"
 
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 var (

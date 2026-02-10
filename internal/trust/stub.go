@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/request"
 )
 
 // StubStore is a simple in-memory trust store for testing

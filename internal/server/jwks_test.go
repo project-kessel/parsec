@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 func TestJWKSServer(t *testing.T) {
