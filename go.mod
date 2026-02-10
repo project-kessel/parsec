@@ -1,4 +1,4 @@
-module github.com/alechenninger/parsec
+module github.com/project-kessel/parsec
 
 go 1.25.3
 

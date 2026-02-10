@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 var never = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)

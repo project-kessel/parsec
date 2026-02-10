@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func TestTokenService_IssueTokens_Observability(t *testing.T) {

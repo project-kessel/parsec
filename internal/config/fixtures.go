@@ -5,8 +5,8 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/httpfixture"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/httpfixture"
 )
 
 // BuildHTTPFixtureProvider creates a composite HTTP fixture provider from fixture configurations

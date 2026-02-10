@@ -71,7 +71,7 @@ package main
 import (
     "io/ioutil"
     "time"
-    "github.com/alechenninger/parsec/internal/datasource"
+    "github.com/project-kessel/parsec/internal/datasource"
 )
 
 func main() {

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/alechenninger/parsec/internal/httpfixture"
-	"github.com/alechenninger/parsec/internal/server"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/httpfixture"
+	"github.com/project-kessel/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // Provider constructs all application components from configuration

@@ -464,7 +464,7 @@ func (ts *TokenService) IssueTokens(ctx context.Context,
    - Sign token (if applicable)
    - Return Token with value, type, expiry
                 ↓
-6. Return TokenExchangeResponse
+6. Return ExchangeResponse
    - access_token: issued token value
    - token_type: token type
    - expires_in: seconds until expiration

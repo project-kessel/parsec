@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/datasource"
-	luaservices "github.com/alechenninger/parsec/internal/lua"
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/datasource"
+	luaservices "github.com/project-kessel/parsec/internal/lua"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // NewDataSourceRegistry creates a data source registry from configuration

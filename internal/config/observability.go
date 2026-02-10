@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/alechenninger/parsec/internal/probe"
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/probe"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // NewObserver creates an application observer from configuration

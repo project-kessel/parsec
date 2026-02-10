@@ -1,0 +1,16 @@
+version: "2" 
+linters:
+  enable:
+    # Start: Defaults
+    - govet
+    - errcheck
+    - ineffassign
+    - staticcheck
+    - unused
+    # End: Defaults
+formatters:
+  enable:
+    - goimports
+issues:
+  # Maximum count of issues with the same text (0 = no limit)
+  max-same-issues: 0

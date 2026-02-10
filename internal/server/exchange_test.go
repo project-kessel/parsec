@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	parsecv1 "github.com/alechenninger/parsec/api/gen/parsec/v1"
+	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/issuer"
-	"github.com/alechenninger/parsec/internal/mapper"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/issuer"
+	"github.com/project-kessel/parsec/internal/mapper"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func TestExchangeServer_WithActorFiltering(t *testing.T) {
@@ -71,7 +71,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 	t.Run("anonymous actor gets filtered store - no validators match", func(t *testing.T) {
 		// No actor credentials in context, so ForActor will be called with AnonymousResult
 		// The CEL filter requires trust_domain == "client.example.com", which won't match empty actor
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "external-token",
 			Audience:     "parsec.test",
@@ -119,7 +119,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 
 		exchangeServerWithClient := NewExchangeServer(storeWithClient, tokenService, claimsFilterRegistry, nil)
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "external-token",
 			Audience:     "parsec.test",
@@ -162,7 +162,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 		})
 		actorCtx := metadata.NewIncomingContext(ctx, md)
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "subject-token",
 			Audience:     "parsec.test",
@@ -229,7 +229,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 		})
 		adminCtx := metadata.NewIncomingContext(ctx, adminMd)
 
-		adminReq := &parsecv1.TokenExchangeRequest{
+		adminReq := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "admin-subject-token",
 			Audience:     "parsec.test",
@@ -304,7 +304,7 @@ func TestExchangeServer_WithActorFilteringByAudience(t *testing.T) {
 	exchangeServer := NewExchangeServer(filteredStore, tokenService, claimsFilterRegistry, nil)
 
 	t.Run("prod audience allows prod validator", func(t *testing.T) {
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "prod-token",
 			Audience:     "prod.example.com",
@@ -335,7 +335,7 @@ func TestExchangeServer_WithActorFilteringByAudience(t *testing.T) {
 	devExchangeServer := NewExchangeServer(filteredStore, devTokenService, claimsFilterRegistry, nil)
 
 	t.Run("dev audience allows dev validator", func(t *testing.T) {
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "dev-token",
 			Audience:     "dev.example.com",
@@ -367,7 +367,7 @@ func TestExchangeServer_WithActorFilteringByAudience(t *testing.T) {
 		wrongTokenService := service.NewTokenService("wrong.example.com", dataSourceRegistry, wrongIssuerRegistry, nil)
 		wrongExchangeServer := NewExchangeServer(filteredStore, wrongTokenService, claimsFilterRegistry, nil)
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "prod-token",
 			Audience:     "wrong.example.com",
@@ -441,7 +441,7 @@ func TestExchangeServer_ActorPassedToTokenIssuance(t *testing.T) {
 		})
 		actorCtx := metadata.NewIncomingContext(ctx, md)
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken: "user-token",
 			Audience:     "parsec.test",
@@ -522,7 +522,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 		// Base64-encode the request context (per transaction token spec)
 		requestContextBase64 := base64.StdEncoding.EncodeToString([]byte(requestContextJSON))
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken:   "test-token",
 			Audience:       "parsec.test",
@@ -592,7 +592,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 		// Base64-encode the request context (per transaction token spec)
 		requestContextBase64 := base64.StdEncoding.EncodeToString([]byte(requestContextJSON))
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken:   "test-token",
 			Audience:       "parsec.test",
@@ -639,7 +639,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
 		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, nil)
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken:   "test-token",
 			Audience:       "parsec.test",
@@ -660,7 +660,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
 		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, nil)
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken:   "test-token",
 			Audience:       "parsec.test",
@@ -685,7 +685,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 		invalidJSON := "not valid json at all"
 		requestContextBase64 := base64.StdEncoding.EncodeToString([]byte(invalidJSON))
 
-		req := &parsecv1.TokenExchangeRequest{
+		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
 			SubjectToken:   "test-token",
 			Audience:       "parsec.test",

@@ -10,6 +10,9 @@
 
 # Output of the go coverage tool
 *.out
+# HTML test coverage report produce with `go tool cover`
+coverage.html
+coverage.txt
 
 # Go workspace file
 go.work

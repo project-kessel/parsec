@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/issuer"
-	"github.com/alechenninger/parsec/internal/server"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/issuer"
+	"github.com/project-kessel/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // setupTestDependencies creates stub implementations for testing

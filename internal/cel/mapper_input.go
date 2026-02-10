@@ -8,7 +8,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // DataSourceRegistry is the interface for accessing data sources

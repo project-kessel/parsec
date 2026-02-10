@@ -7,10 +7,10 @@ import (
 
 	lua "github.com/yuin/gopher-lua"
 
-	luaservices "github.com/alechenninger/parsec/internal/lua"
-	"github.com/alechenninger/parsec/internal/request"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	luaservices "github.com/project-kessel/parsec/internal/lua"
+	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // LuaDataSource executes a Lua script to fetch data

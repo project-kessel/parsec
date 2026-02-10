@@ -3,8 +3,8 @@ package trust
 import (
 	"testing"
 
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/request"
 )
 
 func TestCelValidatorFilter_IsAllowed(t *testing.T) {

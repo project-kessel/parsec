@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/alechenninger/parsec/internal/cli"
+	"github.com/project-kessel/parsec/internal/cli"
 )
 
 func main() {

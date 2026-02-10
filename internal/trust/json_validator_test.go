@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/claims"
 )
 
 func TestJSONValidator_Validate(t *testing.T) {

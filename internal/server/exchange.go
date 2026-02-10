@@ -6,16 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 
-	parsecv1 "github.com/alechenninger/parsec/api/gen/parsec/v1"
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/request"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 // ExchangeServer implements the TokenExchange gRPC service
 type ExchangeServer struct {
-	parsecv1.UnimplementedTokenExchangeServer
+	parsecv1.UnimplementedTokenExchangeServiceServer
 
 	trustStore           trust.Store
 	tokenService         *service.TokenService
@@ -38,7 +38,7 @@ func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenServic
 }
 
 // Exchange implements the token exchange endpoint (RFC 8693)
-func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.TokenExchangeRequest) (*parsecv1.TokenExchangeResponse, error) {
+func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeRequest) (*parsecv1.ExchangeResponse, error) {
 	// Create request-scoped probe
 	ctx, probe := s.observer.TokenExchangeStarted(ctx, req.GrantType, req.RequestedTokenType, req.Audience, req.Scope)
 	defer probe.End()
@@ -170,7 +170,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.TokenExchan
 	}
 
 	// 9. Return response
-	return &parsecv1.TokenExchangeResponse{
+	return &parsecv1.ExchangeResponse{
 		AccessToken:     token.Value,
 		IssuedTokenType: string(requestedTokenType),
 		TokenType:       "Bearer",

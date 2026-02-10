@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/clock"
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // StubIssuerConfig is the configuration for creating a stub issuer

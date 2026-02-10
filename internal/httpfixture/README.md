@@ -444,7 +444,7 @@ compositeProvider := httpfixture.NewFuncProvider(func(req *http.Request) *httpfi
 Use `clock.FixtureClock` for precise control over token timestamps and expiration testing:
 
 ```go
-import "github.com/alechenninger/parsec/internal/clock"
+import "github.com/project-kessel/parsec/internal/clock"
 
 func TestTokenExpiration(t *testing.T) {
     // Create a fixture clock at a specific time

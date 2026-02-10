@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/httpfixture"
-	luaservices "github.com/alechenninger/parsec/internal/lua"
-	"github.com/alechenninger/parsec/internal/service"
-	"github.com/alechenninger/parsec/internal/trust"
+	"github.com/project-kessel/parsec/internal/httpfixture"
+	luaservices "github.com/project-kessel/parsec/internal/lua"
+	"github.com/project-kessel/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func TestLuaDataSource_WithMapFixtureProvider(t *testing.T) {

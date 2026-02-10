@@ -21,8 +21,8 @@ A LuaDataSource executes a Lua script that has access to:
 import (
     "net/http"
     "time"
-    "github.com/alechenninger/parsec/internal/datasource"
-    "github.com/alechenninger/parsec/internal/lua"
+    "github.com/project-kessel/parsec/internal/datasource"
+    "github.com/project-kessel/parsec/internal/lua"
 )
 
 script := `

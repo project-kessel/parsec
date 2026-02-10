@@ -7,11 +7,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/alechenninger/parsec/internal/claims"
-	"github.com/alechenninger/parsec/internal/issuer"
-	"github.com/alechenninger/parsec/internal/keys"
-	"github.com/alechenninger/parsec/internal/mapper"
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/issuer"
+	"github.com/project-kessel/parsec/internal/keys"
+	"github.com/project-kessel/parsec/internal/mapper"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // NewIssuerRegistry creates an issuer registry from configuration

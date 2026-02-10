@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	"github.com/alechenninger/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/server"
 )
 
 // NewClaimsFilterRegistry creates a claims filter registry from configuration

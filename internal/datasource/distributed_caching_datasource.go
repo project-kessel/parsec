@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang/groupcache"
 
-	"github.com/alechenninger/parsec/internal/service"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 // DistributedCachingDataSource wraps a cacheable data source with groupcache

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/alechenninger/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/clock"
 )
 
 // Transport implements http.RoundTripper using a FixtureProvider

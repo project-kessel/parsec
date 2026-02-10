@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/alechenninger/parsec/internal/config"
-	"github.com/alechenninger/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/config"
+	"github.com/project-kessel/parsec/internal/server"
 )
 
 // NewServeCmd creates the serve command

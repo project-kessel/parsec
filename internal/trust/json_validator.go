@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/alechenninger/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/claims"
 )
 
 // JSONValidator validates unsigned JSON credentials with a Result structure

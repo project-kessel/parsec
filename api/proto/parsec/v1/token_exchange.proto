@@ -4,14 +4,14 @@ package parsec.v1;
 
 import "google/api/annotations.proto";
 
-option go_package = "github.com/alechenninger/parsec/api/gen/parsec/v1;parsecv1";
+option go_package = "github.com/project-kessel/parsec/api/gen/parsec/v1;parsecv1";
 
 // TokenExchange implements RFC 8693 OAuth 2.0 Token Exchange.
 // https://datatracker.ietf.org/doc/html/rfc8693
-service TokenExchange {
+service TokenExchangeService {
   // Exchange performs token exchange according to RFC 8693.
   // The HTTP mapping follows the OAuth 2.0 token endpoint specification.
-  rpc Exchange(TokenExchangeRequest) returns (TokenExchangeResponse) {
+  rpc Exchange(ExchangeRequest) returns (ExchangeResponse) {
     option (google.api.http) = {
       post: "/v1/token"
       body: "*"
@@ -19,8 +19,8 @@ service TokenExchange {
   }
 }
 
-// TokenExchangeRequest follows RFC 8693 Section 2.1
-message TokenExchangeRequest {
+// ExchangeRequest follows RFC 8693 Section 2.1
+message ExchangeRequest {
   // REQUIRED. The value "urn:ietf:params:oauth:grant-type:token-exchange"
   // indicates that a token exchange is being performed.
   string grant_type = 1;
@@ -62,8 +62,8 @@ message TokenExchangeRequest {
   string request_context = 10;
 }
 
-// TokenExchangeResponse follows RFC 8693 Section 2.2
-message TokenExchangeResponse {
+// ExchangeResponse follows RFC 8693 Section 2.2
+message ExchangeResponse {
   // REQUIRED. The security token issued by the authorization server in
   // response to the token exchange request.
   string access_token = 1;

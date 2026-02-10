@@ -41,7 +41,7 @@ The `FormMarshaler` implements grpc-gateway's `runtime.Marshaler` interface to h
    - Currently takes the first value if multiple present
    
 3. **Type Conversion**: All form values are strings
-   - For `TokenExchangeRequest`, this is correct (per RFC 8693)
+   - For `ExchangeRequest`, this is correct (per RFC 8693)
    - Numeric fields like `expires_in` in responses are handled by JSON marshaler
 
 ### Testing

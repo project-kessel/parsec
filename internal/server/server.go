@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 
-	parsecv1 "github.com/alechenninger/parsec/api/gen/parsec/v1"
+	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
 )
 
 // Server manages the gRPC and HTTP servers
@@ -56,8 +56,8 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Register services
 	authv3.RegisterAuthorizationServer(s.grpcServer, s.authzServer)
-	parsecv1.RegisterTokenExchangeServer(s.grpcServer, s.exchangeServer)
-	parsecv1.RegisterJWKSServer(s.grpcServer, s.jwksServer)
+	parsecv1.RegisterTokenExchangeServiceServer(s.grpcServer, s.exchangeServer)
+	parsecv1.RegisterJWKSServiceServer(s.grpcServer, s.jwksServer)
 
 	// Register reflection service for grpcurl and other tools
 	reflection.Register(s.grpcServer)
@@ -84,10 +84,10 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Register HTTP handlers (transcoding from gRPC)
 	endpoint := fmt.Sprintf("localhost:%d", s.grpcPort)
-	if err := parsecv1.RegisterTokenExchangeHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+	if err := parsecv1.RegisterTokenExchangeServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
 		return fmt.Errorf("failed to register token exchange handler: %w", err)
 	}
-	if err := parsecv1.RegisterJWKSHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+	if err := parsecv1.RegisterJWKSServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
 		return fmt.Errorf("failed to register JWKS handler: %w", err)
 	}
 
