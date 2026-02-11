@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -62,7 +63,7 @@ func TestTokenExchangeFormEncoded(t *testing.T) {
 		HTTPPort:       18080,
 		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry}),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
 	})
 
 	if err := srv.Start(ctx); err != nil {
@@ -143,7 +144,7 @@ func TestTokenExchangeJSON(t *testing.T) {
 		HTTPPort:       18081,
 		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry}),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
 	})
 
 	if err := srv.Start(ctx); err != nil {

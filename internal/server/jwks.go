@@ -49,7 +49,7 @@ type JWKSServerConfig struct {
 	// Clock is used for time operations (defaults to system clock)
 	Clock clock.Clock
 
-	// Logger is the structured logger to use. If nil, uses slog.Default()
+	// Logger is the structured logger to use (required)
 	Logger *slog.Logger
 }
 
@@ -61,16 +61,11 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 	if cfg.Clock == nil {
 		cfg.Clock = clock.NewSystemClock()
 	}
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-
 	return &JWKSServer{
 		issuerRegistry:  cfg.IssuerRegistry,
 		clock:           cfg.Clock,
 		refreshInterval: cfg.RefreshInterval,
-		logger:          logger,
+		logger:          cfg.Logger,
 	}
 }
 

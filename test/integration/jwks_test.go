@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestJWKSEndpoint(t *testing.T) {
 		HTTPPort:       18082,
 		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry}),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
 	})
 
 	if err := srv.Start(ctx); err != nil {
@@ -249,7 +250,7 @@ func TestJWKSWithMultipleIssuers(t *testing.T) {
 		HTTPPort:       18083,
 		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry}),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
 	})
 
 	if err := srv.Start(ctx); err != nil {
@@ -336,7 +337,7 @@ func TestJWKSWithUnsignedIssuer(t *testing.T) {
 		HTTPPort:       18084,
 		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry}),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
 	})
 
 	if err := srv.Start(ctx); err != nil {
