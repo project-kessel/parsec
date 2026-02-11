@@ -11,8 +11,15 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
-// NewObserver creates an application observer from configuration
+// NewObserver creates an application observer from configuration.
+// This is a convenience wrapper that creates its own logger from cfg.
 func NewObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) {
+	return NewObserverWithLogger(cfg, NewLogger(cfg))
+}
+
+// NewObserverWithLogger creates an application observer using the provided logger.
+// Use this when you want the observer to share a logger with other components.
+func NewObserverWithLogger(cfg *ObservabilityConfig, logger *slog.Logger) (service.ApplicationObserver, error) {
 	if cfg == nil {
 		// Default to no-op observer if not configured
 		return &service.NoOpApplicationObserver{}, nil
@@ -20,7 +27,9 @@ func NewObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) 
 
 	switch cfg.Type {
 	case "logging":
-		return newLoggingObserver(cfg)
+		return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
+			Logger: logger,
+		}), nil
 	case "noop", "":
 		return &service.NoOpApplicationObserver{}, nil
 	case "composite":
@@ -30,20 +39,16 @@ func NewObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) 
 	}
 }
 
-// newLoggingObserver creates a logging observer
-func newLoggingObserver(cfg *ObservabilityConfig) (service.ApplicationObserver, error) {
-	// Parse default log level
+// NewLogger creates a structured logger from the observability configuration.
+// Returns slog.Default() if cfg is nil.
+func NewLogger(cfg *ObservabilityConfig) *slog.Logger {
+	if cfg == nil {
+		return slog.Default()
+	}
+
 	defaultLevel := parseLogLevel(cfg.LogLevel)
-
-	// Create handler with event-based filtering
 	handler := createEventFilteringHandler(cfg, defaultLevel)
-
-	// Create logger
-	logger := slog.New(handler)
-
-	return probe.NewLoggingObserverWithConfig(probe.LoggingObserverConfig{
-		Logger: logger,
-	}), nil
+	return slog.New(handler)
 }
 
 // newCompositeObserver creates a composite observer that delegates to multiple observers

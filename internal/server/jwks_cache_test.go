@@ -266,11 +266,11 @@ func TestJWKSServerCaching(t *testing.T) {
 		})
 
 		// Start will fail to populate cache but shouldn't error
-		err := jwksServer.Start(ctx)
+		_ = jwksServer.Start(ctx)
 		// Start doesn't fail, but logs warning
 
 		// GetJWKS should return error since cache is empty
-		_, err = jwksServer.GetJWKS(ctx, nil)
+		_, err := jwksServer.GetJWKS(ctx, nil)
 		if err == nil {
 			t.Error("expected error when cache is empty and issuer fails, got nil")
 		}

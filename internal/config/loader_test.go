@@ -38,11 +38,11 @@ func TestNewLoader_WithoutConfigFile(t *testing.T) {
 
 func TestNewLoader_WithEnvironmentVariables(t *testing.T) {
 	// Set some environment variables
-	os.Setenv("PARSEC_SERVER__GRPC_PORT", "19090")
-	os.Setenv("PARSEC_TRUST_DOMAIN", "env.test.com")
+	_ = os.Setenv("PARSEC_SERVER__GRPC_PORT", "19090")
+	_ = os.Setenv("PARSEC_TRUST_DOMAIN", "env.test.com")
 	defer func() {
-		os.Unsetenv("PARSEC_SERVER__GRPC_PORT")
-		os.Unsetenv("PARSEC_TRUST_DOMAIN")
+		_ = os.Unsetenv("PARSEC_SERVER__GRPC_PORT")
+		_ = os.Unsetenv("PARSEC_TRUST_DOMAIN")
 	}()
 
 	// Create loader without config file

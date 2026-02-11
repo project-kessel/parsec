@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,8 +74,8 @@ func TestNewLuaDataSource(t *testing.T) {
 					t.Errorf("expected error containing %q, got nil", tt.errMsg)
 					return
 				}
-				if tt.errMsg != "" && err.Error() != "" {
-					// Just check that an error occurred
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errMsg, err.Error())
 				}
 			} else {
 				if err != nil {
@@ -331,7 +332,7 @@ func TestLuaDataSource_Fetch_HTTPService(t *testing.T) {
 		if r.URL.Path == "/user/alice" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]string{
 				"username": "alice",
 				"email":    "alice@example.com",
 			})
@@ -630,7 +631,7 @@ func TestLuaDataSource_Integration(t *testing.T) {
 	// Create a test HTTP server that returns user data
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":    123,
 			"roles": []string{"admin", "user"},
 		})

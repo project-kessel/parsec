@@ -73,4 +73,3 @@ type PassthroughClaimsFilter struct{}
 func (f *PassthroughClaimsFilter) Filter(c Claims) Claims {
 	return c.Copy()
 }
-

@@ -73,7 +73,7 @@ func TestJWKSEndpoint(t *testing.T) {
 	if err := srv.Start(ctx); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer srv.Stop(ctx)
+	defer func() { _ = srv.Stop(ctx) }()
 
 	// Wait for the server to be ready
 	waitForServer(t, 18082, 5*time.Second)
@@ -93,7 +93,7 @@ func testJWKSEndpoint(t *testing.T, url string) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
@@ -255,7 +255,7 @@ func TestJWKSWithMultipleIssuers(t *testing.T) {
 	if err := srv.Start(ctx); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer srv.Stop(ctx)
+	defer func() { _ = srv.Stop(ctx) }()
 
 	// Wait for the server to be ready
 	waitForServer(t, 18083, 5*time.Second)
@@ -266,7 +266,7 @@ func TestJWKSWithMultipleIssuers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -342,7 +342,7 @@ func TestJWKSWithUnsignedIssuer(t *testing.T) {
 	if err := srv.Start(ctx); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer srv.Stop(ctx)
+	defer func() { _ = srv.Stop(ctx) }()
 
 	// Wait for the server to be ready
 	waitForServer(t, 18084, 5*time.Second)
@@ -353,7 +353,7 @@ func TestJWKSWithUnsignedIssuer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

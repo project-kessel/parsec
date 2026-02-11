@@ -19,14 +19,14 @@ func TestLuaDataSource_WithRequestOptions(t *testing.T) {
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer secret-token" {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 			return
 		}
 
 		// Return user data
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":       123,
 			"username": "alice",
 			"email":    "alice@example.com",
@@ -116,7 +116,7 @@ func TestLuaDataSource_RequestOptionsWithConfigSource(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}))
 	defer server.Close()
 
@@ -194,7 +194,7 @@ func TestLuaDataSource_RequestOptionsModifyURL(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"tenant": "acme-corp"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tenant": "acme-corp"})
 	}))
 	defer server.Close()
 

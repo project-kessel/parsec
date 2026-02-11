@@ -39,4 +39,3 @@ func NewStubClaimsFilterRegistryWithFilter(filter claims.ClaimsFilter) *StubClai
 func (r *StubClaimsFilterRegistry) GetFilter(actor *trust.Result) (claims.ClaimsFilter, error) {
 	return r.filter, nil
 }
-

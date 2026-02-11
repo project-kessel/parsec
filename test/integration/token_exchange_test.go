@@ -68,7 +68,7 @@ func TestTokenExchangeFormEncoded(t *testing.T) {
 	if err := srv.Start(ctx); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer srv.Stop(ctx)
+	defer func() { _ = srv.Stop(ctx) }()
 
 	// Wait for the server to be ready
 	waitForServer(t, 18080, 5*time.Second)
@@ -98,7 +98,7 @@ func TestTokenExchangeFormEncoded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
@@ -149,7 +149,7 @@ func TestTokenExchangeJSON(t *testing.T) {
 	if err := srv.Start(ctx); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer srv.Stop(ctx)
+	defer func() { _ = srv.Stop(ctx) }()
 
 	// Wait for the server to be ready
 	waitForServer(t, 18081, 5*time.Second)
@@ -179,7 +179,7 @@ func TestTokenExchangeJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)

@@ -108,7 +108,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 	t.Run("respects TTL expiration", func(t *testing.T) {
 		// Use a fake clock to deterministically test cache expiration
 		clk := clock.NewFixtureClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
-		
+
 		source := &mockCacheableDataSource{
 			name: "test-source",
 			ttl:  50 * time.Millisecond,
@@ -198,7 +198,7 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 	t.Run("cleanup removes expired entries", func(t *testing.T) {
 		// Use a fake clock to deterministically test cleanup
 		clk := clock.NewFixtureClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
-		
+
 		source := &mockCacheableDataSource{
 			name: "test-source",
 			ttl:  50 * time.Millisecond,

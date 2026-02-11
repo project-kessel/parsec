@@ -46,7 +46,7 @@ func publicKeyToJWK(publicKey crypto.PublicKey) (map[string]interface{}, error) 
 
 // ecdsaToJWK converts an ECDSA public key to JWK format
 func ecdsaToJWK(key *ecdsa.PublicKey) (map[string]interface{}, error) {
-	curve := key.Curve.Params().Name
+	curve := key.Params().Name
 	var crv string
 	switch curve {
 	case "P-256":
@@ -60,7 +60,7 @@ func ecdsaToJWK(key *ecdsa.PublicKey) (map[string]interface{}, error) {
 	}
 
 	// Get curve parameters
-	params := key.Curve.Params()
+	params := key.Params()
 	byteLen := (params.BitSize + 7) / 8
 
 	// Encode coordinates as base64url (RFC 7518)
@@ -126,4 +126,3 @@ func canonicalizeJWK(jwk map[string]interface{}) (string, error) {
 
 	return string(jsonBytes), nil
 }
-

@@ -15,7 +15,7 @@ func TestHTTPService_WithRequestOptions(t *testing.T) {
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer auto-added-token" {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("unauthorized"))
+			_, _ = w.Write([]byte("unauthorized"))
 			return
 		}
 
@@ -23,12 +23,12 @@ func TestHTTPService_WithRequestOptions(t *testing.T) {
 		customHeader := r.Header.Get("X-Custom")
 		if customHeader != "from-lua" {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("missing custom header"))
+			_, _ = w.Write([]byte("missing custom header"))
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("authenticated"))
+		_, _ = w.Write([]byte("authenticated"))
 	}))
 	defer server.Close()
 
@@ -69,7 +69,7 @@ func TestHTTPService_WithRequestOptions(t *testing.T) {
 func TestHTTPService_RequestOptionsError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer server.Close()
 
@@ -111,12 +111,12 @@ func TestHTTPService_RequestOptionsModifyURL(t *testing.T) {
 		// Check if query param was added
 		if r.URL.Query().Get("api_key") != "secret123" {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("missing api key"))
+			_, _ = w.Write([]byte("missing api key"))
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	}))
 	defer server.Close()
 
@@ -166,7 +166,7 @@ func TestHTTPService_RequestOptionsAllMethods(t *testing.T) {
 
 		callCount++
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer server.Close()
 

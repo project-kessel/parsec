@@ -313,7 +313,7 @@ func TestTransport_WithFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
@@ -357,7 +357,7 @@ func TestTransport_WithFallback(t *testing.T) {
 	// Create a test server for fallback
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("real response"))
+		_, _ = w.Write([]byte("real response"))
 	}))
 	defer server.Close()
 
@@ -381,7 +381,7 @@ func TestTransport_WithFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "fixture response" {
@@ -393,7 +393,7 @@ func TestTransport_WithFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ = io.ReadAll(resp.Body)
 	if string(body) != "real response" {
@@ -426,7 +426,7 @@ func TestTransport_WithDelay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if elapsed < delay {
 		t.Errorf("expected delay of at least %v, got %v", delay, elapsed)

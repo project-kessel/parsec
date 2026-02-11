@@ -81,7 +81,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 3. Create provider to build all components from config
 	provider := config.NewProvider(cfg)
 
-	// 4. Build components via provider
+	// 4. Create logger and observer — single instance shared across all components
+	logger := config.NewLogger(cfg.Observability)
+
+	observer, err := config.NewObserverWithLogger(cfg.Observability, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create observer: %w", err)
+	}
+
+	// Inject into provider so TokenService and other internal components use the same observer
+	provider.SetObserver(observer)
+
+	// 5. Build components via provider
 	trustStore, err := provider.TrustStore()
 	if err != nil {
 		return fmt.Errorf("failed to create trust store: %w", err)
@@ -92,28 +103,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create token service: %w", err)
 	}
 
-	// 5. Get authz server token types from config
 	authzTokenTypes, err := provider.AuthzServerTokenTypes()
 	if err != nil {
 		return fmt.Errorf("failed to get authz token types: %w", err)
 	}
 
-	// Get exchange server claims filter registry from config
 	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
 	if err != nil {
 		return fmt.Errorf("failed to get exchange server claims filter registry: %w", err)
 	}
 
-	// Get issuer registry for JWKS endpoint
 	issuerRegistry, err := provider.IssuerRegistry()
 	if err != nil {
 		return fmt.Errorf("failed to get issuer registry: %w", err)
-	}
-
-	// Get observer for observability
-	observer, err := provider.Observer()
-	if err != nil {
-		return fmt.Errorf("failed to get observer: %w", err)
 	}
 
 	// 6. Create service handlers with observability
@@ -121,7 +123,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, observer)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
-		// Use default refresh interval (1 minute)
+		Logger:         logger,
 	})
 
 	// Start JWKS background refresh
