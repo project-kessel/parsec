@@ -19,7 +19,7 @@ func TestHTTPService_Get(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"message": "success",
 		})
 	}))
@@ -58,7 +58,7 @@ func TestHTTPService_GetWithHeaders(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("authenticated"))
+		_, _ = w.Write([]byte("authenticated"))
 	}))
 	defer server.Close()
 
@@ -108,7 +108,7 @@ func TestHTTPService_Post(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"result": "created",
 		})
 	}))
@@ -152,7 +152,7 @@ func TestHTTPService_Request(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("updated"))
+		_, _ = w.Write([]byte("updated"))
 	}))
 	defer server.Close()
 
@@ -225,7 +225,7 @@ func TestHTTPService_StatusCodes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte("body"))
+				_, _ = w.Write([]byte("body"))
 			}))
 			defer server.Close()
 
@@ -264,7 +264,7 @@ func TestHTTPService_ResponseHeaders(t *testing.T) {
 		w.Header().Set("X-Custom-Header", "custom-value")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer server.Close()
 

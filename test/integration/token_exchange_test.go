@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -62,13 +63,13 @@ func TestTokenExchangeFormEncoded(t *testing.T) {
 		HTTPPort:       18080,
 		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry}),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
 	})
 
 	if err := srv.Start(ctx); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer srv.Stop(ctx)
+	defer func() { _ = srv.Stop(ctx) }()
 
 	// Wait for the server to be ready
 	waitForServer(t, 18080, 5*time.Second)
@@ -98,7 +99,7 @@ func TestTokenExchangeFormEncoded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
@@ -143,13 +144,13 @@ func TestTokenExchangeJSON(t *testing.T) {
 		HTTPPort:       18081,
 		AuthzServer:    server.NewAuthzServer(trustStore, tokenService, nil, nil),
 		ExchangeServer: server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
-		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry}),
+		JWKSServer:     server.NewJWKSServer(server.JWKSServerConfig{IssuerRegistry: issuerRegistry, Logger: slog.Default()}),
 	})
 
 	if err := srv.Start(ctx); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
-	defer srv.Stop(ctx)
+	defer func() { _ = srv.Stop(ctx) }()
 
 	// Wait for the server to be ready
 	waitForServer(t, 18081, 5*time.Second)
@@ -179,7 +180,7 @@ func TestTokenExchangeJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)

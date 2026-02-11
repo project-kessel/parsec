@@ -33,13 +33,21 @@ func NewProvider(config *Config) *Provider {
 	}
 }
 
-// Observer returns the configured application observer
+// SetObserver sets the application observer for all components built by this provider.
+// Must be called before TokenService() or any method that depends on the observer.
+func (p *Provider) SetObserver(observer service.ApplicationObserver) {
+	p.observer = observer
+}
+
+// Observer returns the configured application observer.
+// If SetObserver was called, returns that observer.
+// Otherwise, creates a default observer from config.
 func (p *Provider) Observer() (service.ApplicationObserver, error) {
 	if p.observer != nil {
 		return p.observer, nil
 	}
 
-	// Build from config
+	// Build from config (fallback when SetObserver was not called)
 	observer, err := NewObserver(p.config.Observability)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create observer: %w", err)

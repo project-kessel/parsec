@@ -59,8 +59,8 @@ func (f *OSFileSystem) WriteFileAtomic(name string, data []byte, perm fs.FileMod
 	// Ensure cleanup on error
 	defer func() {
 		if tmpFile != nil {
-			tmpFile.Close()
-			os.Remove(tmpName)
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpName)
 		}
 	}()
 
@@ -82,13 +82,13 @@ func (f *OSFileSystem) WriteFileAtomic(name string, data []byte, perm fs.FileMod
 
 	// Set proper permissions (CreateTemp creates with 0600)
 	if err := os.Chmod(tmpName, perm); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
 	}
 
 	// Atomically rename temp file to final name
 	if err := os.Rename(tmpName, name); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return err
 	}
 

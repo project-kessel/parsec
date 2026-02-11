@@ -117,7 +117,7 @@ func (s *HTTPService) luaHTTPGet(L *lua.LState) int {
 		L.Push(lua.LString(fmt.Sprintf("request failed: %v", err)))
 		return 2
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	L.Push(s.responseToLua(L, resp))
 	return 1
@@ -157,7 +157,7 @@ func (s *HTTPService) luaHTTPPost(L *lua.LState) int {
 		L.Push(lua.LString(fmt.Sprintf("request failed: %v", err)))
 		return 2
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	L.Push(s.responseToLua(L, resp))
 	return 1
@@ -204,7 +204,7 @@ func (s *HTTPService) luaHTTPRequest(L *lua.LState) int {
 		L.Push(lua.LString(fmt.Sprintf("request failed: %v", err)))
 		return 2
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	L.Push(s.responseToLua(L, resp))
 	return 1

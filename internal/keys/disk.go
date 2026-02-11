@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/project-kessel/parsec/internal/fs"
 	"github.com/google/uuid"
+	"github.com/project-kessel/parsec/internal/fs"
 )
 
 // DiskKeyProvider is a KeyProvider that stores keys on disk as JSON files.

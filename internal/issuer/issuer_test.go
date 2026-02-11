@@ -117,7 +117,7 @@ func TestStubIssuer(t *testing.T) {
 	t.Run("generates unique token values", func(t *testing.T) {
 		// Use a fake clock to deterministically advance time
 		clk := clock.NewFixtureClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
-		
+
 		txnMappers := []service.ClaimMapper{service.NewPassthroughSubjectMapper()}
 		reqMappers := []service.ClaimMapper{service.NewRequestAttributesMapper()}
 		issuer := NewStubIssuer(StubIssuerConfig{

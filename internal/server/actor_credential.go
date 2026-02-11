@@ -24,19 +24,19 @@ func extractActorCredential(ctx context.Context) (trust.Credential, error) {
 			// Check if client certificate is present
 			if len(tlsInfo.State.PeerCertificates) > 0 {
 				clientCert := tlsInfo.State.PeerCertificates[0]
-				
+
 				// Convert certificate to DER encoding
 				certDER := clientCert.Raw
-				
+
 				// Build certificate chain
 				chain := make([][]byte, len(tlsInfo.State.PeerCertificates)-1)
 				for i, cert := range tlsInfo.State.PeerCertificates[1:] {
 					chain[i] = cert.Raw
 				}
-				
+
 				// Extract issuer identity from certificate
 				issuerIdentity := extractIssuerFromCert(clientCert)
-				
+
 				return &trust.MTLSCredential{
 					Certificate:    certDER,
 					Chain:          chain,
@@ -45,7 +45,7 @@ func extractActorCredential(ctx context.Context) (trust.Credential, error) {
 			}
 		}
 	}
-	
+
 	// 2. Try to extract bearer token from gRPC metadata as fallback
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		if authHeaders := md.Get("authorization"); len(authHeaders) > 0 {
@@ -57,7 +57,7 @@ func extractActorCredential(ctx context.Context) (trust.Credential, error) {
 			}
 		}
 	}
-	
+
 	// No actor credentials found - this is not an error
 	return nil, nil
 }
@@ -72,6 +72,8 @@ func extractIssuerFromCert(cert *x509.Certificate) string {
 
 // encodeCertToPEM converts a certificate to PEM encoding
 // This is a helper function for debugging/logging
+//
+//nolint:unused // kept for debugging/logging use
 func encodeCertToPEM(certDER []byte) string {
 	pemBlock := &pem.Block{
 		Type:  "CERTIFICATE",
@@ -82,17 +84,18 @@ func encodeCertToPEM(certDER []byte) string {
 
 // parseCertFromPEM parses a PEM-encoded certificate
 // This is a helper function for testing
+//
+//nolint:unused // kept for testing use
 func parseCertFromPEM(pemData string) (*x509.Certificate, error) {
 	block, _ := pem.Decode([]byte(pemData))
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
-	
+
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse certificate: %w", err)
 	}
-	
+
 	return cert, nil
 }
-

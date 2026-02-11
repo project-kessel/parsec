@@ -135,7 +135,7 @@ func (m *InMemoryKeyProvider) storageKey(trustDomain, namespace, keyName string)
 		parts = append(parts, namespace)
 	}
 	parts = append(parts, keyName)
-	
+
 	// Join with ":" to create storage key
 	result := ""
 	for i, part := range parts {

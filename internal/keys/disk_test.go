@@ -155,10 +155,10 @@ func TestDiskKeyProvider_ConcurrentAccess(t *testing.T) {
 
 	// Create initial keys
 	h1, _ := kp.GetKeyHandle(ctx, trustDomain, ns, "key-a")
-	h1.Rotate(ctx)
+	_ = h1.Rotate(ctx)
 
 	h2, _ := kp.GetKeyHandle(ctx, trustDomain, ns, "key-b")
-	h2.Rotate(ctx)
+	_ = h2.Rotate(ctx)
 
 	// Concurrent reads
 	const numReaders = 10
@@ -196,7 +196,7 @@ func TestDiskKeyProvider_CorruptedJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Manually write corrupted JSON to the filesystem
-	memFS.MkdirAll("/keys/test-ns", 0700)
+	_ = memFS.MkdirAll("/keys/test-ns", 0700)
 	corruptedJSON := []byte("{invalid json}")
 	err = memFS.WriteFileAtomic("/keys/test-ns/key-a.json", corruptedJSON, 0600)
 	require.NoError(t, err)

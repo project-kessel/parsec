@@ -180,7 +180,7 @@ func TestJWTValidator(t *testing.T) {
 
 		// Advance clock by 30 minutes - still valid
 		clk.Advance(30 * time.Minute)
-		result, err = validator.Validate(ctx, cred)
+		_, err = validator.Validate(ctx, cred)
 		if err != nil {
 			t.Errorf("expected token to still be valid after 30 minutes, got error: %v", err)
 		}

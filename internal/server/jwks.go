@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ type JWKSServer struct {
 	issuerRegistry  service.Registry
 	clock           clock.Clock
 	refreshInterval time.Duration
+	logger          *slog.Logger
 
 	// Cached response
 	mu             sync.RWMutex
@@ -46,6 +48,9 @@ type JWKSServerConfig struct {
 
 	// Clock is used for time operations (defaults to system clock)
 	Clock clock.Clock
+
+	// Logger is the structured logger to use (required)
+	Logger *slog.Logger
 }
 
 // NewJWKSServer creates a new JWKS server with caching
@@ -56,11 +61,11 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 	if cfg.Clock == nil {
 		cfg.Clock = clock.NewSystemClock()
 	}
-
 	return &JWKSServer{
 		issuerRegistry:  cfg.IssuerRegistry,
 		clock:           cfg.Clock,
 		refreshInterval: cfg.RefreshInterval,
+		logger:          cfg.Logger,
 	}
 }
 
@@ -68,13 +73,15 @@ func NewJWKSServer(cfg JWKSServerConfig) *JWKSServer {
 func (s *JWKSServer) Start(ctx context.Context) error {
 	// Populate cache immediately
 	if err := s.refreshCache(ctx); err != nil {
-		// Log warning but don't fail - cache will be populated on first request if needed
+		s.logger.Warn("initial cache population failed, will retry", "error", err)
 	}
 
 	// Start background refresh
 	s.ticker = s.clock.Ticker(s.refreshInterval)
 	return s.ticker.Start(func(ctx context.Context) {
-		s.refreshCache(ctx)
+		if err := s.refreshCache(ctx); err != nil {
+			s.logger.Warn("background cache refresh failed", "error", err)
+		}
 	})
 }
 

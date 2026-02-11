@@ -297,11 +297,11 @@ func TestJWKSFixture_SignToken(t *testing.T) {
 	t.Run("signs pre-built token", func(t *testing.T) {
 		// Create a custom token
 		token := jwt.New()
-		token.Set(jwt.IssuerKey, fixture.issuer)
-		token.Set(jwt.SubjectKey, "custom-subject")
-		token.Set(jwt.IssuedAtKey, time.Now())
-		token.Set(jwt.ExpirationKey, time.Now().Add(2*time.Hour))
-		token.Set("custom_claim", "custom_value")
+		_ = token.Set(jwt.IssuerKey, fixture.issuer)
+		_ = token.Set(jwt.SubjectKey, "custom-subject")
+		_ = token.Set(jwt.IssuedAtKey, time.Now())
+		_ = token.Set(jwt.ExpirationKey, time.Now().Add(2*time.Hour))
+		_ = token.Set("custom_claim", "custom_value")
 
 		tokenString, err := fixture.SignToken(token)
 		if err != nil {
