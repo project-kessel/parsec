@@ -1,0 +1,48 @@
+name: CI Build and Test
+
+on:
+  workflow_call:
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
+
+concurrency:
+  # Cancel in-progress runs on PR update
+  group: ci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: Install dependencies
+        run: go get ./...
+      - name: Build
+        run: go build -tags release -v ./...
+      - name: Test
+        run: make test
+        shell: bash
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v5
+        with:
+          name: code-coverage
+          path: coverage.txt
+      # - name: Upload main coverage to Codecov
+      #   id: code-cov-report
+      #   uses: codecov/codecov-action@v5
+      #   with:
+      #     files: coverage.txt
+      #     flags: main
+      #     disable_search: true
+      #     verbose: true
+      #     token: ${{ secrets.CODECOV_TOKEN }}
