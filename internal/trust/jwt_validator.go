@@ -2,14 +2,16 @@ package trust
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/httprc/v3"
+	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/project-kessel/parsec/internal/claims"
 	"github.com/project-kessel/parsec/internal/clock"
@@ -68,14 +70,17 @@ func NewJWTValidator(cfg JWTValidatorConfig) (*JWTValidator, error) {
 	}
 
 	// Create JWKS cache with auto-refresh
-	cache := jwk.NewCache(context.Background())
+	cache, err := jwk.NewCache(context.Background(), httprc.NewClient())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWKS cache: %w", err)
+	}
 
 	// Register the JWKS URL with the cache
-	registerOpts := []jwk.RegisterOption{jwk.WithMinRefreshInterval(refreshInterval)}
+	registerOpts := []jwk.RegisterOption{jwk.WithMinInterval(refreshInterval)}
 	if cfg.HTTPClient != nil {
 		registerOpts = append(registerOpts, jwk.WithHTTPClient(cfg.HTTPClient))
 	}
-	if err := cache.Register(jwksURL, registerOpts...); err != nil {
+	if err := cache.Register(context.Background(), jwksURL, registerOpts...); err != nil {
 		return nil, fmt.Errorf("failed to register JWKS URL: %w", err)
 	}
 
@@ -123,7 +128,7 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	}
 
 	// Fetch the current JWKS
-	jwks, err := v.cache.Get(ctx, v.jwksURL)
+	jwks, err := v.cache.Lookup(ctx, v.jwksURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
@@ -140,28 +145,26 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 		// TODO: validate aud
 	)
 	if err != nil {
-		// Check if it's an expiration error
-		if jwt.IsValidationError(err) {
-			// Check if the error is about expiration
-			errMsg := err.Error()
-			if strings.Contains(errMsg, "exp") || strings.Contains(errMsg, "expir") {
-				return nil, ErrExpiredToken
-			}
+		if errors.Is(err, jwt.TokenExpiredError()) {
+			return nil, ErrExpiredToken
 		}
 		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}
 
 	// Ensure there is a subject
-	subject := token.Subject()
-	if subject == "" {
+	subject, ok := token.Subject()
+	if !ok || subject == "" {
 		return nil, fmt.Errorf("%w: missing subject claim", ErrInvalidToken)
 	}
 
 	// Extract all claims into our Claims type
-	// Use AsMap() to get ALL claims from the token (both standard and private)
-	allClaims, err := token.AsMap(ctx)
+	allClaims := map[string]any{}
+	serialized, err := json.Marshal(token)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract token claims: %w", err)
+		return nil, fmt.Errorf("failed to serialize token claims: %w", err)
+	}
+	if err := json.Unmarshal(serialized, &allClaims); err != nil {
+		return nil, fmt.Errorf("failed to parse token claims: %w", err)
 	}
 
 	// TODO: Probably should add a ClaimsFilter to validator config so we can configure trust on a per-claim basis
@@ -169,23 +172,24 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	maps.Copy(claimsMap, allClaims)
 
 	// Extract audience
-	audiences := token.Audience()
+	audiences, _ := token.Audience()
 
 	// Extract scope (OAuth2/OIDC)
 	scope := ""
-	if scopeClaim, ok := token.Get("scope"); ok {
-		if scopeStr, ok := scopeClaim.(string); ok {
-			scope = scopeStr
-		}
+	if err := token.Get("scope", &scope); err != nil {
+		scope = ""
 	}
+
+	expiresAt, _ := token.Expiration()
+	issuedAt, _ := token.IssuedAt()
 
 	return &Result{
 		Subject:     subject,
 		Issuer:      v.issuer,
 		TrustDomain: v.trustDomain,
 		Claims:      claimsMap,
-		ExpiresAt:   token.Expiration(),
-		IssuedAt:    token.IssuedAt(),
+		ExpiresAt:   expiresAt,
+		IssuedAt:    issuedAt,
 		Audience:    audiences,
 		Scope:       scope,
 	}, nil

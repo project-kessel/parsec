@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/project-kessel/parsec/internal/clock"
 )
@@ -65,8 +65,8 @@ func NewJWKSFixture(cfg JWKSFixtureConfig) (*JWKSFixture, error) {
 	}
 
 	algorithm := cfg.Algorithm
-	if algorithm == "" {
-		algorithm = jwa.RS256
+	if algorithm == jwa.EmptySignatureAlgorithm() {
+		algorithm = jwa.RS256()
 	}
 
 	// Generate RSA key pair
@@ -76,7 +76,7 @@ func NewJWKSFixture(cfg JWKSFixtureConfig) (*JWKSFixture, error) {
 	}
 
 	// Create JWK from public key
-	publicKey, err := jwk.FromRaw(privateKey.PublicKey)
+	publicKey, err := jwk.Import(privateKey.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JWK: %w", err)
 	}
@@ -165,7 +165,7 @@ func (f *JWKSFixture) Clock() clock.Clock {
 // SignToken signs a JWT token using the fixture's private key
 func (f *JWKSFixture) SignToken(token jwt.Token) (string, error) {
 	// Create JWK from private key with kid for signing
-	key, err := jwk.FromRaw(f.privateKey)
+	key, err := jwk.Import(f.privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to create JWK from private key: %w", err)
 	}

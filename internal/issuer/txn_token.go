@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jws"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/keys"
@@ -142,6 +142,10 @@ func (i *TransactionTokenIssuer) Issue(ctx context.Context, issueCtx *service.Is
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current signer: %w", err)
 	}
+	signAlg, ok := jwa.LookupSignatureAlgorithm(string(algorithm))
+	if !ok {
+		return nil, fmt.Errorf("unsupported signature algorithm: %s", algorithm)
+	}
 
 	// Build JWS headers with the key ID
 	headers := jws.NewHeaders()
@@ -151,7 +155,7 @@ func (i *TransactionTokenIssuer) Issue(ctx context.Context, issueCtx *service.Is
 
 	// Sign the token with the current key
 	signedToken, err := jwt.Sign(token,
-		jwt.WithKey(jwa.SignatureAlgorithm(string(algorithm)), signer, jws.WithProtectedHeaders(headers)))
+		jwt.WithKey(signAlg, signer, jws.WithProtectedHeaders(headers)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign token: %w", err)
 	}

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/project-kessel/parsec/internal/clock"
 )
@@ -36,7 +36,7 @@ func TestNewJWKSFixture(t *testing.T) {
 			t.Errorf("expected default keyID 'test-key-1', got %q", fixture.keyID)
 		}
 
-		if fixture.algorithm != jwa.RS256 {
+		if fixture.algorithm != jwa.RS256() {
 			t.Errorf("expected default algorithm RS256, got %v", fixture.algorithm)
 		}
 
@@ -59,7 +59,7 @@ func TestNewJWKSFixture(t *testing.T) {
 			Issuer:    "https://test-issuer.example.com",
 			JWKSURL:   "https://test-issuer.example.com/.well-known/jwks.json",
 			KeyID:     "custom-key-id",
-			Algorithm: jwa.RS512,
+			Algorithm: jwa.RS512(),
 		})
 		if err != nil {
 			t.Fatalf("failed to create fixture: %v", err)
@@ -69,7 +69,7 @@ func TestNewJWKSFixture(t *testing.T) {
 			t.Errorf("expected keyID 'custom-key-id', got %q", fixture.keyID)
 		}
 
-		if fixture.algorithm != jwa.RS512 {
+		if fixture.algorithm != jwa.RS512() {
 			t.Errorf("expected algorithm RS512, got %v", fixture.algorithm)
 		}
 	})
@@ -137,12 +137,14 @@ func TestJWKSFixture_GetFixture(t *testing.T) {
 			t.Fatal("failed to get key from JWKS")
 		}
 
-		if key.KeyID() != "test-key-1" {
-			t.Errorf("expected key ID 'test-key-1', got %q", key.KeyID())
+		keyID, ok := key.KeyID()
+		if !ok || keyID != "test-key-1" {
+			t.Errorf("expected key ID 'test-key-1', got %q", keyID)
 		}
 
-		if key.Algorithm().String() != "RS256" {
-			t.Errorf("expected algorithm RS256, got %s", key.Algorithm())
+		alg, ok := key.Algorithm()
+		if !ok || alg.String() != "RS256" {
+			t.Errorf("expected algorithm RS256, got %s", alg.String())
 		}
 	})
 
@@ -192,27 +194,29 @@ func TestJWKSFixture_CreateAndSignToken(t *testing.T) {
 		}
 
 		// Verify standard claims
-		if token.Subject() != "user@example.com" {
-			t.Errorf("expected subject 'user@example.com', got %q", token.Subject())
+		subject, ok := token.Subject()
+		if !ok || subject != "user@example.com" {
+			t.Errorf("expected subject 'user@example.com', got %q", subject)
 		}
 
-		if token.Issuer() != "https://test-issuer.example.com" {
-			t.Errorf("expected issuer 'https://test-issuer.example.com', got %q", token.Issuer())
+		issuer, ok := token.Issuer()
+		if !ok || issuer != "https://test-issuer.example.com" {
+			t.Errorf("expected issuer 'https://test-issuer.example.com', got %q", issuer)
 		}
 
 		// Verify custom claims
-		email, ok := token.Get("email")
-		if !ok {
+		var email string
+		if err := token.Get("email", &email); err != nil {
 			t.Error("expected 'email' claim to be present")
 		} else if email != "user@example.com" {
-			t.Errorf("expected email 'user@example.com', got %v", email)
+			t.Errorf("expected email 'user@example.com', got %q", email)
 		}
 
-		name, ok := token.Get("name")
-		if !ok {
+		var name string
+		if err := token.Get("name", &name); err != nil {
 			t.Error("expected 'name' claim to be present")
 		} else if name != "Test User" {
-			t.Errorf("expected name 'Test User', got %v", name)
+			t.Errorf("expected name 'Test User', got %q", name)
 		}
 	})
 
@@ -235,7 +239,10 @@ func TestJWKSFixture_CreateAndSignToken(t *testing.T) {
 
 		// Token should expire 1 hour after creation
 		expectedExpiry := after.Add(1 * time.Hour)
-		actualExpiry := token.Expiration()
+		actualExpiry, ok := token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
 
 		// Allow some tolerance for test execution time
 		tolerance := 5 * time.Second
@@ -244,7 +251,10 @@ func TestJWKSFixture_CreateAndSignToken(t *testing.T) {
 		}
 
 		// Verify iat is recent
-		iat := token.IssuedAt()
+		iat, ok := token.IssuedAt()
+		if !ok {
+			t.Fatal("expected iat claim to be present")
+		}
 		if iat.Before(before.Add(-tolerance)) || iat.After(after.Add(tolerance)) {
 			t.Errorf("expected iat between %v and %v, got %v", before, after, iat)
 		}
@@ -277,7 +287,10 @@ func TestJWKSFixture_CreateAndSignTokenWithExpiry(t *testing.T) {
 			t.Fatalf("failed to parse token: %v", err)
 		}
 
-		actualExpiry := token.Expiration()
+		actualExpiry, ok := token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
 		tolerance := 1 * time.Second
 		if actualExpiry.Before(expiry.Add(-tolerance)) || actualExpiry.After(expiry.Add(tolerance)) {
 			t.Errorf("expected expiry %v, got %v", expiry, actualExpiry)
@@ -318,13 +331,17 @@ func TestJWKSFixture_SignToken(t *testing.T) {
 			t.Fatalf("failed to parse/verify token: %v", err)
 		}
 
-		if parsed.Subject() != "custom-subject" {
-			t.Errorf("expected subject 'custom-subject', got %q", parsed.Subject())
+		subject, ok := parsed.Subject()
+		if !ok || subject != "custom-subject" {
+			t.Errorf("expected subject 'custom-subject', got %q", subject)
 		}
 
-		customClaim, _ := parsed.Get("custom_claim")
+		var customClaim string
+		if err := parsed.Get("custom_claim", &customClaim); err != nil {
+			t.Fatalf("expected custom_claim to be present: %v", err)
+		}
 		if customClaim != "custom_value" {
-			t.Errorf("expected custom_claim 'custom_value', got %v", customClaim)
+			t.Errorf("expected custom_claim 'custom_value', got %q", customClaim)
 		}
 	})
 }
@@ -385,14 +402,20 @@ func TestJWKSFixture_WithClockFixture(t *testing.T) {
 		}
 
 		// Verify iat matches the fixed time
-		iat := token.IssuedAt()
+		iat, ok := token.IssuedAt()
+		if !ok {
+			t.Fatal("expected iat claim to be present")
+		}
 		if !iat.Equal(fixedTime) {
 			t.Errorf("expected iat %v, got %v", fixedTime, iat)
 		}
 
 		// Verify exp is 1 hour after the fixed time
 		expectedExp := fixedTime.Add(1 * time.Hour)
-		exp := token.Expiration()
+		exp, ok := token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
 		if !exp.Equal(expectedExp) {
 			t.Errorf("expected exp %v, got %v", expectedExp, exp)
 		}
@@ -413,7 +436,10 @@ func TestJWKSFixture_WithClockFixture(t *testing.T) {
 			t.Fatalf("failed to parse token: %v", err)
 		}
 
-		originalExp := token.Expiration()
+		originalExp, ok := token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
 
 		// Advance clock by 2 hours (past expiration)
 		clk.Advance(2 * time.Hour)
@@ -455,7 +481,11 @@ func TestJWKSFixture_WithClockFixture(t *testing.T) {
 		}
 
 		// Token should be expired relative to current clock time
-		if !fixture.Clock().Now().After(token.Expiration()) {
+		exp, ok := token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
+		if !fixture.Clock().Now().After(exp) {
 			t.Error("expected token to be expired")
 		}
 	})
@@ -481,19 +511,31 @@ func TestJWKSFixture_WithClockFixture(t *testing.T) {
 		}
 
 		// Verify expiry
-		if !token.Expiration().Equal(customExpiry) {
-			t.Errorf("expected exp %v, got %v", customExpiry, token.Expiration())
+		exp, ok := token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
+		if !exp.Equal(customExpiry) {
+			t.Errorf("expected exp %v, got %v", customExpiry, exp)
 		}
 
 		// Advance clock by 29 minutes (not expired yet)
 		clk.Advance(29 * time.Minute)
-		if !fixture.Clock().Now().Before(token.Expiration()) {
+		exp, ok = token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
+		if !fixture.Clock().Now().Before(exp) {
 			t.Error("expected token to not be expired yet")
 		}
 
 		// Advance by 2 more minutes (now expired)
 		clk.Advance(2 * time.Minute)
-		if !fixture.Clock().Now().After(token.Expiration()) {
+		exp, ok = token.Expiration()
+		if !ok {
+			t.Fatal("expected exp claim to be present")
+		}
+		if !fixture.Clock().Now().After(exp) {
 			t.Error("expected token to be expired now")
 		}
 	})

@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwa"
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/httpfixture"
@@ -61,7 +61,12 @@ func BuildHTTPFixtureProvider(fixtures []FixtureConfig, clk clock.Clock) (httpfi
 		// Parse algorithm if provided
 		var algo jwa.SignatureAlgorithm
 		if f.Algorithm != "" {
-			algo = jwa.SignatureAlgorithm(f.Algorithm)
+			var ok bool
+			algo, ok = jwa.LookupSignatureAlgorithm(f.Algorithm)
+			if !ok {
+				return nil, fmt.Errorf("jwks fixture for issuer %s has unsupported algorithm: %s", f.Issuer, f.Algorithm)
+			}
+
 		}
 
 		jwksFixture, err := httpfixture.NewJWKSFixture(httpfixture.JWKSFixtureConfig{
