@@ -144,11 +144,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
 
+	// 8a. All components initialized — signal readiness via gRPC health service.
+	// Per-service statuses transition from NOT_SERVING to SERVING.
+	srv.SetReady()
+
 	fmt.Println("parsec is running")
 	fmt.Printf("  gRPC (ext_authz):      localhost:%d\n", serverCfg.GRPCPort)
 	fmt.Printf("  HTTP (token exchange): http://localhost:%d/v1/token\n", serverCfg.HTTPPort)
 	fmt.Printf("  HTTP (JWKS):           http://localhost:%d/v1/jwks.json\n", serverCfg.HTTPPort)
 	fmt.Printf("                         http://localhost:%d/.well-known/jwks.json\n", serverCfg.HTTPPort)
+	fmt.Printf("  Health (gRPC):         localhost:%d (grpc.health.v1.Health)\n", serverCfg.GRPCPort)
+	fmt.Printf("  Health (HTTP live):    http://localhost:%d/healthz/live\n", serverCfg.HTTPPort)
+	fmt.Printf("  Health (HTTP ready):   http://localhost:%d/healthz/ready\n", serverCfg.HTTPPort)
 	fmt.Printf("  Trust Domain:          %s\n", provider.TrustDomain())
 	fmt.Printf("  Config:                %s\n", configPath)
 

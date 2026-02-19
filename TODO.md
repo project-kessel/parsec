@@ -73,6 +73,6 @@ Add structured logging and metrics. Would like to experiment with observability 
 
 ### Production Hardening
 - [ ] Graceful shutdown
-- [ ] Health checks – use standard grpc health protocol (separate readiness and liveness services)
+- [X] Health checks – use standard grpc health protocol (separate readiness and liveness services)
 - [ ] Circuit breakers for external calls / caching failures (failing open vs closed)
 
