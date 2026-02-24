@@ -5,7 +5,7 @@ go 1.25.7
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.2
 	github.com/aws/aws-sdk-go-v2/config v1.32.10
-	github.com/aws/aws-sdk-go-v2/service/kms v1.50.0
+	github.com/aws/aws-sdk-go-v2/service/kms v1.50.1
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
