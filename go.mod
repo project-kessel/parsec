@@ -3,7 +3,7 @@ module github.com/project-kessel/parsec
 go 1.25.7
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.41.3
+	github.com/aws/aws-sdk-go-v2 v1.41.4
 	github.com/aws/aws-sdk-go-v2/config v1.32.11
 	github.com/aws/aws-sdk-go-v2/service/kms v1.50.2
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0
