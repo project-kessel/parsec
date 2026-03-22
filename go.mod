@@ -27,7 +27,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/gopher-lua v1.1.1
 	google.golang.org/genproto/googleapis/api v0.0.0-20260311181403-84a4fc48630c
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260316180232-0b37fe3546d5
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260319201613-d00831a3d3e7
 	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
 )
