@@ -3,6 +3,7 @@ package mapper
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -563,4 +564,59 @@ func TestCELMapper_Map(t *testing.T) {
 			t.Errorf("expected other_field=value, got %v", result["other_field"])
 		}
 	})
+}
+
+// TestCELMapper_isConsoleApiTokenScope verifies isConsoleApiToken uses space-delimited scope tokens (not substring match).
+func TestCELMapper_isConsoleApiTokenScope(t *testing.T) {
+	ctx := context.Background()
+
+	mapper, err := NewCELMapper(`{"console": isConsoleApiToken(subject.claims)}`)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	base := func(scope string) *service.MapperInput {
+		return &service.MapperInput{
+			Subject: &trust.Result{
+				Subject:     "user@example.com",
+				Issuer:      "https://idp.example.com",
+				TrustDomain: "example",
+				Claims: claims.Claims{
+					"scope": scope,
+				},
+				ExpiresAt: time.Now().Add(time.Hour),
+				IssuedAt:  time.Now(),
+			},
+		}
+	}
+
+	tests := []struct {
+		scope string
+		want  bool
+	}{
+		{"api.console", true},
+		{"openid profile api.console email", true},
+		{"api.console openid", true},
+		{"xapi.console", false},
+		{"myapi.console", false},
+		{"api.console_extra", false},
+		{"openid profile", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%q", tt.scope), func(t *testing.T) {
+			out, err := mapper.Map(ctx, base(tt.scope))
+			if err != nil {
+				t.Fatalf("Map: %v", err)
+			}
+			got, ok := out["console"].(bool)
+			if !ok {
+				t.Fatalf("console: want bool, got %T %v", out["console"], out["console"])
+			}
+			if got != tt.want {
+				t.Errorf("scope %q: console = %v, want %v", tt.scope, got, tt.want)
+			}
+		})
+	}
 }
