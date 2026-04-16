@@ -1,6 +1,8 @@
 package cel
 
 import (
+	"os"
+
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -10,6 +12,7 @@ import (
 //
 // Provides:
 //   - hasRole(claims, roleName) - checks if claims.realm_access.roles contains roleName
+//   - isInternal(claims) - three-tier internal user check (idp target, is_internal claim, optional role fallback)
 //   - isConsoleApiToken(claims) - checks if scope contains "api.console"
 //   - isServiceAccountToken(claims) - checks if preferred_username starts with "service-account-"
 //   - safeToString(val) - converts value to string safely (returns empty string if nil)
@@ -45,6 +48,15 @@ func (lib *redhatHelpersLib) CompileOptions() []cel.EnvOption {
 				[]*cel.Type{cel.DynType},
 				cel.BoolType,
 				cel.UnaryBinding(lib.isServiceAccountToken),
+			),
+		),
+
+		// isInternal(claims) - tiered check for internal identity (PARSEC_INTERNAL_IDP_TARGET, is_internal, PARSEC_INTERNAL_ROLE_FALLBACK)
+		cel.Function("isInternal",
+			cel.Overload("isInternal_map",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(lib.isInternal),
 			),
 		),
 
@@ -116,6 +128,31 @@ func (lib *redhatHelpersLib) hasRole(claimsVal, roleVal ref.Val) ref.Val {
 		}
 	}
 
+	return types.Bool(false)
+}
+
+// isInternal applies a three-tier check: idp vs PARSEC_INTERNAL_IDP_TARGET, then is_internal claim, then optional hasRole fallback.
+func (lib *redhatHelpersLib) isInternal(claimsVal ref.Val) ref.Val {
+	claimsMap, ok := claimsVal.Value().(map[string]any)
+	if !ok {
+		return types.Bool(false)
+	}
+
+	// Tier 1: idp claim vs configured target
+	if idp, ok := claimsMap["idp"]; ok {
+		target := os.Getenv("PARSEC_INTERNAL_IDP_TARGET")
+		return types.Bool(idp == target)
+	}
+	// Tier 2: is_internal claim
+	if isInternal, ok := claimsMap["is_internal"]; ok {
+		if b, ok := isInternal.(bool); ok {
+			return types.Bool(b)
+		}
+	}
+	// Tier 3: env-gated role fallback
+	if os.Getenv("PARSEC_INTERNAL_ROLE_FALLBACK") != "" {
+		return lib.hasRole(claimsVal, types.String("redhat:employees"))
+	}
 	return types.Bool(false)
 }
 

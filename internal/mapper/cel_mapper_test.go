@@ -564,3 +564,113 @@ func TestCELMapper_Map(t *testing.T) {
 		}
 	})
 }
+
+// TestCELMapper_isInternalHelper exercises the Red Hat isInternal() CEL helper tiers and env vars.
+// Run: go test ./internal/mapper -run TestCELMapper_isInternalHelper -v
+func TestCELMapper_isInternalHelper(t *testing.T) {
+	ctx := context.Background()
+
+	mapper, err := NewCELMapper(`{"internal": isInternal(subject.claims)}`)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	employeeRealm := claims.Claims{
+		"realm_access": map[string]any{
+			"roles": []any{"redhat:employees"},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		env    map[string]string // key -> value; empty value deletes via Setenv to ""
+		claims claims.Claims
+		want   bool
+	}{
+		{
+			name: "tier1 idp matches PARSEC_INTERNAL_IDP_TARGET",
+			env: map[string]string{
+				"PARSEC_INTERNAL_IDP_TARGET": "https://sso.redhat.com/auth/realms/redhat",
+			},
+			claims: claims.Claims{
+				"idp": "https://sso.redhat.com/auth/realms/redhat",
+			},
+			want: true,
+		},
+		{
+			name: "tier1 idp present but wrong target",
+			env: map[string]string{
+				"PARSEC_INTERNAL_IDP_TARGET": "https://sso.redhat.com/auth/realms/redhat",
+			},
+			claims: claims.Claims{
+				"idp": "https://other-idp.example/",
+			},
+			want: false,
+		},
+		{
+			name: "tier2 is_internal true",
+			env:  map[string]string{},
+			claims: claims.Claims{
+				"is_internal": true,
+			},
+			want: true,
+		},
+		{
+			name: "tier2 is_internal false",
+			env:  map[string]string{},
+			claims: claims.Claims{
+				"is_internal": false,
+			},
+			want: false,
+		},
+		{
+			name: "tier3 role fallback when PARSEC_INTERNAL_ROLE_FALLBACK set",
+			env: map[string]string{
+				"PARSEC_INTERNAL_ROLE_FALLBACK": "1",
+			},
+			claims: employeeRealm,
+			want:   true,
+		},
+		{
+			name: "tier3 role ignored when PARSEC_INTERNAL_ROLE_FALLBACK empty",
+			env: map[string]string{
+				"PARSEC_INTERNAL_ROLE_FALLBACK": "",
+			},
+			claims: employeeRealm,
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PARSEC_INTERNAL_IDP_TARGET", "")
+			t.Setenv("PARSEC_INTERNAL_ROLE_FALLBACK", "")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			input := &service.MapperInput{
+				Subject: &trust.Result{
+					Subject:     "user@example.com",
+					Issuer:      "https://idp.example.com",
+					TrustDomain: "example",
+					Claims:      tt.claims,
+					ExpiresAt:   time.Now().Add(time.Hour),
+					IssuedAt:    time.Now(),
+				},
+			}
+
+			out, err := mapper.Map(ctx, input)
+			if err != nil {
+				t.Fatalf("Map: %v", err)
+			}
+			got, ok := out["internal"].(bool)
+			if !ok {
+				t.Fatalf("internal: want bool, got %T %v", out["internal"], out["internal"])
+			}
+			if got != tt.want {
+				t.Errorf("internal = %v, want %v (check PARSEC_* env for this subtest)", got, tt.want)
+			}
+		})
+	}
+}
