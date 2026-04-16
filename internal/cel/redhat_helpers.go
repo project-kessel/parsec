@@ -12,7 +12,7 @@ import (
 //
 // Provides:
 //   - hasRole(claims, roleName) - checks if claims.realm_access.roles contains roleName
-//   - isInternal(claims) - three-tier internal user check (idp target, is_internal claim, optional role fallback)
+//   - isInternal(claims) - internal user check (idp vs PARSEC_INTERNAL_IDP_TARGET when set, is_internal claim, optional role fallback)
 //   - isConsoleApiToken(claims) - checks if scope contains "api.console"
 //   - isServiceAccountToken(claims) - checks if preferred_username starts with "service-account-"
 //   - safeToString(val) - converts value to string safely (returns empty string if nil)
@@ -51,7 +51,7 @@ func (lib *redhatHelpersLib) CompileOptions() []cel.EnvOption {
 			),
 		),
 
-		// isInternal(claims) - tiered check for internal identity (PARSEC_INTERNAL_IDP_TARGET, is_internal, PARSEC_INTERNAL_ROLE_FALLBACK)
+		// isInternal(claims) - internal identity (PARSEC_INTERNAL_IDP_TARGET when set, is_internal, PARSEC_INTERNAL_ROLE_FALLBACK)
 		cel.Function("isInternal",
 			cel.Overload("isInternal_map",
 				[]*cel.Type{cel.DynType},
@@ -131,17 +131,22 @@ func (lib *redhatHelpersLib) hasRole(claimsVal, roleVal ref.Val) ref.Val {
 	return types.Bool(false)
 }
 
-// isInternal applies a three-tier check: idp vs PARSEC_INTERNAL_IDP_TARGET, then is_internal claim, then optional hasRole fallback.
+// isInternal applies a three-tier check: when PARSEC_INTERNAL_IDP_TARGET is set, non-empty string idp vs target; else is_internal claim; else optional hasRole fallback.
 func (lib *redhatHelpersLib) isInternal(claimsVal ref.Val) ref.Val {
 	claimsMap, ok := claimsVal.Value().(map[string]any)
 	if !ok {
 		return types.Bool(false)
 	}
 
-	// Tier 1: idp claim vs configured target
-	if idp, ok := claimsMap["idp"]; ok {
-		target := os.Getenv("PARSEC_INTERNAL_IDP_TARGET")
-		return types.Bool(idp == target)
+	// Tier 1: idp claim vs configured target (only when target is set)
+	if target, ok := os.LookupEnv("PARSEC_INTERNAL_IDP_TARGET"); ok && target != "" {
+		if idpAny, present := claimsMap["idp"]; present {
+			idp, ok := idpAny.(string)
+			if !ok || idp == "" {
+				return types.Bool(false)
+			}
+			return types.Bool(idp == target)
+		}
 	}
 	// Tier 2: is_internal claim
 	if isInternal, ok := claimsMap["is_internal"]; ok {

@@ -608,6 +608,36 @@ func TestCELMapper_isInternalHelper(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "tier1 target set but no idp claim falls through to tier2",
+			env: map[string]string{
+				"PARSEC_INTERNAL_IDP_TARGET": "https://sso.redhat.com/auth/realms/redhat",
+			},
+			claims: claims.Claims{
+				"is_internal": true,
+			},
+			want: true,
+		},
+		{
+			name: "tier1 idp non-string returns false",
+			env: map[string]string{
+				"PARSEC_INTERNAL_IDP_TARGET": "https://sso.redhat.com/auth/realms/redhat",
+			},
+			claims: claims.Claims{
+				"idp": 123,
+			},
+			want: false,
+		},
+		{
+			name: "tier1 idp empty string returns false",
+			env: map[string]string{
+				"PARSEC_INTERNAL_IDP_TARGET": "https://sso.redhat.com/auth/realms/redhat",
+			},
+			claims: claims.Claims{
+				"idp": "",
+			},
+			want: false,
+		},
+		{
 			name: "tier2 is_internal true",
 			env:  map[string]string{},
 			claims: claims.Claims{
