@@ -366,6 +366,7 @@ func newUnsignedIssuer(cfg IssuerConfig) (service.Issuer, error) {
 	return issuer.NewUnsignedIssuer(issuer.UnsignedIssuerConfig{
 		TokenType:    cfg.TokenType,
 		ClaimMappers: mappers,
+		AuthType:     cfg.AuthType,
 	}), nil
 }
 
@@ -384,6 +385,7 @@ func newRHIdentityIssuer(cfg IssuerConfig) (service.Issuer, error) {
 	return issuer.NewRHIdentityIssuer(issuer.RHIdentityIssuerConfig{
 		TokenType:    cfg.TokenType,
 		ClaimMappers: mappers,
+		AuthType:     cfg.AuthType,
 	}), nil
 }
 

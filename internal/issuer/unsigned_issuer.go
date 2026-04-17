@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/project-kessel/parsec/internal/claims"
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/service"
 )
@@ -24,56 +25,83 @@ type UnsignedIssuerConfig struct {
 	// Clock is the time source for token timestamps
 	// If nil, uses system clock
 	Clock clock.Clock
+
+	// IdentityRootKey, when non-empty, wraps mapped claims as a single-key JSON object,
+	// e.g. "identity" produces {"identity": <mapped claims>} for x-rh-identity.
+	IdentityRootKey string
+
+	// AuthType is merged into the inner identity object (e.g. "jwt-auth") when IdentityRootKey is set.
+	// Skipped when the mapper output is an error object (contains "error").
+	AuthType string
+
+	// IncludeEntitlementsEmpty adds "entitlements": {} as a sibling of identity at the JSON root.
+	IncludeEntitlementsEmpty bool
 }
 
 // UnsignedIssuer issues unsigned tokens containing claim-mapped data
 // The token is the base64-encoded JSON representation of the mapped claims
 type UnsignedIssuer struct {
-	tokenType    string
-	claimMappers []service.ClaimMapper
-	clock        clock.Clock
+	cfg UnsignedIssuerConfig
 }
 
 // NewUnsignedIssuer creates a new unsigned issuer
 func NewUnsignedIssuer(cfg UnsignedIssuerConfig) *UnsignedIssuer {
-	clk := cfg.Clock
-	if clk == nil {
-		clk = clock.NewSystemClock()
+	if cfg.Clock == nil {
+		cfg.Clock = clock.NewSystemClock()
 	}
+	return &UnsignedIssuer{cfg: cfg}
+}
 
-	return &UnsignedIssuer{
-		tokenType:    cfg.TokenType,
-		claimMappers: cfg.ClaimMappers,
-		clock:        clk,
+// enrichIdentityInner sets identity.auth_type. Skips when the mapper returned an error object.
+func enrichIdentityInner(inner claims.Claims, authType string) {
+	if inner == nil {
+		return
+	}
+	if _, hasErr := inner["error"]; hasErr {
+		return
+	}
+	if authType != "" {
+		inner["auth_type"] = authType
 	}
 }
 
 // Issue implements the Issuer interface
 // Returns a token containing base64-encoded JSON of the mapped claims
 func (i *UnsignedIssuer) Issue(ctx context.Context, issueCtx *service.IssueContext) (*service.Token, error) {
-	// Apply claim mappers
-	mappedClaims, err := issueCtx.ToClaims(ctx, i.claimMappers)
+	mappedClaims, err := issueCtx.ToClaims(ctx, i.cfg.ClaimMappers)
 	if err != nil {
 		return nil, fmt.Errorf("failed to map claims: %w", err)
 	}
 
-	// Serialize mapped claims to JSON
-	claimsJSON, err := json.Marshal(mappedClaims)
+	inner := mappedClaims.Copy()
+	if i.cfg.IdentityRootKey != "" {
+		enrichIdentityInner(inner, i.cfg.AuthType)
+	}
+
+	var toMarshal any
+	if i.cfg.IdentityRootKey == "" {
+		toMarshal = inner
+	} else {
+		root := map[string]any{i.cfg.IdentityRootKey: inner}
+		if i.cfg.IncludeEntitlementsEmpty {
+			root["entitlements"] = map[string]any{}
+		}
+		toMarshal = root
+	}
+
+	claimsJSON, err := json.Marshal(toMarshal)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal claims: %w", err)
 	}
 
-	// Base64-encode the JSON
 	encodedToken := base64.StdEncoding.EncodeToString(claimsJSON)
-
-	// Use a far-future expiration time to indicate the token never expires
 	neverExpires := never
 
 	return &service.Token{
 		Value:     encodedToken,
-		Type:      i.tokenType,
+		Type:      i.cfg.TokenType,
 		ExpiresAt: neverExpires,
-		IssuedAt:  i.clock.Now(),
+		IssuedAt:  i.cfg.Clock.Now(),
 	}, nil
 }
 

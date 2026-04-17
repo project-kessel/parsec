@@ -19,6 +19,9 @@ type RHIdentityIssuerConfig struct {
 	// ClaimMappers are the mappers to apply to generate claims
 	ClaimMappers []service.ClaimMapper
 
+	// AuthType is merged into the inner identity object (e.g. "jwt-auth").
+	AuthType string
+
 	// Clock is the time source for token timestamps
 	// If nil, uses system clock
 	Clock clock.Clock
@@ -29,6 +32,7 @@ type RHIdentityIssuerConfig struct {
 type RHIdentityIssuer struct {
 	tokenType    string
 	claimMappers []service.ClaimMapper
+	authType     string
 	clock        clock.Clock
 }
 
@@ -42,6 +46,7 @@ func NewRHIdentityIssuer(cfg RHIdentityIssuerConfig) *RHIdentityIssuer {
 	return &RHIdentityIssuer{
 		tokenType:    cfg.TokenType,
 		claimMappers: cfg.ClaimMappers,
+		authType:     cfg.AuthType,
 		clock:        clk,
 	}
 }
@@ -55,10 +60,13 @@ func (i *RHIdentityIssuer) Issue(ctx context.Context, issueCtx *service.IssueCon
 		return nil, fmt.Errorf("failed to map claims: %w", err)
 	}
 
+	inner := mappedClaims.Copy()
+	enrichIdentityInner(inner, i.authType)
+
 	// Wrap mapped claims in "identity" wrapper
 	// This matches the format expected by Red Hat services
 	identityWrapper := map[string]any{
-		"identity": mappedClaims,
+		"identity": inner,
 	}
 
 	// Serialize to JSON

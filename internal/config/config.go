@@ -223,6 +223,9 @@ type IssuerConfig struct {
 	// These mappers build the token's claim structure
 	ClaimMappers []ClaimMapperConfig `koanf:"claim_mappers"`
 
+	// auth_type: merged into identity by rh_identity / unsigned issuers; see issuer package.
+	AuthType string `koanf:"auth_type"`
+
 	// Stub issuer fields (deprecated - use mappers instead)
 	IncludeRequestContext bool `koanf:"include_request_context"`
 }

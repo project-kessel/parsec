@@ -50,6 +50,7 @@ issuers:
   # Red Hat identity token issuer
   - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
     type: rh_identity
+    auth_type: jwt-auth
     # Claim mappers build the identity structure
     claim_mappers:
       - type: cel
