@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -45,17 +46,16 @@ func mustLoadRedhatIdentityMappers(t *testing.T) (inner, envelope *CELMapper) {
 
 func assertJSONMapsEqual(t *testing.T, want, got map[string]any) {
 	t.Helper()
-	wb, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("marshal want: %v", err)
+	if reflect.DeepEqual(want, got) {
+		return
 	}
-	gb, err := json.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal got: %v", err)
+	wb, werr := json.Marshal(want)
+	gb, gerr := json.Marshal(got)
+	if werr != nil || gerr != nil {
+		t.Errorf("maps differ (json.Marshal for display: want err=%v got err=%v):\nwant=%#v\n got=%#v", werr, gerr, want, got)
+		return
 	}
-	if string(wb) != string(gb) {
-		t.Errorf("maps differ (JSON):\nwant: %s\n got: %s", wb, gb)
-	}
+	t.Errorf("maps differ:\nwant: %s\n got: %s", wb, gb)
 }
 
 // mockDataSource is a simple mock data source for testing
@@ -156,15 +156,14 @@ func TestNewCELMapper(t *testing.T) {
 
 func TestRedhatIdentityCELScriptsCompile(t *testing.T) {
 	t.Parallel()
-	root := filepath.Join("..", "..", "configs", "scripts")
-	for _, name := range []string{"redhat_identity.cel", "redhat_identity_inner.cel"} {
-		path := filepath.Join(root, name)
+	innerPath, envelopePath := redhatIdentityScriptPaths(t)
+	for _, path := range []string{innerPath, envelopePath} {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
 		if _, err := NewCELMapper(string(b)); err != nil {
-			t.Fatalf("compile %s: %v", name, err)
+			t.Fatalf("compile %s: %v", filepath.Base(path), err)
 		}
 	}
 }
