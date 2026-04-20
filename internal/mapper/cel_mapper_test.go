@@ -3,6 +3,8 @@ package mapper
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -88,6 +90,39 @@ func TestNewCELMapper(t *testing.T) {
 			t.Fatal("expected error for invalid CEL syntax")
 		}
 	})
+
+	t.Run("cel.bind macro", func(t *testing.T) {
+		mapper, err := NewCELMapper(`cel.bind(x, {"a": 1}, {"out": x.a})`)
+		if err != nil {
+			t.Fatalf("failed to create mapper: %v", err)
+		}
+		result, err := mapper.Map(context.Background(), &service.MapperInput{})
+		if err != nil {
+			t.Fatalf("Map: %v", err)
+		}
+		out, ok := result["out"].(int64)
+		if !ok {
+			t.Fatalf("expected out int64, got %T %v", result["out"], result["out"])
+		}
+		if out != 1 {
+			t.Errorf("out = %v", out)
+		}
+	})
+}
+
+func TestRedhatIdentityCELScriptsCompile(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join("..", "..", "configs", "scripts")
+	for _, name := range []string{"redhat_identity.cel", "redhat_identity_inner.cel"} {
+		path := filepath.Join(root, name)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if _, err := NewCELMapper(string(b)); err != nil {
+			t.Fatalf("compile %s: %v", name, err)
+		}
+	}
 }
 
 func TestCELMapper_Map(t *testing.T) {

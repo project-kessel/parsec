@@ -26,16 +26,10 @@ type UnsignedIssuerConfig struct {
 	// If nil, uses system clock
 	Clock clock.Clock
 
-	// IdentityRootKey, when non-empty, wraps mapped claims as a single-key JSON object,
-	// e.g. "identity" produces {"identity": <mapped claims>} for x-rh-identity.
-	IdentityRootKey string
-
-	// AuthType is merged into the inner identity object (e.g. "jwt-auth") when IdentityRootKey is set.
-	// Skipped when the mapper output is an error object (contains "error").
+	// AuthType is merged into the nested "identity" object when the mapper output
+	// includes a top-level "identity" map (e.g. x-rh-identity envelope from CEL).
+	// Skipped when that object contains "error".
 	AuthType string
-
-	// IncludeEntitlementsEmpty adds "entitlements": {} as a sibling of identity at the JSON root.
-	IncludeEntitlementsEmpty bool
 }
 
 // UnsignedIssuer issues unsigned tokens containing claim-mapped data
@@ -74,22 +68,15 @@ func (i *UnsignedIssuer) Issue(ctx context.Context, issueCtx *service.IssueConte
 	}
 
 	inner := mappedClaims.Copy()
-	if i.cfg.IdentityRootKey != "" {
-		enrichIdentityInner(inner, i.cfg.AuthType)
-	}
-
-	var toMarshal any
-	if i.cfg.IdentityRootKey == "" {
-		toMarshal = inner
-	} else {
-		root := map[string]any{i.cfg.IdentityRootKey: inner}
-		if i.cfg.IncludeEntitlementsEmpty {
-			root["entitlements"] = map[string]any{}
+	if i.cfg.AuthType != "" {
+		if idVal, ok := inner["identity"]; ok {
+			if idMap, ok := idVal.(map[string]any); ok {
+				enrichIdentityInner(claims.Claims(idMap), i.cfg.AuthType)
+			}
 		}
-		toMarshal = root
 	}
 
-	claimsJSON, err := json.Marshal(toMarshal)
+	claimsJSON, err := json.Marshal(inner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal claims: %w", err)
 	}

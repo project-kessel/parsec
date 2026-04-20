@@ -203,7 +203,7 @@ type IssuerConfig struct {
 	TokenType string `koanf:"token_type"`
 
 	// Type selects the issuer implementation
-	// Options: "stub", "unsigned", "transaction_token", "rh_identity"
+	// Options: "stub", "unsigned", "transaction_token"
 	Type string `koanf:"type"`
 
 	// Common fields
@@ -219,11 +219,11 @@ type IssuerConfig struct {
 	TransactionContextMappers []ClaimMapperConfig `koanf:"transaction_context"`
 	RequestContextMappers     []ClaimMapperConfig `koanf:"request_context"`
 
-	// Simple issuer fields (unsigned, rh_identity types)
+	// Simple issuer fields (unsigned type)
 	// These mappers build the token's claim structure
 	ClaimMappers []ClaimMapperConfig `koanf:"claim_mappers"`
 
-	// auth_type: merged into identity by rh_identity / unsigned issuers; see issuer package.
+	// auth_type: merged into the nested "identity" object by UnsignedIssuer when the mapper output includes that key (e.g. x-rh-identity envelope from CEL); see issuer package.
 	AuthType string `koanf:"auth_type"`
 
 	// Stub issuer fields (deprecated - use mappers instead)

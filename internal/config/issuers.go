@@ -243,10 +243,8 @@ func newIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegistry) (service.I
 		return newUnsignedIssuer(cfg)
 	case "transaction_token":
 		return newTransactionTokenIssuer(cfg, signerRegistry)
-	case "rh_identity":
-		return newRHIdentityIssuer(cfg)
 	default:
-		return nil, fmt.Errorf("unknown issuer type: %s (supported: stub, unsigned, transaction_token, rh_identity)", cfg.Type)
+		return nil, fmt.Errorf("unknown issuer type: %s (supported: stub, unsigned, transaction_token)", cfg.Type)
 	}
 }
 
@@ -353,7 +351,6 @@ func newTransactionTokenIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegi
 
 // newUnsignedIssuer creates an unsigned issuer (for development/testing)
 func newUnsignedIssuer(cfg IssuerConfig) (service.Issuer, error) {
-	// Create claim mappers
 	var mappers []service.ClaimMapper
 	for i, mapperCfg := range cfg.ClaimMappers {
 		m, err := newClaimMapper(mapperCfg)
@@ -364,25 +361,6 @@ func newUnsignedIssuer(cfg IssuerConfig) (service.Issuer, error) {
 	}
 
 	return issuer.NewUnsignedIssuer(issuer.UnsignedIssuerConfig{
-		TokenType:    cfg.TokenType,
-		ClaimMappers: mappers,
-		AuthType:     cfg.AuthType,
-	}), nil
-}
-
-// newRHIdentityIssuer creates a Red Hat identity issuer
-func newRHIdentityIssuer(cfg IssuerConfig) (service.Issuer, error) {
-	// Create claim mappers
-	var mappers []service.ClaimMapper
-	for i, mapperCfg := range cfg.ClaimMappers {
-		m, err := newClaimMapper(mapperCfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create claim mapper %d: %w", i, err)
-		}
-		mappers = append(mappers, m)
-	}
-
-	return issuer.NewRHIdentityIssuer(issuer.RHIdentityIssuerConfig{
 		TokenType:    cfg.TokenType,
 		ClaimMappers: mappers,
 		AuthType:     cfg.AuthType,

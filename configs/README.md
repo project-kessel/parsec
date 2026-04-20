@@ -297,7 +297,7 @@ Issuers create tokens:
 ```yaml
 issuers:
   - token_type: "urn:ietf:params:oauth:token-type:txn_token"
-    type: stub  # stub, unsigned, transaction_token, rh_identity
+    type: stub  # stub, unsigned, transaction_token
     issuer_url: "https://parsec.example.com"
     ttl: 5m
 ```
@@ -311,9 +311,8 @@ issuers:
 **Issuer Types:**
 
 - `stub` - Simple test tokens (includes subject and transaction ID)
-- `unsigned` - Base64-encoded JSON tokens (never expires)
+- `unsigned` - Base64-encoded JSON tokens (never expires); use CEL (e.g. `configs/scripts/redhat_identity.cel`) for `urn:redhat:params:oauth:token-type:rh-identity` / x-rh-identity envelopes
 - `transaction_token` - Signed transaction tokens using a KeyManager (follows OAuth transaction token spec)
-- `rh_identity` - Red Hat identity tokens (x-rh-identity format)
 
 ## Examples
 

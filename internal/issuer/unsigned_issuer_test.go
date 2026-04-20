@@ -172,6 +172,48 @@ func TestUnsignedIssuer_Issue_NilTransactionContext(t *testing.T) {
 	}
 }
 
+func TestUnsignedIssuer_Issue_XRHIdentityEnvelope_AuthType(t *testing.T) {
+	t.Parallel()
+
+	// Mapper returns full x-rh-identity envelope (as redhat_identity.cel does).
+	testMapper := service.NewStubClaimMapper(claims.Claims{
+		"identity": map[string]any{
+			"type": "User",
+			"user": map[string]any{"username": "alice"},
+		},
+	})
+
+	iss := NewUnsignedIssuer(UnsignedIssuerConfig{
+		TokenType:    "urn:redhat:params:oauth:token-type:rh-identity",
+		ClaimMappers: []service.ClaimMapper{testMapper},
+		AuthType:     "jwt-auth",
+	})
+
+	tok, err := iss.Issue(context.Background(), &service.IssueContext{
+		Subject:            &trust.Result{Subject: "s"},
+		DataSourceRegistry: service.NewDataSourceRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(tok.Value)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	id, _ := root["identity"].(map[string]any)
+	if id == nil {
+		t.Fatal("missing identity")
+	}
+	if id["auth_type"] != "jwt-auth" {
+		t.Errorf("auth_type = %v", id["auth_type"])
+	}
+}
+
 func TestUnsignedIssuer_PublicKeys(t *testing.T) {
 	issuer := NewUnsignedIssuer(UnsignedIssuerConfig{
 		TokenType:    "test-token-type",

@@ -42,14 +42,14 @@ issuers:
     transaction_context:
       - type: cel
         name: redhat-identity-mapper
-        script_file: ./configs/scripts/redhat_identity.cel
+        script_file: ./configs/scripts/redhat_identity_inner.cel
     # Request context mappers build the "req_ctx" claim
     request_context:
       - type: request_attributes  # Include request path, method, etc.
 
-  # Red Hat identity token issuer
+  # Red Hat identity token issuer (unsigned base64 JSON; envelope from CEL)
   - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
-    type: rh_identity
+    type: unsigned
     auth_type: jwt-auth
     # Claim mappers build the identity structure
     claim_mappers:

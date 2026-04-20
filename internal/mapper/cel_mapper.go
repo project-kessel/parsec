@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/ext"
 
 	celhelpers "github.com/project-kessel/parsec/internal/cel"
 	"github.com/project-kessel/parsec/internal/claims"
@@ -56,6 +57,7 @@ func NewCELMapper(script string) (*CELMapper, error) {
 	// Compile the script once at construction time
 	// Use a test environment with nil datasources for compilation
 	env, err := cel.NewEnv(
+		ext.Bindings(),
 		celhelpers.MapperInputLibrary(context.Background(), nil, nil),
 		celhelpers.RedHatHelpersLibrary(),
 	)
@@ -85,6 +87,7 @@ func (m *CELMapper) Map(ctx context.Context, input *service.MapperInput) (claims
 	// TODO: this could be at least constructed per token service invocation, rather than per source
 	// TODO: we could also make this constructed once per application, and use macros to bind convenience functions to input
 	env, err := cel.NewEnv(
+		ext.Bindings(),
 		celhelpers.MapperInputLibrary(ctx, input.DataSourceRegistry, input.DataSourceInput),
 		celhelpers.RedHatHelpersLibrary(),
 	)
