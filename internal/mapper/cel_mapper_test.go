@@ -14,6 +14,50 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
+// redhatIdentityScriptPaths are repo-relative from internal/mapper (test cwd).
+func redhatIdentityScriptPaths(t *testing.T) (innerPath, envelopePath string) {
+	t.Helper()
+	root := filepath.Join("..", "..", "configs", "scripts")
+	return filepath.Join(root, "redhat_identity_inner.cel"), filepath.Join(root, "redhat_identity.cel")
+}
+
+func mustLoadRedhatIdentityMappers(t *testing.T) (inner, envelope *CELMapper) {
+	t.Helper()
+	innerPath, envelopePath := redhatIdentityScriptPaths(t)
+	innerB, err := os.ReadFile(innerPath)
+	if err != nil {
+		t.Fatalf("read inner script: %v", err)
+	}
+	envB, err := os.ReadFile(envelopePath)
+	if err != nil {
+		t.Fatalf("read envelope script: %v", err)
+	}
+	inner, err = NewCELMapper(string(innerB))
+	if err != nil {
+		t.Fatalf("compile inner: %v", err)
+	}
+	envelope, err = NewCELMapper(string(envB))
+	if err != nil {
+		t.Fatalf("compile envelope: %v", err)
+	}
+	return inner, envelope
+}
+
+func assertJSONMapsEqual(t *testing.T, want, got map[string]any) {
+	t.Helper()
+	wb, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal want: %v", err)
+	}
+	gb, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal got: %v", err)
+	}
+	if string(wb) != string(gb) {
+		t.Errorf("maps differ (JSON):\nwant: %s\n got: %s", wb, gb)
+	}
+}
+
 // mockDataSource is a simple mock data source for testing
 type mockDataSource struct {
 	name string
@@ -122,6 +166,101 @@ func TestRedhatIdentityCELScriptsCompile(t *testing.T) {
 		if _, err := NewCELMapper(string(b)); err != nil {
 			t.Fatalf("compile %s: %v", name, err)
 		}
+	}
+}
+
+// TestRedhatIdentityEnvelopeIdentityMatchesInner verifies redhat_identity.cel's identityPayload
+// stays identical to redhat_identity_inner.cel for the same subject.claims (regression guard for duplicated branches).
+func TestRedhatIdentityEnvelopeIdentityMatchesInner(t *testing.T) {
+	ctx := context.Background()
+	innerMapper, envelopeMapper := mustLoadRedhatIdentityMappers(t)
+
+	baseSubject := trust.Result{
+		Subject:     "fixture-subject",
+		Issuer:      "https://sso.redhat.com/auth/realms/redhat-external",
+		TrustDomain: "https://sso.redhat.com/auth/realms/redhat-external",
+		ExpiresAt:   time.Now().Add(time.Hour),
+		IssuedAt:    time.Now(),
+	}
+
+	tests := []struct {
+		name   string
+		claims claims.Claims
+		// wantBranch documents which helper path must apply (for test failure messages).
+		wantBranch string
+	}{
+		{
+			name: "service_account",
+			claims: claims.Claims{
+				"preferred_username": "service-account-myclient",
+				"sub":                "sa-subject-1",
+				"client_id":          "myclient",
+				"scope":              "openid",
+				"rh-org-id":          "org-sa-100",
+			},
+			wantBranch: "isServiceAccountToken",
+		},
+		{
+			name: "console_api",
+			claims: claims.Claims{
+				"preferred_username": "human@example.com",
+				"scope":              "openid api.console",
+				"email":              "human@example.com",
+				"given_name":         "Jane",
+				"family_name":        "Doe",
+				"locale":             "en_US",
+				"user_id":            "u-42",
+				"organization": map[string]any{
+					"id":             "org-console-200",
+					"account_number": "acct-555",
+				},
+				"realm_access": map[string]any{
+					"roles": []any{"admin:org:all"},
+				},
+			},
+			wantBranch: "isConsoleApiToken",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sub := baseSubject
+			sub.Claims = tt.claims
+			input := &service.MapperInput{Subject: &sub}
+
+			innerOut, err := innerMapper.Map(ctx, input)
+			if err != nil {
+				t.Fatalf("inner Map: %v", err)
+			}
+			envOut, err := envelopeMapper.Map(ctx, input)
+			if err != nil {
+				t.Fatalf("envelope Map: %v", err)
+			}
+
+			idVal, ok := envOut["identity"]
+			if !ok {
+				t.Fatalf("envelope missing identity key; got %v", envOut)
+			}
+			idMap, ok := idVal.(map[string]any)
+			if !ok {
+				t.Fatalf("identity not a map, got %T", idVal)
+			}
+
+			assertJSONMapsEqual(t, innerOut, idMap)
+
+			// Branch sanity checks (must match redhat_helpers + script order: SA before console).
+			switch tt.wantBranch {
+			case "isServiceAccountToken":
+				if innerOut["type"] != "ServiceAccount" {
+					t.Fatalf("expected ServiceAccount branch, got type=%v", innerOut["type"])
+				}
+			case "isConsoleApiToken":
+				if innerOut["type"] != "User" {
+					t.Fatalf("expected User branch, got type=%v", innerOut["type"])
+				}
+			}
+		})
 	}
 }
 
