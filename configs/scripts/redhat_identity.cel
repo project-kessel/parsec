@@ -1,5 +1,13 @@
+// Red Hat Identity Transformation
+//
+// Transforms JWT claims into Red Hat identity format (x-rh-identity structure)
+// Supports:
+//   - Service Account tokens (preferred_username starts with "service-account-")
+//   - Console API tokens (scope contains "api.console")
+//
+// Based on: https://github.com/RedHatInsights/insights-3scale
+//
 // x-rh-identity payload: base64({ "identity": <inner> }).
-// Requires cel.bind (enabled in internal/mapper/cel_mapper.go).
 //
 // For transaction-token tctx (inner map only), use redhat_identity_inner.cel.
 // Keep the cel.bind initializer expression in sync with redhat_identity_inner.cel.
