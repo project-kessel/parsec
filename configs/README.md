@@ -311,7 +311,7 @@ issuers:
 **Issuer Types:**
 
 - `stub` - Simple test tokens (includes subject and transaction ID)
-- `unsigned` - Base64-encoded JSON tokens (never expires); use CEL (e.g. `configs/scripts/redhat_identity.cel`) for `urn:redhat:params:oauth:token-type:rh-identity` / x-rh-identity envelopes
+- `unsigned` - Base64-encoded JSON tokens (never expires)
 - `transaction_token` - Signed transaction tokens using a KeyManager (follows OAuth transaction token spec)
 
 ## Examples
