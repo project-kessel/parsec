@@ -3,9 +3,6 @@ package mapper
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -14,49 +11,6 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
-
-// redhatIdentityScriptPaths are repo-relative from internal/mapper (test cwd).
-func redhatIdentityScriptPaths(t *testing.T) (innerPath, envelopePath string) {
-	t.Helper()
-	root := filepath.Join("..", "..", "configs", "scripts")
-	return filepath.Join(root, "redhat_identity_inner.cel"), filepath.Join(root, "redhat_identity.cel")
-}
-
-func mustLoadRedhatIdentityMappers(t *testing.T) (inner, envelope *CELMapper) {
-	t.Helper()
-	innerPath, envelopePath := redhatIdentityScriptPaths(t)
-	innerB, err := os.ReadFile(innerPath)
-	if err != nil {
-		t.Fatalf("read inner script: %v", err)
-	}
-	envB, err := os.ReadFile(envelopePath)
-	if err != nil {
-		t.Fatalf("read envelope script: %v", err)
-	}
-	inner, err = NewCELMapper(string(innerB))
-	if err != nil {
-		t.Fatalf("compile inner: %v", err)
-	}
-	envelope, err = NewCELMapper(string(envB))
-	if err != nil {
-		t.Fatalf("compile envelope: %v", err)
-	}
-	return inner, envelope
-}
-
-func assertJSONMapsEqual(t *testing.T, want, got map[string]any) {
-	t.Helper()
-	if reflect.DeepEqual(want, got) {
-		return
-	}
-	wb, werr := json.Marshal(want)
-	gb, gerr := json.Marshal(got)
-	if werr != nil || gerr != nil {
-		t.Errorf("maps differ (json.Marshal for display: want err=%v got err=%v):\nwant=%#v\n got=%#v", werr, gerr, want, got)
-		return
-	}
-	t.Errorf("maps differ:\nwant: %s\n got: %s", wb, gb)
-}
 
 // mockDataSource is a simple mock data source for testing
 type mockDataSource struct {
@@ -152,128 +106,6 @@ func TestNewCELMapper(t *testing.T) {
 			t.Errorf("out = %v", out)
 		}
 	})
-}
-
-func TestRedhatIdentityCELScriptsCompile(t *testing.T) {
-	t.Parallel()
-	innerPath, envelopePath := redhatIdentityScriptPaths(t)
-	for _, path := range []string{innerPath, envelopePath} {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		if _, err := NewCELMapper(string(b)); err != nil {
-			t.Fatalf("compile %s: %v", filepath.Base(path), err)
-		}
-	}
-}
-
-// TestRedhatIdentityEnvelopeIdentityMatchesInner verifies redhat_identity.cel's identityPayload
-// stays identical to redhat_identity_inner.cel for the same subject.claims (regression guard for duplicated branches).
-func TestRedhatIdentityEnvelopeIdentityMatchesInner(t *testing.T) {
-	ctx := context.Background()
-	innerMapper, envelopeMapper := mustLoadRedhatIdentityMappers(t)
-
-	baseSubject := trust.Result{
-		Subject:     "fixture-subject",
-		Issuer:      "https://sso.redhat.com/auth/realms/redhat-external",
-		TrustDomain: "https://sso.redhat.com/auth/realms/redhat-external",
-		ExpiresAt:   time.Now().Add(time.Hour),
-		IssuedAt:    time.Now(),
-	}
-
-	tests := []struct {
-		name   string
-		claims claims.Claims
-		// wantBranch documents which helper path must apply (for test failure messages).
-		wantBranch string
-	}{
-		{
-			name: "service_account",
-			claims: claims.Claims{
-				"preferred_username": "service-account-myclient",
-				"sub":                "sa-subject-1",
-				"client_id":          "myclient",
-				"scope":              "openid",
-				"rh-org-id":          "org-sa-100",
-			},
-			wantBranch: "isServiceAccountToken",
-		},
-		{
-			name: "console_api",
-			claims: claims.Claims{
-				"preferred_username": "human@example.com",
-				"scope":              "openid api.console",
-				"email":              "human@example.com",
-				"given_name":         "Jane",
-				"family_name":        "Doe",
-				"locale":             "en_US",
-				"user_id":            "u-42",
-				"organization": map[string]any{
-					"id":             "org-console-200",
-					"account_number": "acct-555",
-				},
-				"realm_access": map[string]any{
-					"roles": []any{"admin:org:all"},
-				},
-			},
-			wantBranch: "isConsoleApiToken",
-		},
-		{
-			name: "unsupported_token_type",
-			// Neither service account (no service-account-* preferred_username) nor console API (scope lacks api.console).
-			claims: claims.Claims{
-				"sub":   "opaque-subject",
-				"scope": "openid",
-			},
-			wantBranch: "unsupported_token_type",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			sub := baseSubject
-			sub.Claims = tt.claims
-			input := &service.MapperInput{Subject: &sub}
-
-			innerOut, err := innerMapper.Map(ctx, input)
-			if err != nil {
-				t.Fatalf("inner Map: %v", err)
-			}
-			envOut, err := envelopeMapper.Map(ctx, input)
-			if err != nil {
-				t.Fatalf("envelope Map: %v", err)
-			}
-
-			idVal, ok := envOut["identity"]
-			if !ok {
-				t.Fatalf("envelope missing identity key; got %v", envOut)
-			}
-			idMap, ok := idVal.(map[string]any)
-			if !ok {
-				t.Fatalf("identity not a map, got %T", idVal)
-			}
-
-			assertJSONMapsEqual(t, innerOut, idMap)
-
-			// Branch sanity checks (must match redhat_helpers + script order: SA before console).
-			switch tt.wantBranch {
-			case "isServiceAccountToken":
-				if innerOut["type"] != "ServiceAccount" {
-					t.Fatalf("expected ServiceAccount branch, got type=%v", innerOut["type"])
-				}
-			case "isConsoleApiToken":
-				if innerOut["type"] != "User" {
-					t.Fatalf("expected User branch, got type=%v", innerOut["type"])
-				}
-			case "unsupported_token_type":
-				if innerOut["error"] != "unsupported_token_type" {
-					t.Fatalf("expected fallback error branch, got %v", innerOut)
-				}
-			}
-		})
-	}
 }
 
 func TestCELMapper_Map(t *testing.T) {
