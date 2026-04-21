@@ -219,6 +219,15 @@ func TestRedhatIdentityEnvelopeIdentityMatchesInner(t *testing.T) {
 			},
 			wantBranch: "isConsoleApiToken",
 		},
+		{
+			name: "unsupported_token_type",
+			// Neither service account (no service-account-* preferred_username) nor console API (scope lacks api.console).
+			claims: claims.Claims{
+				"sub":   "opaque-subject",
+				"scope": "openid",
+			},
+			wantBranch: "unsupported_token_type",
+		},
 	}
 
 	for _, tt := range tests {
@@ -257,6 +266,10 @@ func TestRedhatIdentityEnvelopeIdentityMatchesInner(t *testing.T) {
 			case "isConsoleApiToken":
 				if innerOut["type"] != "User" {
 					t.Fatalf("expected User branch, got type=%v", innerOut["type"])
+				}
+			case "unsupported_token_type":
+				if innerOut["error"] != "unsupported_token_type" {
+					t.Fatalf("expected fallback error branch, got %v", innerOut)
 				}
 			}
 		})
