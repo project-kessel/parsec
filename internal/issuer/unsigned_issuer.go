@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
-	"github.com/project-kessel/parsec/internal/claims"
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/service"
 )
@@ -26,10 +26,9 @@ type UnsignedIssuerConfig struct {
 	// If nil, uses system clock
 	Clock clock.Clock
 
-	// AuthType is merged into the nested "identity" object when the mapper output
-	// includes a top-level "identity" map (e.g. x-rh-identity envelope from CEL).
-	// Skipped when that object contains "error".
-	AuthType string
+	// IssuerParams are passed to CEL as issuer metadata (issuerParam / issuerPath).
+	// Claim-shape logic stays in CEL mapper scripts.
+	IssuerParams map[string]any
 }
 
 // UnsignedIssuer issues unsigned tokens containing claim-mapped data
@@ -46,35 +45,22 @@ func NewUnsignedIssuer(cfg UnsignedIssuerConfig) *UnsignedIssuer {
 	return &UnsignedIssuer{cfg: cfg}
 }
 
-// enrichIdentityInner sets identity.auth_type. Skips when the mapper returned an error object.
-func enrichIdentityInner(inner claims.Claims, authType string) {
-	if inner == nil {
-		return
-	}
-	if _, hasErr := inner["error"]; hasErr {
-		return
-	}
-	if authType != "" {
-		inner["auth_type"] = authType
-	}
-}
-
 // Issue implements the Issuer interface
 // Returns a token containing base64-encoded JSON of the mapped claims
 func (i *UnsignedIssuer) Issue(ctx context.Context, issueCtx *service.IssueContext) (*service.Token, error) {
-	mappedClaims, err := issueCtx.ToClaims(ctx, i.cfg.ClaimMappers)
+	var opts *service.ToClaimsOptions
+	if len(i.cfg.IssuerParams) > 0 {
+		opts = &service.ToClaimsOptions{
+			IssuerParams: maps.Clone(i.cfg.IssuerParams),
+		}
+	}
+
+	mappedClaims, err := issueCtx.ToClaims(ctx, i.cfg.ClaimMappers, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to map claims: %w", err)
 	}
 
 	inner := mappedClaims.Copy()
-	if i.cfg.AuthType != "" {
-		if idVal, ok := inner["identity"]; ok {
-			if idMap, ok := idVal.(map[string]any); ok {
-				enrichIdentityInner(claims.Claims(idMap), i.cfg.AuthType)
-			}
-		}
-	}
 
 	claimsJSON, err := json.Marshal(inner)
 	if err != nil {

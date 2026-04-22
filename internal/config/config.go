@@ -223,8 +223,8 @@ type IssuerConfig struct {
 	// These mappers build the token's claim structure
 	ClaimMappers []ClaimMapperConfig `koanf:"claim_mappers"`
 
-	// auth_type: merged into the nested "identity" object by UnsignedIssuer when the mapper output includes that key (e.g. x-rh-identity envelope from CEL); see issuer package.
-	AuthType string `koanf:"auth_type"`
+	// IssuerParams are passed to CEL as issuer metadata (issuerParam / issuerPath) for unsigned issuers.
+	IssuerParams map[string]any `koanf:"issuer_params"`
 
 	// Stub issuer fields (deprecated - use mappers instead)
 	IncludeRequestContext bool `koanf:"include_request_context"`

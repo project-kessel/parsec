@@ -32,9 +32,20 @@ type IssueContext struct {
 	DataSourceRegistry *DataSourceRegistry
 }
 
+// ToClaimsOptions configures optional claim mapping inputs.
+type ToClaimsOptions struct {
+	// IssuerParams are passed to mapper input and exposed to CEL helper functions.
+	IssuerParams map[string]any
+}
+
 // ToClaims applies a set of claim mappers to produce claims
 // This is a convenience method to reduce duplication in issuer implementations
-func (ic *IssueContext) ToClaims(ctx context.Context, mappers []ClaimMapper) (claims.Claims, error) {
+func (ic *IssueContext) ToClaims(ctx context.Context, mappers []ClaimMapper, opts ...*ToClaimsOptions) (claims.Claims, error) {
+	var issuerParams map[string]any
+	if len(opts) > 0 && opts[0] != nil {
+		issuerParams = opts[0].IssuerParams
+	}
+
 	// Build data source input
 	dataSourceInput := &DataSourceInput{
 		Subject:           ic.Subject,
@@ -49,6 +60,7 @@ func (ic *IssueContext) ToClaims(ctx context.Context, mappers []ClaimMapper) (cl
 		RequestAttributes:  ic.RequestAttributes,
 		DataSourceRegistry: ic.DataSourceRegistry,
 		DataSourceInput:    dataSourceInput,
+		IssuerParams:       issuerParams,
 	}
 
 	// Apply mappers

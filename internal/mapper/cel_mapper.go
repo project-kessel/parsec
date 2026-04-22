@@ -18,6 +18,8 @@ import (
 //
 // The CEL expression has access to the following variables:
 //   - datasource(name) - function to fetch data from a named data source
+//   - issuerParam(name) - function to fetch a top-level issuer parameter
+//   - issuerPath(path) - function to fetch a nested issuer parameter by dot path
 //   - subject - the subject identity information as a map
 //   - actor - the actor identity information as a map
 //   - request - the request attributes as a map
@@ -58,7 +60,7 @@ func NewCELMapper(script string) (*CELMapper, error) {
 	// Use a test environment with nil datasources for compilation
 	env, err := cel.NewEnv(
 		ext.Bindings(),
-		celhelpers.MapperInputLibrary(context.Background(), nil, nil),
+		celhelpers.MapperInputLibrary(context.Background(), nil, nil, nil),
 		celhelpers.RedHatHelpersLibrary(),
 	)
 	if err != nil {
@@ -88,7 +90,7 @@ func (m *CELMapper) Map(ctx context.Context, input *service.MapperInput) (claims
 	// TODO: we could also make this constructed once per application, and use macros to bind convenience functions to input
 	env, err := cel.NewEnv(
 		ext.Bindings(),
-		celhelpers.MapperInputLibrary(ctx, input.DataSourceRegistry, input.DataSourceInput),
+		celhelpers.MapperInputLibrary(ctx, input.DataSourceRegistry, input.DataSourceInput, input.IssuerParams),
 		celhelpers.RedHatHelpersLibrary(),
 	)
 	if err != nil {

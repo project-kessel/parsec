@@ -3,6 +3,7 @@ package cel
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -21,23 +22,32 @@ type DataSourceRegistry interface {
 //
 // This provides compile-time declarations for:
 //   - datasource(name) - function to fetch data from a named data source
+//   - issuerParam(name) - function to fetch a top-level issuer parameter by key
+//   - issuerPath(path) - function to fetch a nested issuer parameter by dot path
 //   - subject, actor, request - variables containing identity and request data
 //
 // Pass nil for registry to create a test/validation environment.
-func MapperInputLibrary(ctx context.Context, registry *service.DataSourceRegistry, dsInput *service.DataSourceInput) cel.EnvOption {
+func MapperInputLibrary(
+	ctx context.Context,
+	registry *service.DataSourceRegistry,
+	dsInput *service.DataSourceInput,
+	issuerParams map[string]any,
+) cel.EnvOption {
 	return cel.Lib(&mapperInputLib{
-		ctx:      ctx,
-		registry: registry,
-		dsInput:  dsInput,
-		cache:    make(map[string]any),
+		ctx:          ctx,
+		registry:     registry,
+		dsInput:      dsInput,
+		issuerParams: issuerParams,
+		cache:        make(map[string]any),
 	})
 }
 
 type mapperInputLib struct {
-	ctx      context.Context
-	registry *service.DataSourceRegistry
-	dsInput  *service.DataSourceInput
-	cache    map[string]any
+	ctx          context.Context
+	registry     *service.DataSourceRegistry
+	dsInput      *service.DataSourceInput
+	issuerParams map[string]any
+	cache        map[string]any
 }
 
 func (lib *mapperInputLib) CompileOptions() []cel.EnvOption {
@@ -50,11 +60,72 @@ func (lib *mapperInputLib) CompileOptions() []cel.EnvOption {
 				cel.UnaryBinding(lib.fetchDatasource),
 			),
 		),
+		cel.Function("issuerParam",
+			cel.Overload("issuerParam_string",
+				[]*cel.Type{cel.StringType},
+				cel.DynType,
+				cel.UnaryBinding(lib.fetchIssuerParam),
+			),
+		),
+		cel.Function("issuerPath",
+			cel.Overload("issuerPath_string",
+				[]*cel.Type{cel.StringType},
+				cel.DynType,
+				cel.UnaryBinding(lib.fetchIssuerPath),
+			),
+		),
 		// Declare other variables as dynamic types
 		cel.Variable("subject", cel.DynType),
 		cel.Variable("actor", cel.DynType),
 		cel.Variable("request", cel.DynType),
 	}
+}
+
+func (lib *mapperInputLib) fetchIssuerParam(arg ref.Val) ref.Val {
+	key, ok := arg.Value().(string)
+	if !ok || key == "" {
+		return types.NullValue
+	}
+	if lib.issuerParams == nil {
+		return types.NullValue
+	}
+	v, ok := lib.issuerParams[key]
+	if !ok {
+		return types.NullValue
+	}
+	return types.DefaultTypeAdapter.NativeToValue(v)
+}
+
+func (lib *mapperInputLib) fetchIssuerPath(arg ref.Val) ref.Val {
+	path, ok := arg.Value().(string)
+	if !ok || path == "" {
+		return types.NullValue
+	}
+	if lib.issuerParams == nil {
+		return types.NullValue
+	}
+
+	parts := strings.Split(path, ".")
+	var current any = lib.issuerParams
+	for _, part := range parts {
+		if part == "" {
+			return types.NullValue
+		}
+		m, ok := current.(map[string]any)
+		if !ok {
+			return types.NullValue
+		}
+		next, ok := m[part]
+		if !ok {
+			return types.NullValue
+		}
+		current = next
+	}
+
+	if current == nil {
+		return types.NullValue
+	}
+	return types.DefaultTypeAdapter.NativeToValue(current)
 }
 
 func (lib *mapperInputLib) ProgramOptions() []cel.ProgramOption {

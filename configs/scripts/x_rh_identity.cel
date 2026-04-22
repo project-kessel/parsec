@@ -59,6 +59,8 @@ cel.bind(
     }
   ),
   {
-    "identity": identityPayload
+    "identity": mergeClaims(identityPayload, {
+      "auth_type": has(identityPayload.error) || issuerParam("auth_type") == null || issuerParam("auth_type") == "" ? null : issuerParam("auth_type"),
+    })
   }
 )

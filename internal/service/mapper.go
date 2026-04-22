@@ -33,4 +33,8 @@ type MapperInput struct {
 
 	// DataSourceInput is the input to use when fetching from data sources
 	DataSourceInput *DataSourceInput
+
+	// IssuerParams contains optional issuer-provided metadata that CEL can use
+	// without hard-coding claim mapping behavior in issuers.
+	IssuerParams map[string]any
 }

@@ -13,6 +13,7 @@ import (
 //   - isConsoleApiToken(claims) - checks if scope contains "api.console"
 //   - isServiceAccountToken(claims) - checks if preferred_username starts with "service-account-"
 //   - safeToString(val) - converts value to string safely (returns empty string if nil)
+//   - mergeClaims(base, patch) - shallow-merges claim maps; patch keys with nil values are omitted
 func RedHatHelpersLibrary() cel.EnvOption {
 	return cel.Lib(&redhatHelpersLib{})
 }
@@ -54,6 +55,14 @@ func (lib *redhatHelpersLib) CompileOptions() []cel.EnvOption {
 				[]*cel.Type{cel.DynType},
 				cel.StringType,
 				cel.UnaryBinding(lib.safeToString),
+			),
+		),
+		// mergeClaims(base, patch) - shallow merge map keys from patch over base
+		cel.Function("mergeClaims",
+			cel.Overload("mergeClaims_dyn_dyn",
+				[]*cel.Type{cel.DynType, cel.DynType},
+				cel.DynType,
+				cel.BinaryBinding(lib.mergeClaims),
 			),
 		),
 	}
@@ -182,6 +191,34 @@ func (lib *redhatHelpersLib) safeToString(val ref.Val) ref.Val {
 		return types.String("")
 	}
 	return result
+}
+
+// mergeClaims shallow-merges two claim maps and returns a new map.
+// Patch keys whose value is nil are skipped so CEL can use null to mean "omit this field".
+func (lib *redhatHelpersLib) mergeClaims(baseVal, patchVal ref.Val) ref.Val {
+	baseNative := ConvertCELValue(baseVal)
+	baseMap, ok := baseNative.(map[string]any)
+	if !ok {
+		return types.NullValue
+	}
+
+	patchNative := ConvertCELValue(patchVal)
+	patchMap, ok := patchNative.(map[string]any)
+	if !ok {
+		patchMap = map[string]any{}
+	}
+
+	out := make(map[string]any, len(baseMap)+len(patchMap))
+	for k, v := range baseMap {
+		out[k] = v
+	}
+	for k, v := range patchMap {
+		if v == nil {
+			continue
+		}
+		out[k] = v
+	}
+	return types.DefaultTypeAdapter.NativeToValue(out)
 }
 
 // contains checks if a string contains a substring (helper function)

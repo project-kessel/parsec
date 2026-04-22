@@ -3,6 +3,7 @@ package mapper
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -579,6 +580,65 @@ func TestCELMapper_Map(t *testing.T) {
 
 		if result["other_field"] != "value" {
 			t.Errorf("expected other_field=value, got %v", result["other_field"])
+		}
+	})
+}
+
+func TestCELMapper_IssuerParams(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("issuerParam returns value", func(t *testing.T) {
+		m, err := NewCELMapper(`{
+			"auth_type": issuerParam("auth_type"),
+			"tenant": issuerParam("tenant_id")
+		}`)
+		if err != nil {
+			t.Fatalf("NewCELMapper: %v", err)
+		}
+
+		result, err := m.Map(ctx, &service.MapperInput{
+			IssuerParams: map[string]any{
+				"auth_type": "jwt-auth",
+				"tenant_id": "tenant-a",
+			},
+		})
+		if err != nil {
+			t.Fatalf("Map: %v", err)
+		}
+
+		if result["auth_type"] != "jwt-auth" {
+			t.Errorf("auth_type = %v", result["auth_type"])
+		}
+		if result["tenant"] != "tenant-a" {
+			t.Errorf("tenant = %v", result["tenant"])
+		}
+	})
+
+	t.Run("issuerPath returns nested values", func(t *testing.T) {
+		m, err := NewCELMapper(`{
+			"region": issuerPath("tenant.region"),
+			"missing": issuerPath("tenant.missing")
+		}`)
+		if err != nil {
+			t.Fatalf("NewCELMapper: %v", err)
+		}
+
+		result, err := m.Map(ctx, &service.MapperInput{
+			IssuerParams: map[string]any{
+				"tenant": map[string]any{
+					"region": "us-east-1",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Map: %v", err)
+		}
+
+		if result["region"] != "us-east-1" {
+			t.Errorf("region = %v", result["region"])
+		}
+		if fmt.Sprint(result["missing"]) != "NULL_VALUE" {
+			t.Errorf("missing = %v, want NULL_VALUE", result["missing"])
 		}
 	})
 }

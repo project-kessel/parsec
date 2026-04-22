@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/mapper"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -175,18 +176,20 @@ func TestUnsignedIssuer_Issue_NilTransactionContext(t *testing.T) {
 func TestUnsignedIssuer_Issue_XRHIdentityEnvelope_AuthType(t *testing.T) {
 	t.Parallel()
 
-	// Mapper returns full x-rh-identity envelope (as redhat_identity.cel does).
-	testMapper := service.NewStubClaimMapper(claims.Claims{
-		"identity": map[string]any{
-			"type": "User",
-			"user": map[string]any{"username": "alice"},
-		},
-	})
+	testMapper, err := mapper.NewCELMapper(`{
+  "identity": mergeClaims(
+    {"type": "User", "user": {"username": "alice"}},
+    issuerParam("auth_type") == null || issuerParam("auth_type") == "" ? {} : {"auth_type": issuerParam("auth_type")}
+  )
+}`)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
 
 	iss := NewUnsignedIssuer(UnsignedIssuerConfig{
 		TokenType:    "urn:redhat:params:oauth:token-type:rh-identity",
 		ClaimMappers: []service.ClaimMapper{testMapper},
-		AuthType:     "jwt-auth",
+		IssuerParams: map[string]any{"auth_type": "jwt-auth"},
 	})
 
 	tok, err := iss.Issue(context.Background(), &service.IssueContext{
