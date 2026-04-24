@@ -99,6 +99,38 @@ func TestUnsignedIssuer_Issue(t *testing.T) {
 	}
 }
 
+func TestUnsignedIssuer_Issue_RHIdentity_WrapsIdentityKey(t *testing.T) {
+	testMapper := service.NewStubClaimMapper(claims.Claims{
+		"error": "unsupported_token_type",
+	})
+	iss := NewUnsignedIssuer(UnsignedIssuerConfig{
+		TokenType:    string(service.TokenTypeRHIdentity),
+		ClaimMappers: []service.ClaimMapper{testMapper},
+	})
+	token, err := iss.Issue(context.Background(), &service.IssueContext{
+		Subject:            &trust.Result{Subject: "sub"},
+		DataSourceRegistry: service.NewDataSourceRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(token.Value)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var outer map[string]any
+	if err := json.Unmarshal(raw, &outer); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	inner, ok := outer["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected identity object, got %T", outer["identity"])
+	}
+	if inner["error"] != "unsupported_token_type" {
+		t.Fatalf("identity.error = %v", inner["error"])
+	}
+}
+
 func TestUnsignedIssuer_Issue_EmptyTransactionContext(t *testing.T) {
 	// Create a mapper that returns empty claims
 	testMapper := service.NewStubClaimMapper(claims.Claims{})

@@ -1,6 +1,8 @@
 package cel
 
 import (
+	"strings"
+
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -10,7 +12,7 @@ import (
 //
 // Provides:
 //   - hasRole(claims, roleName) - checks if claims.realm_access.roles contains roleName
-//   - isConsoleApiToken(claims) - checks if scope contains "api.console"
+//   - isConsoleApiToken(claims) - checks if scope lists "api.console" as a space-delimited token
 //   - isServiceAccountToken(claims) - checks if preferred_username starts with "service-account-"
 //   - safeToString(val) - converts value to string safely (returns empty string if nil)
 func RedHatHelpersLibrary() cel.EnvOption {
@@ -30,7 +32,7 @@ func (lib *redhatHelpersLib) CompileOptions() []cel.EnvOption {
 			),
 		),
 
-		// isConsoleApiToken(claims) - check if scope contains "api.console"
+		// isConsoleApiToken(claims) - check if scope includes token "api.console"
 		cel.Function("isConsoleApiToken",
 			cel.Overload("isConsoleApiToken_map",
 				[]*cel.Type{cel.DynType},
@@ -119,7 +121,7 @@ func (lib *redhatHelpersLib) hasRole(claimsVal, roleVal ref.Val) ref.Val {
 	return types.Bool(false)
 }
 
-// isConsoleApiToken checks if the scope claim contains "api.console"
+// isConsoleApiToken checks if the scope claim lists "api.console" as a space-delimited token.
 func (lib *redhatHelpersLib) isConsoleApiToken(claimsVal ref.Val) ref.Val {
 	claimsMap, ok := claimsVal.Value().(map[string]any)
 	if !ok {
@@ -136,10 +138,12 @@ func (lib *redhatHelpersLib) isConsoleApiToken(claimsVal ref.Val) ref.Val {
 		return types.Bool(false)
 	}
 
-	// Check if "api.console" is in the space-separated scope string
-	// Simple implementation - checks if scope contains "api.console"
-	// In production, you might want to properly parse space-separated values
-	return types.Bool(contains(scope, "api.console"))
+	for _, token := range strings.Fields(scope) {
+		if token == "api.console" {
+			return types.Bool(true)
+		}
+	}
+	return types.Bool(false)
 }
 
 // isServiceAccountToken checks if preferred_username starts with "service-account-"
@@ -182,18 +186,4 @@ func (lib *redhatHelpersLib) safeToString(val ref.Val) ref.Val {
 		return types.String("")
 	}
 	return result
-}
-
-// contains checks if a string contains a substring (helper function)
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || findSubstring(s, substr) >= 0)
-}
-
-func findSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }
