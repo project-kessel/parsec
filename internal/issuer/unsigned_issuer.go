@@ -27,8 +27,7 @@ type UnsignedIssuerConfig struct {
 }
 
 // UnsignedIssuer issues unsigned tokens containing claim-mapped data.
-// The payload is base64-encoded JSON: raw mapped claims, except for
-// TokenTypeRHIdentity where the JSON is {"identity": <mapped claims>} (x-rh-identity).
+// The payload is base64-encoded JSON of exactly what claim mappers produce.
 type UnsignedIssuer struct {
 	tokenType    string
 	claimMappers []service.ClaimMapper
@@ -51,8 +50,7 @@ func NewUnsignedIssuer(cfg UnsignedIssuerConfig) *UnsignedIssuer {
 
 // Issue implements the Issuer interface
 // Returns a token containing base64-encoded JSON of the mapped claims.
-// For TokenTypeRHIdentity, JSON matches x-rh-identity: {"identity": <mapped claims>},
-// same as RHIdentityIssuer (so fields like identity.error are addressable).
+// Payload structure is mapper-defined; the unsigned issuer applies no token-type specific shaping.
 func (i *UnsignedIssuer) Issue(ctx context.Context, issueCtx *service.IssueContext) (*service.Token, error) {
 	// Apply claim mappers
 	mappedClaims, err := issueCtx.ToClaims(ctx, i.claimMappers)
@@ -60,12 +58,7 @@ func (i *UnsignedIssuer) Issue(ctx context.Context, issueCtx *service.IssueConte
 		return nil, fmt.Errorf("failed to map claims: %w", err)
 	}
 
-	payload := any(mappedClaims)
-	if service.TokenType(i.tokenType) == service.TokenTypeRHIdentity {
-		payload = map[string]any{"identity": mappedClaims}
-	}
-
-	claimsJSON, err := json.Marshal(payload)
+	claimsJSON, err := json.Marshal(mappedClaims)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal claims: %w", err)
 	}

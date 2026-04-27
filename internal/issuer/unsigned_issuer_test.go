@@ -99,9 +99,43 @@ func TestUnsignedIssuer_Issue(t *testing.T) {
 	}
 }
 
-func TestUnsignedIssuer_Issue_RHIdentity_WrapsIdentityKey(t *testing.T) {
+func TestUnsignedIssuer_Issue_RHIdentity_DoesNotApplyImplicitWrapper(t *testing.T) {
 	testMapper := service.NewStubClaimMapper(claims.Claims{
 		"error": "unsupported_token_type",
+	})
+	iss := NewUnsignedIssuer(UnsignedIssuerConfig{
+		TokenType:    string(service.TokenTypeRHIdentity),
+		ClaimMappers: []service.ClaimMapper{testMapper},
+	})
+	token, err := iss.Issue(context.Background(), &service.IssueContext{
+		Subject:            &trust.Result{Subject: "sub"},
+		DataSourceRegistry: service.NewDataSourceRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(token.Value)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var outer map[string]any
+	if err := json.Unmarshal(raw, &outer); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if _, found := outer["identity"]; found {
+		t.Fatalf("expected no implicit identity wrapper, got %v", outer["identity"])
+	}
+	if outer["error"] != "unsupported_token_type" {
+		t.Fatalf("error = %v", outer["error"])
+	}
+}
+
+func TestUnsignedIssuer_Issue_MapperCanDefineIdentityWrapper(t *testing.T) {
+	testMapper := service.NewStubClaimMapper(claims.Claims{
+		"identity": map[string]any{
+			"error": "unsupported_token_type",
+		},
 	})
 	iss := NewUnsignedIssuer(UnsignedIssuerConfig{
 		TokenType:    string(service.TokenTypeRHIdentity),
