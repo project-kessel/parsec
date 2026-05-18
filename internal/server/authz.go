@@ -145,11 +145,11 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	issuedTokens, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
-		Subject:                result,
-		Actor:                  actor,
-		RequestAttributes:      reqAttrs,
-		TokenTypes:             tokenTypes,
-		CredentialSourceType:   ext.sourceType,
+		Subject:              result,
+		Actor:                actor,
+		RequestAttributes:    reqAttrs,
+		TokenTypes:           tokenTypes,
+		CredentialSourceType: ext.sourceType,
 		// TODO: Get scope from configuration or request
 		Scope: "",
 	})

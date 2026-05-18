@@ -125,8 +125,8 @@ type ValidatorConfig struct {
 	// (TrustDomain is shared)
 
 	// Stub Validator fields
-	CredentialTypes []string         `koanf:"credential_types"` // e.g., ["bearer", "jwt"]
-	Claims          map[string]any   `koanf:"claims"`           // JWT-like claims returned on success
+	CredentialTypes []string       `koanf:"credential_types"` // e.g., ["bearer", "jwt"]
+	Claims          map[string]any `koanf:"claims"`           // JWT-like claims returned on success
 }
 
 // ValidatorFilterConfig configures validator filtering for actors

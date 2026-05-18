@@ -75,13 +75,13 @@ func (ts *TokenService) IssueTokens(ctx context.Context, req *IssueRequest) (map
 	// Build issue context with base information needed for all issuers
 	// Audience is always the trust domain per transaction token spec
 	issueCtx := &IssueContext{
-		Subject:                req.Subject,
-		Actor:                  req.Actor,
-		RequestAttributes:      req.RequestAttributes,
-		Audience:               ts.trustDomain,
-		Scope:                  req.Scope,
-		DataSourceRegistry:     ts.dataSources,
-		CredentialSourceType:   req.CredentialSourceType,
+		Subject:              req.Subject,
+		Actor:                req.Actor,
+		RequestAttributes:    req.RequestAttributes,
+		Audience:             ts.trustDomain,
+		Scope:                req.Scope,
+		DataSourceRegistry:   ts.dataSources,
+		CredentialSourceType: req.CredentialSourceType,
 	}
 
 	// Issue tokens for each requested type
