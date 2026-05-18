@@ -77,6 +77,29 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if bearer.Token != "cookie-jwt" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
+		if len(ext.headers) != 0 {
+			t.Fatalf("expected no header removals, got %v", ext.headers)
+		}
+		if ext.headerSets["cookie"] != "session=abc; other=1" {
+			t.Fatalf("expected sanitized cookie header, got %q", ext.headerSets["cookie"])
+		}
+	})
+
+	t.Run("cookie only credential is removed entirely", func(t *testing.T) {
+		t.Parallel()
+		sources := []CredentialSource{{Type: "cookie", Name: "cs_jwt"}}
+		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+			"cookie": "cs_jwt=cookie-jwt",
+		}, "/"), sources)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(ext.headers) != 1 || ext.headers[0] != "cookie" {
+			t.Fatalf("expected cookie header removal, got %v", ext.headers)
+		}
+		if len(ext.headerSets) != 0 {
+			t.Fatalf("expected no header overrides, got %v", ext.headerSets)
+		}
 	})
 
 	t.Run("query", func(t *testing.T) {

@@ -18,9 +18,10 @@ type CredentialSource struct {
 }
 
 type credentialExtraction struct {
-	credential trust.Credential
-	headers    []string
-	sourceType string
+	credential  trust.Credential
+	headers     []string            // header names to remove entirely
+	headerSets  map[string]string   // header names to set/override on the upstream request
+	sourceType  string
 }
 
 func defaultCredentialSources() []CredentialSource {
@@ -105,11 +106,17 @@ func extractBearerFromCookie(headers map[string]string, name string) (*credentia
 		return nil, fmt.Errorf("cookie %q not found", name)
 	}
 
-	return &credentialExtraction{
+	ext := &credentialExtraction{
 		credential: &trust.BearerCredential{Token: token},
-		headers:    []string{"cookie"},
 		sourceType: "cookie",
-	}, nil
+	}
+	sanitized := sanitizeCookieHeader(cookieHeader, name)
+	if sanitized == "" {
+		ext.headers = []string{"cookie"}
+	} else {
+		ext.headerSets = map[string]string{"cookie": sanitized}
+	}
+	return ext, nil
 }
 
 func extractBearerFromQuery(path, param string) (*credentialExtraction, error) {
@@ -171,4 +178,21 @@ func cookieValue(cookieHeader, name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// sanitizeCookieHeader rebuilds a Cookie header value without the named cookie.
+func sanitizeCookieHeader(cookieHeader, omitName string) string {
+	var remaining []string
+	for part := range strings.SplitSeq(cookieHeader, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, _, ok := strings.Cut(part, "=")
+		if ok && key == omitName {
+			continue
+		}
+		remaining = append(remaining, part)
+	}
+	return strings.Join(remaining, "; ")
 }

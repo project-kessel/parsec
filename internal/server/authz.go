@@ -164,8 +164,8 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		return s.denyResponse(codes.Internal, fmt.Sprintf("failed to issue tokens: %v", err)), nil
 	}
 
-	// 7. Build response headers from issued tokens
-	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens))
+	// 7. Build response headers from issued tokens and credential sanitization
+	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.headerSets))
 	for _, spec := range s.TokenTypesToIssue {
 		if token, ok := issuedTokens[spec.Type]; ok {
 			responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
@@ -175,6 +175,14 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 				},
 			})
 		}
+	}
+	for name, value := range ext.headerSets {
+		responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
+			Header: &corev3.HeaderValue{
+				Key:   name,
+				Value: value,
+			},
+		})
 	}
 
 	// 8. Return OK with issued tokens in headers
