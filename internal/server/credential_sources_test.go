@@ -47,6 +47,20 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		}
 	})
 
+	t.Run("bearer scheme is case-insensitive", func(t *testing.T) {
+		t.Parallel()
+		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+			"authorization": "bearer jwt-token",
+		}, "/"), defaultCredentialSources())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		bearer := ext.credential.(*trust.BearerCredential)
+		if bearer.Token != "jwt-token" {
+			t.Fatalf("unexpected token: %q", bearer.Token)
+		}
+	})
+
 	t.Run("cookie", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{{Type: "cookie", Name: "cs_jwt"}}

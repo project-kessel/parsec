@@ -78,8 +78,8 @@ func extractBearerFromAuthHeader(headers map[string]string) (*credentialExtracti
 		return nil, fmt.Errorf("no authorization header")
 	}
 
-	token, ok := strings.CutPrefix(authHeader, "Bearer ")
-	if !ok {
+	scheme, token, ok := strings.Cut(authHeader, " ")
+	if !ok || !strings.EqualFold(scheme, "bearer") || token == "" {
 		return nil, fmt.Errorf("unsupported authorization scheme")
 	}
 
