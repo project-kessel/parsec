@@ -23,6 +23,7 @@ import (
 //   - subject - the subject identity information as a map
 //   - actor - the actor identity information as a map
 //   - request - the request attributes as a map
+//   - config - identity mapping settings from parsec.yaml (internal_idp_target, role_fallback_enabled)
 //
 // The expression should evaluate to a map that will be used as the claims,
 // or call fail() to abort mapping with a structured error.
@@ -46,16 +47,18 @@ import (
 //	  "region": datasource("geo").region
 //	}
 type CELMapper struct {
-	script string
-	ast    *cel.Ast // Pre-compiled AST
-	clock  clock.Clock
+	script         string
+	ast            *cel.Ast // Pre-compiled AST
+	clock          clock.Clock
+	identityConfig map[string]any
 }
 
 // CELMapperOption configures a CELMapper.
 type CELMapperOption func(*celMapperConfig)
 
 type celMapperConfig struct {
-	clock clock.Clock
+	clock          clock.Clock
+	identityConfig map[string]any
 }
 
 // WithClock sets the clock used by the now_ms() CEL function.
@@ -63,6 +66,13 @@ type celMapperConfig struct {
 func WithClock(clk clock.Clock) CELMapperOption {
 	return func(cfg *celMapperConfig) {
 		cfg.clock = clk
+	}
+}
+
+// WithIdentityConfig sets CEL config.* variables for identity mapping.
+func WithIdentityConfig(identityConfig map[string]any) CELMapperOption {
+	return func(cfg *celMapperConfig) {
+		cfg.identityConfig = identityConfig
 	}
 }
 
@@ -96,10 +106,19 @@ func NewCELMapper(script string, opts ...CELMapperOption) (*CELMapper, error) {
 		return nil, fmt.Errorf("failed to compile CEL script: %w", issues.Err())
 	}
 
+	identityConfig := cfg.identityConfig
+	if identityConfig == nil {
+		identityConfig = map[string]any{
+			"internal_idp_target":   "",
+			"role_fallback_enabled": true,
+		}
+	}
+
 	return &CELMapper{
-		script: script,
-		ast:    ast,
-		clock:  cfg.clock,
+		script:         script,
+		ast:            ast,
+		clock:          cfg.clock,
+		identityConfig: identityConfig,
 	}, nil
 }
 
@@ -195,6 +214,8 @@ func (m *CELMapper) createActivation(ctx context.Context, input *service.MapperI
 				"additional": input.RequestAttributes.Additional,
 			}
 		}(),
+
+		"config": m.identityConfig,
 	}
 
 	return activation

@@ -9,6 +9,9 @@ type Config struct {
 	// Used as the audience for all issued tokens
 	TrustDomain string `koanf:"trust_domain" usage:"trust domain for issued tokens (audience claim)"`
 
+	// Identity configures Red Hat identity mapping values exposed to CEL as config.*
+	Identity *IdentityConfig `koanf:"identity"`
+
 	// AuthzServer configuration for ext_authz service
 	AuthzServer *AuthzServerConfig `koanf:"authz_server"`
 
@@ -44,6 +47,15 @@ type ServerConfig struct {
 
 	// HTTPPort is the port for HTTP services (gRPC-gateway transcoding)
 	HTTPPort int `koanf:"http_port" usage:"HTTP server port (gRPC-gateway transcoding)"`
+}
+
+// IdentityConfig configures Red Hat identity mapping values exposed to CEL as config.*
+type IdentityConfig struct {
+	// InternalIDPTarget is the idp claim value that marks an internal user (tier 1)
+	InternalIDPTarget string `koanf:"internal_idp_target"`
+
+	// RoleFallbackEnabled gates the redhat:employees role fallback (tier 3)
+	RoleFallbackEnabled bool `koanf:"role_fallback_enabled"`
 }
 
 // AuthzServerConfig configures the ext_authz authorization server

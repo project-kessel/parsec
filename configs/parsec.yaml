@@ -17,6 +17,10 @@ observability:
 # Used as the audience (aud) claim in all issued tokens
 trust_domain: "parsec.example.com"
 
+identity:
+  internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+  role_fallback_enabled: true
+
 # Exchange server configuration
 exchange_server:
   # Claims filter (determines which request_context claims actors can provide)

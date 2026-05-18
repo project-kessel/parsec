@@ -650,3 +650,76 @@ func TestCELMapper_ErrorClaimAllowedInOutput(t *testing.T) {
 		t.Errorf("expected other claim preserved as %q, got %v", "data", result["other"])
 	}
 }
+
+func TestCELMapper_isInternalTiers(t *testing.T) {
+	ctx := context.Background()
+	script := `{"is_internal": has(subject.claims.idp) ? (subject.claims.idp == config.internal_idp_target) :
+	           has(subject.claims.is_internal) ? subject.claims.is_internal :
+	           config.role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
+	           false}`
+
+	m, err := NewCELMapper(script, WithIdentityConfig(map[string]any{
+		"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
+		"role_fallback_enabled": true,
+	}))
+	if err != nil {
+		t.Fatalf("failed to create mapper: %v", err)
+	}
+
+	subject := func(claims map[string]any) *service.MapperInput {
+		return &service.MapperInput{Subject: &trust.Result{Claims: claims}}
+	}
+
+	t.Run("tier 1 idp", func(t *testing.T) {
+		result, err := m.Map(ctx, subject(map[string]any{
+			"idp": "https://sso.redhat.com/auth/realms/internal",
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result["is_internal"] != true {
+			t.Errorf("got %v", result["is_internal"])
+		}
+	})
+
+	t.Run("tier 2 is_internal claim", func(t *testing.T) {
+		result, err := m.Map(ctx, subject(map[string]any{"is_internal": false}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result["is_internal"] != false {
+			t.Errorf("got %v", result["is_internal"])
+		}
+	})
+
+	t.Run("tier 3 role fallback", func(t *testing.T) {
+		result, err := m.Map(ctx, subject(map[string]any{
+			"realm_access": map[string]any{"roles": []any{"redhat:employees"}},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result["is_internal"] != true {
+			t.Errorf("got %v", result["is_internal"])
+		}
+	})
+
+	t.Run("tier 3 disabled", func(t *testing.T) {
+		disabled, err := NewCELMapper(script, WithIdentityConfig(map[string]any{
+			"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
+			"role_fallback_enabled": false,
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := disabled.Map(ctx, subject(map[string]any{
+			"realm_access": map[string]any{"roles": []any{"redhat:employees"}},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result["is_internal"] != false {
+			t.Errorf("got %v", result["is_internal"])
+		}
+	})
+}
