@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -34,12 +33,24 @@ type AuthzServer struct {
 	observer     service.AuthzCheckObserver
 
 	// TokenTypesToIssue specifies which token types to issue and their headers
-	// This could come from configuration in the future
 	TokenTypesToIssue []TokenTypeSpec
+
+	// CredentialSources configures where subject credentials are extracted from
+	CredentialSources []CredentialSource
+}
+
+// AuthzServerOption configures an AuthzServer.
+type AuthzServerOption func(*AuthzServer)
+
+// WithCredentialSources sets credential extraction sources for subject validation.
+func WithCredentialSources(sources []CredentialSource) AuthzServerOption {
+	return func(s *AuthzServer) {
+		s.CredentialSources = sources
+	}
 }
 
 // NewAuthzServer creates a new ext_authz server
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, observer service.AuthzCheckObserver) *AuthzServer {
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, observer service.AuthzCheckObserver, opts ...AuthzServerOption) *AuthzServer {
 	// Default to transaction tokens if none specified
 	if len(tokenTypes) == 0 {
 		tokenTypes = []TokenTypeSpec{
@@ -55,12 +66,19 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		observer = service.NoOpAuthzCheckObserver{}
 	}
 
-	return &AuthzServer{
+	srv := &AuthzServer{
 		trustStore:        trustStore,
 		tokenService:      tokenService,
 		TokenTypesToIssue: tokenTypes,
 		observer:          observer,
 	}
+	for _, opt := range opts {
+		opt(srv)
+	}
+	if len(srv.CredentialSources) == 0 {
+		srv.CredentialSources = defaultCredentialSources()
+	}
+	return srv
 }
 
 // Check implements the ext_authz check endpoint
@@ -104,16 +122,16 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 	// 4. Extract subject credentials from request
 	// The extraction layer returns both the credential and which headers were used
-	cred, headersUsed, err := s.extractCredential(req)
+	ext, err := extractCredentialFromSources(req, s.CredentialSources)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
-	p.SubjectCredentialExtracted(cred, headersUsed)
+	p.SubjectCredentialExtracted(ext.credential, ext.headers)
 
 	// 5. Validate subject credentials against filtered trust store
 	// The filtered store only includes validators the actor is allowed to use
-	result, err := filteredStore.Validate(ctx, cred)
+	result, err := filteredStore.Validate(ctx, ext.credential)
 	if err != nil {
 		p.SubjectValidationFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", err)), nil
@@ -127,10 +145,11 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	issuedTokens, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
-		Subject:           result,
-		Actor:             actor,
-		RequestAttributes: reqAttrs,
-		TokenTypes:        tokenTypes,
+		Subject:                result,
+		Actor:                  actor,
+		RequestAttributes:      reqAttrs,
+		TokenTypes:             tokenTypes,
+		CredentialSourceType:   ext.sourceType,
 		// TODO: Get scope from configuration or request
 		Scope: "",
 	})
@@ -162,46 +181,10 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			OkResponse: &authv3.OkHttpResponse{
 				Headers: responseHeaders,
 				// Remove external credential headers - security boundary
-				HeadersToRemove: headersUsed,
+				HeadersToRemove: ext.headers,
 			},
 		},
 	}, nil
-}
-
-// extractCredential extracts credentials from the Envoy request
-// Returns the credential and the list of headers that were used to extract it
-func (s *AuthzServer) extractCredential(req *authv3.CheckRequest) (trust.Credential, []string, error) {
-	httpReq := req.GetAttributes().GetRequest().GetHttp()
-	// TODO: mtls e.g. cert := req.GetAttributes().GetSource().GetCertificate()
-
-	if httpReq == nil {
-		return nil, nil, fmt.Errorf("no HTTP request attributes")
-	}
-
-	// Look for Authorization header
-	authHeader := httpReq.GetHeaders()["authorization"]
-	if authHeader == "" {
-		return nil, nil, fmt.Errorf("no authorization header")
-	}
-
-	// Extract bearer token
-	if token, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
-		// For bearer tokens, the trust store determines which validator to use
-		// based on its configuration (e.g., default validator, token introspection)
-		cred := &trust.BearerCredential{
-			Token: token,
-		}
-		// Return the credential and the headers that were used
-		headersUsed := []string{"authorization"}
-		return cred, headersUsed, nil
-	}
-
-	// Future: Handle other authentication schemes
-	// - Basic auth: would use "authorization" header
-	// - API key in custom header: would track that header name
-	// - Cookie-based auth: would track cookie names
-
-	return nil, nil, fmt.Errorf("unsupported authorization scheme")
 }
 
 // buildRequestAttributes extracts request attributes from the Envoy request

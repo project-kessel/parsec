@@ -23,6 +23,7 @@ import (
 //   - subject - the subject identity information as a map
 //   - actor - the actor identity information as a map
 //   - request - the request attributes as a map
+//   - cred_type - how the subject credential was extracted (bearer, cookie, cert, query)
 //
 // The expression should evaluate to a map that will be used as the claims,
 // or call fail() to abort mapping with a structured error.
@@ -195,6 +196,8 @@ func (m *CELMapper) createActivation(ctx context.Context, input *service.MapperI
 				"additional": input.RequestAttributes.Additional,
 			}
 		}(),
+
+		"cred_type": input.CredentialSourceType,
 	}
 
 	return activation

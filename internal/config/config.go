@@ -50,6 +50,21 @@ type ServerConfig struct {
 type AuthzServerConfig struct {
 	// TokenTypes specifies which token types to issue and how to deliver them
 	TokenTypes []TokenTypeConfig `koanf:"token_types"`
+
+	// CredentialSources lists where to extract subject credentials, in order
+	CredentialSources []CredentialSourceConfig `koanf:"credential_sources"`
+}
+
+// CredentialSourceConfig configures a credential extraction location for ext_authz
+type CredentialSourceConfig struct {
+	// Type is the source kind: bearer, cookie, cert, query
+	Type string `koanf:"type"`
+
+	// Name is the cookie or query parameter name (cookie, query types)
+	Name string `koanf:"name"`
+
+	// Header is the HTTP header for cert extraction (default: x-forwarded-client-cert)
+	Header string `koanf:"header"`
 }
 
 // TokenTypeConfig specifies a token type to issue via ext_authz
@@ -110,7 +125,8 @@ type ValidatorConfig struct {
 	// (TrustDomain is shared)
 
 	// Stub Validator fields
-	CredentialTypes []string `koanf:"credential_types"` // e.g., ["bearer", "jwt"]
+	CredentialTypes []string         `koanf:"credential_types"` // e.g., ["bearer", "jwt"]
+	Claims          map[string]any   `koanf:"claims"`           // JWT-like claims returned on success
 }
 
 // ValidatorFilterConfig configures validator filtering for actors

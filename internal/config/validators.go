@@ -3,9 +3,11 @@ package config
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 
+	"github.com/project-kessel/parsec/internal/claims"
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -153,7 +155,31 @@ func newStubValidator(cfg ValidatorConfig) (trust.Validator, error) {
 		credTypes = []trust.CredentialType{trust.CredentialTypeBearer}
 	}
 
-	return trust.NewStubValidator(credTypes...), nil
+	validator := trust.NewStubValidator(credTypes...)
+	if len(cfg.Claims) == 0 {
+		return validator, nil
+	}
+
+	trustDomain := cfg.TrustDomain
+	if trustDomain == "" {
+		trustDomain = "test-domain"
+	}
+
+	stubClaims := claims.Claims(maps.Clone(cfg.Claims))
+	result := &trust.Result{
+		Subject:     "test-subject",
+		Issuer:      "https://test-issuer.example.com",
+		TrustDomain: trustDomain,
+		Claims:      stubClaims,
+		ExpiresAt:   time.Now().Add(time.Hour),
+		IssuedAt:    time.Now(),
+		Audience:    []string{"https://parsec.example.com"},
+	}
+	if scope, ok := stubClaims["scope"].(string); ok {
+		result.Scope = scope
+	}
+
+	return validator.WithResult(result), nil
 }
 
 // newValidatorFilter creates a validator filter from configuration

@@ -75,6 +75,7 @@ func (lib *mapperInputLib) CompileOptions() []cel.EnvOption {
 		cel.Variable("subject", cel.DynType),
 		cel.Variable("actor", cel.DynType),
 		cel.Variable("request", cel.DynType),
+		cel.Variable("cred_type", cel.StringType),
 	}
 }
 

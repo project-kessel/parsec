@@ -382,3 +382,25 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 
 	return tokenTypes, nil
 }
+
+// AuthzServerCredentialSources returns configured credential extraction sources for ext_authz.
+// Returns nil when unset so the server applies bearer-only defaults.
+func (p *Provider) AuthzServerCredentialSources() ([]server.CredentialSource, error) {
+	if p.config.AuthzServer == nil || len(p.config.AuthzServer.CredentialSources) == 0 {
+		return nil, nil
+	}
+
+	sources := make([]server.CredentialSource, 0, len(p.config.AuthzServer.CredentialSources))
+	for i, srcCfg := range p.config.AuthzServer.CredentialSources {
+		if srcCfg.Type == "" {
+			return nil, fmt.Errorf("credential_sources[%d]: type is required", i)
+		}
+		sources = append(sources, server.CredentialSource{
+			Type:   srcCfg.Type,
+			Name:   srcCfg.Name,
+			Header: srcCfg.Header,
+		})
+	}
+
+	return sources, nil
+}

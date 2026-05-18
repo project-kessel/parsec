@@ -30,6 +30,9 @@ type IssueContext struct {
 
 	// DataSourceRegistry provides access to data sources for lazy fetching
 	DataSourceRegistry *DataSourceRegistry
+
+	// CredentialSourceType is how the subject credential was extracted (bearer, cookie, cert, query)
+	CredentialSourceType string
 }
 
 // ToClaims applies a set of claim mappers to produce claims
@@ -44,11 +47,12 @@ func (ic *IssueContext) ToClaims(ctx context.Context, mappers []ClaimMapper) (cl
 
 	// Build mapper input
 	mapperInput := &MapperInput{
-		Subject:            ic.Subject,
-		Actor:              ic.Actor,
-		RequestAttributes:  ic.RequestAttributes,
-		DataSourceRegistry: ic.DataSourceRegistry,
-		DataSourceInput:    dataSourceInput,
+		Subject:                ic.Subject,
+		Actor:                  ic.Actor,
+		RequestAttributes:      ic.RequestAttributes,
+		DataSourceRegistry:     ic.DataSourceRegistry,
+		DataSourceInput:        dataSourceInput,
+		CredentialSourceType:   ic.CredentialSourceType,
 	}
 
 	// Apply mappers
