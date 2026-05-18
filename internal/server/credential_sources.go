@@ -153,12 +153,6 @@ func extractCertCredential(headers map[string]string, header string) (*credentia
 	header = strings.ToLower(header)
 
 	certHeader := headers[header]
-	if certHeader == "" && header != "x-rh-certauth-cn" {
-		certHeader = headers["x-rh-certauth-cn"]
-		if certHeader != "" {
-			header = "x-rh-certauth-cn"
-		}
-	}
 	if certHeader == "" {
 		return nil, fmt.Errorf("no certificate header")
 	}

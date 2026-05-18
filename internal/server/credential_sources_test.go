@@ -123,7 +123,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cert from x-forwarded-client-cert", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{{Type: "cert"}}
+		sources := []CredentialSource{{Type: "cert", Header: "x-forwarded-client-cert"}}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"x-forwarded-client-cert": "By=spiffe://example/ns/default/sa/app;Hash=abc",
 		}, "/"), sources)
@@ -136,6 +136,17 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		bearer := ext.credential.(*trust.BearerCredential)
 		if bearer.Token == "" {
 			t.Fatal("expected cert material in credential")
+		}
+	})
+
+	t.Run("cert does not fall back to x-rh-certauth-cn", func(t *testing.T) {
+		t.Parallel()
+		sources := []CredentialSource{{Type: "cert", Header: "x-forwarded-client-cert"}}
+		_, err := extractCredentialFromSources(makeReq(map[string]string{
+			"x-rh-certauth-cn": "must-not-use",
+		}, "/"), sources)
+		if err == nil {
+			t.Fatal("expected error when configured cert header is absent")
 		}
 	})
 
