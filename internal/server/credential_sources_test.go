@@ -151,7 +151,7 @@ func TestNewAuthzServer_defaultCredentialSources(t *testing.T) {
 	t.Parallel()
 
 	srv := NewAuthzServer(nil, nil, nil, nil)
-	if len(srv.CredentialSources) != 1 || srv.CredentialSources[0].Type != "bearer" {
-		t.Fatalf("expected default bearer source, got %+v", srv.CredentialSources)
+	if len(srv.credentialSources) != 1 || srv.credentialSources[0].Type != "bearer" {
+		t.Fatalf("expected default bearer source, got %+v", srv.credentialSources)
 	}
 }

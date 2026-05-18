@@ -24,6 +24,12 @@ type TokenTypeSpec struct {
 	HeaderName string
 }
 
+// authzServerConfig holds AuthzServer settings applied via options.
+type authzServerConfig struct {
+	// credentialSources configures where subject credentials are extracted from.
+	credentialSources []CredentialSource
+}
+
 // AuthzServer implements Envoy's ext_authz Authorization service
 type AuthzServer struct {
 	authv3.UnimplementedAuthorizationServer
@@ -35,17 +41,16 @@ type AuthzServer struct {
 	// TokenTypesToIssue specifies which token types to issue and their headers
 	TokenTypesToIssue []TokenTypeSpec
 
-	// CredentialSources configures where subject credentials are extracted from
-	CredentialSources []CredentialSource
+	authzServerConfig
 }
 
 // AuthzServerOption configures an AuthzServer.
-type AuthzServerOption func(*AuthzServer)
+type AuthzServerOption func(*authzServerConfig)
 
 // WithCredentialSources sets credential extraction sources for subject validation.
 func WithCredentialSources(sources []CredentialSource) AuthzServerOption {
-	return func(s *AuthzServer) {
-		s.CredentialSources = sources
+	return func(cfg *authzServerConfig) {
+		cfg.credentialSources = sources
 	}
 }
 
@@ -66,19 +71,21 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		observer = service.NoOpAuthzCheckObserver{}
 	}
 
-	srv := &AuthzServer{
+	cfg := authzServerConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if len(cfg.credentialSources) == 0 {
+		cfg.credentialSources = defaultCredentialSources()
+	}
+
+	return &AuthzServer{
 		trustStore:        trustStore,
 		tokenService:      tokenService,
 		TokenTypesToIssue: tokenTypes,
 		observer:          observer,
+		authzServerConfig: cfg,
 	}
-	for _, opt := range opts {
-		opt(srv)
-	}
-	if len(srv.CredentialSources) == 0 {
-		srv.CredentialSources = defaultCredentialSources()
-	}
-	return srv
 }
 
 // Check implements the ext_authz check endpoint
@@ -122,7 +129,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 	// 4. Extract subject credentials from request
 	// The extraction layer returns both the credential and which headers were used
-	ext, err := extractCredentialFromSources(req, s.CredentialSources)
+	ext, err := extractCredentialFromSources(req, s.credentialSources)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
