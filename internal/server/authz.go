@@ -197,6 +197,8 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 				Headers: responseHeaders,
 				// Remove external credential headers - security boundary
 				HeadersToRemove: ext.headers,
+				// Remove credential query parameters before forwarding upstream
+				QueryParametersToRemove: ext.queryParamsToRemove,
 			},
 		},
 	}, nil

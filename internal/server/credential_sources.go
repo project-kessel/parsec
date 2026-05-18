@@ -18,10 +18,11 @@ type CredentialSource struct {
 }
 
 type credentialExtraction struct {
-	credential  trust.Credential
-	headers     []string            // header names to remove entirely
-	headerSets  map[string]string   // header names to set/override on the upstream request
-	sourceType  string
+	credential            trust.Credential
+	headers               []string          // header names to remove entirely
+	headerSets            map[string]string // header names to set/override on the upstream request
+	queryParamsToRemove   []string          // query parameter names to remove before forwarding upstream
+	sourceType            string
 }
 
 func defaultCredentialSources() []CredentialSource {
@@ -139,9 +140,9 @@ func extractBearerFromQuery(path, param string) (*credentialExtraction, error) {
 	}
 
 	return &credentialExtraction{
-		credential: &trust.BearerCredential{Token: token},
-		headers:    nil,
-		sourceType: "query",
+		credential:          &trust.BearerCredential{Token: token},
+		queryParamsToRemove: []string{param},
+		sourceType:          "query",
 	}, nil
 }
 

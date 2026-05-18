@@ -116,6 +116,9 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if bearer.Token != "query-jwt" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
+		if len(ext.queryParamsToRemove) != 1 || ext.queryParamsToRemove[0] != "token" {
+			t.Fatalf("expected token query param removal, got %v", ext.queryParamsToRemove)
+		}
 	})
 
 	t.Run("cert from x-forwarded-client-cert", func(t *testing.T) {
