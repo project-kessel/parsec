@@ -23,6 +23,7 @@ import (
 //   - subject - the subject identity information as a map
 //   - actor - the actor identity information as a map
 //   - request - the request attributes as a map
+//   - config - configuration values for policy expressions (map)
 //
 // The expression should evaluate to a map that will be used as the claims,
 // or call fail() to abort mapping with a structured error.
@@ -49,13 +50,15 @@ type CELMapper struct {
 	script string
 	ast    *cel.Ast // Pre-compiled AST
 	clock  clock.Clock
+	config map[string]any
 }
 
 // CELMapperOption configures a CELMapper.
 type CELMapperOption func(*celMapperConfig)
 
 type celMapperConfig struct {
-	clock clock.Clock
+	clock  clock.Clock
+	config map[string]any
 }
 
 // WithClock sets the clock used by the now_ms() CEL function.
@@ -63,6 +66,13 @@ type celMapperConfig struct {
 func WithClock(clk clock.Clock) CELMapperOption {
 	return func(cfg *celMapperConfig) {
 		cfg.clock = clk
+	}
+}
+
+// WithCELConfig sets configuration values available in CEL as config.*.
+func WithCELConfig(cfg map[string]any) CELMapperOption {
+	return func(c *celMapperConfig) {
+		c.config = cfg
 	}
 }
 
@@ -100,6 +110,7 @@ func NewCELMapper(script string, opts ...CELMapperOption) (*CELMapper, error) {
 		script: script,
 		ast:    ast,
 		clock:  cfg.clock,
+		config: cfg.config,
 	}, nil
 }
 
@@ -195,6 +206,10 @@ func (m *CELMapper) createActivation(ctx context.Context, input *service.MapperI
 				"additional": input.RequestAttributes.Additional,
 			}
 		}(),
+	}
+
+	if len(m.config) > 0 {
+		activation["config"] = m.config
 	}
 
 	return activation

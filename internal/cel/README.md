@@ -13,6 +13,7 @@ This package provides CEL extensions specifically for claim mapping in Parsec:
 ### Variables
 
 - **`subject`** - Subject identity information (map)
+- **`config`** - Configuration values from parsec.yaml identity section (map)
   - `subject.subject` - Subject identifier
   - `subject.issuer` - Issuer URL
   - `subject.trust_domain` - Trust domain
