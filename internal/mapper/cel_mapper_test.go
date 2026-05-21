@@ -115,6 +115,105 @@ func TestCELMapper_Map(t *testing.T) {
 		}
 	})
 
+	t.Run("config variable exposes identity settings", func(t *testing.T) {
+		mapper, err := NewCELMapper(`{
+			"target": config.internal_idp_target,
+			"fallback": config.role_fallback_enabled
+		}`, WithCELConfig(map[string]any{
+			"internal_idp_target":    "https://idp.example.com/internal",
+			"role_fallback_enabled": false,
+		}))
+		if err != nil {
+			t.Fatalf("failed to create mapper: %v", err)
+		}
+
+		result, err := mapper.Map(ctx, &service.MapperInput{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result["target"] != "https://idp.example.com/internal" {
+			t.Errorf("expected target from config, got %v", result["target"])
+		}
+		if result["fallback"] != false {
+			t.Errorf("expected fallback=false from config, got %v", result["fallback"])
+		}
+	})
+
+	t.Run("is_internal uses config for idp match and role fallback", func(t *testing.T) {
+		script := `{
+			"by_idp": has(subject.claims.idp) ? (subject.claims.idp == config.internal_idp_target) : false,
+			"by_role": config.role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") : false
+		}`
+		mapper, err := NewCELMapper(script, WithCELConfig(map[string]any{
+			"internal_idp_target":    "https://sso.redhat.com/auth/realms/internal",
+			"role_fallback_enabled": true,
+		}))
+		if err != nil {
+			t.Fatalf("failed to create mapper: %v", err)
+		}
+
+		t.Run("internal idp claim", func(t *testing.T) {
+			result, err := mapper.Map(ctx, &service.MapperInput{
+				Subject: &trust.Result{
+					Claims: map[string]any{
+						"idp": "https://sso.redhat.com/auth/realms/internal",
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result["by_idp"] != true {
+				t.Errorf("expected by_idp=true for matching idp, got %v", result["by_idp"])
+			}
+		})
+
+		t.Run("role fallback when idp absent", func(t *testing.T) {
+			result, err := mapper.Map(ctx, &service.MapperInput{
+				Subject: &trust.Result{
+					Claims: map[string]any{
+						"realm_access": map[string]any{
+							"roles": []any{"redhat:employees"},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result["by_role"] != true {
+				t.Errorf("expected by_role=true with employees role, got %v", result["by_role"])
+			}
+		})
+
+		t.Run("role fallback disabled", func(t *testing.T) {
+			disabled, err := NewCELMapper(script, WithCELConfig(map[string]any{
+				"internal_idp_target":    "https://sso.redhat.com/auth/realms/internal",
+				"role_fallback_enabled": false,
+			}))
+			if err != nil {
+				t.Fatalf("failed to create mapper: %v", err)
+			}
+
+			result, err := disabled.Map(ctx, &service.MapperInput{
+				Subject: &trust.Result{
+					Claims: map[string]any{
+						"realm_access": map[string]any{
+							"roles": []any{"redhat:employees"},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result["by_role"] != false {
+				t.Errorf("expected by_role=false when fallback disabled, got %v", result["by_role"])
+			}
+		})
+	})
+
 	t.Run("simple static map", func(t *testing.T) {
 		mapper, err := NewCELMapper(`{"user": "alice", "role": "admin"}`)
 		if err != nil {
