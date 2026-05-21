@@ -214,21 +214,20 @@ func TestNewCredentialSource(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		typ    string
 		name   string
-		header string
+		spec   CredentialSourceSpec
 		want   CredentialSource
 	}{
-		{typ: "bearer", want: &BearerCredentialSource{}},
-		{typ: "cookie", name: "cs_jwt", want: &CookieCredentialSource{Name: "cs_jwt"}},
-		{typ: "query", name: "token", want: &QueryCredentialSource{Param: "token"}},
-		{typ: "cert", header: "x-forwarded-client-cert", want: &CertCredentialSource{Header: "x-forwarded-client-cert"}},
+		{name: "bearer", spec: CredentialSourceSpec{Type: CredentialSourceTypeBearer}, want: &BearerCredentialSource{}},
+		{name: "cookie", spec: CredentialSourceSpec{Type: CredentialSourceTypeCookie, Name: "cs_jwt"}, want: &CookieCredentialSource{Name: "cs_jwt"}},
+		{name: "query", spec: CredentialSourceSpec{Type: CredentialSourceTypeQuery, Name: "token"}, want: &QueryCredentialSource{Param: "token"}},
+		{name: "cert", spec: CredentialSourceSpec{Type: CredentialSourceTypeCert, Header: "x-forwarded-client-cert"}, want: &CertCredentialSource{Header: "x-forwarded-client-cert"}},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.typ, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := NewCredentialSource(tt.typ, tt.name, tt.header)
+			got, err := NewCredentialSource(tt.spec)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -256,9 +255,25 @@ func TestNewCredentialSource(t *testing.T) {
 		})
 	}
 
+	t.Run("missing type", func(t *testing.T) {
+		t.Parallel()
+		_, err := NewCredentialSource(CredentialSourceSpec{})
+		if err == nil {
+			t.Fatal("expected error for missing type")
+		}
+	})
+
+	t.Run("cookie without name", func(t *testing.T) {
+		t.Parallel()
+		_, err := NewCredentialSource(CredentialSourceSpec{Type: CredentialSourceTypeCookie})
+		if err == nil {
+			t.Fatal("expected error for cookie without name")
+		}
+	})
+
 	t.Run("unknown type", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewCredentialSource("header", "", "")
+		_, err := NewCredentialSource(CredentialSourceSpec{Type: "header"})
 		if err == nil {
 			t.Fatal("expected error for unknown type")
 		}

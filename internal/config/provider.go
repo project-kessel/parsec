@@ -392,10 +392,11 @@ func (p *Provider) AuthzServerCredentialSources() ([]server.CredentialSource, er
 
 	sources := make([]server.CredentialSource, 0, len(p.config.AuthzServer.CredentialSources))
 	for i, srcCfg := range p.config.AuthzServer.CredentialSources {
-		if err := validateCredentialSourceConfig(i, srcCfg); err != nil {
-			return nil, err
-		}
-		src, err := server.NewCredentialSource(srcCfg.Type, srcCfg.Name, srcCfg.Header)
+		src, err := server.NewCredentialSource(server.CredentialSourceSpec{
+			Type:   srcCfg.Type,
+			Name:   srcCfg.Name,
+			Header: srcCfg.Header,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("credential_sources[%d]: %w", i, err)
 		}
@@ -403,27 +404,4 @@ func (p *Provider) AuthzServerCredentialSources() ([]server.CredentialSource, er
 	}
 
 	return sources, nil
-}
-
-func validateCredentialSourceConfig(i int, src CredentialSourceConfig) error {
-	prefix := fmt.Sprintf("credential_sources[%d]", i)
-	if src.Type == "" {
-		return fmt.Errorf("%s: type is required", prefix)
-	}
-	switch src.Type {
-	case "bearer":
-		return nil
-	case "cookie", "query":
-		if src.Name == "" {
-			return fmt.Errorf("%s: name is required for type %q", prefix, src.Type)
-		}
-		return nil
-	case "cert":
-		if src.Header == "" {
-			return fmt.Errorf("%s: header is required for type %q", prefix, src.Type)
-		}
-		return nil
-	default:
-		return fmt.Errorf("%s: unknown type %q (allowed: bearer, cookie, cert, query)", prefix, src.Type)
-	}
 }
