@@ -214,9 +214,9 @@ func TestNewCredentialSource(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		spec   CredentialSourceSpec
-		want   CredentialSource
+		name string
+		spec CredentialSourceSpec
+		want CredentialSource
 	}{
 		{name: "bearer", spec: CredentialSourceSpec{Type: CredentialSourceTypeBearer}, want: &BearerCredentialSource{}},
 		{name: "cookie", spec: CredentialSourceSpec{Type: CredentialSourceTypeCookie, Name: "cs_jwt"}, want: &CookieCredentialSource{Name: "cs_jwt"}},
