@@ -208,9 +208,11 @@ func (m *CELMapper) createActivation(ctx context.Context, input *service.MapperI
 		}(),
 	}
 
-	if len(m.config) > 0 {
-		activation["config"] = m.config
+	cfg := m.config
+	if len(cfg) == 0 {
+		cfg = map[string]any{}
 	}
+	activation["config"] = cfg
 
 	return activation
 }
