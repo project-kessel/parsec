@@ -182,6 +182,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 				Key:   name,
 				Value: value,
 			},
+			AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
 		})
 	}
 
