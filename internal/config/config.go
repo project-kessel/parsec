@@ -61,7 +61,7 @@ func (c IdentityConfig) CELConfig() map[string]any {
 		roleFallback = *c.RoleFallbackEnabled
 	}
 	return map[string]any{
-		"internal_idp_target":    target,
+		"internal_idp_target":   target,
 		"role_fallback_enabled": roleFallback,
 	}
 }

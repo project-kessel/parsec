@@ -19,7 +19,7 @@ func TestIdentityConfig_CELConfig(t *testing.T) {
 			name:     "empty uses defaults",
 			identity: IdentityConfig{},
 			want: map[string]any{
-				"internal_idp_target":    defaultInternalIDPTarget,
+				"internal_idp_target":   defaultInternalIDPTarget,
 				"role_fallback_enabled": true,
 			},
 		},
@@ -29,7 +29,7 @@ func TestIdentityConfig_CELConfig(t *testing.T) {
 				InternalIDPTarget: "https://idp.example.com/realms/internal",
 			},
 			want: map[string]any{
-				"internal_idp_target":    "https://idp.example.com/realms/internal",
+				"internal_idp_target":   "https://idp.example.com/realms/internal",
 				"role_fallback_enabled": true,
 			},
 		},
@@ -39,7 +39,7 @@ func TestIdentityConfig_CELConfig(t *testing.T) {
 				RoleFallbackEnabled: boolPtr(false),
 			},
 			want: map[string]any{
-				"internal_idp_target":    defaultInternalIDPTarget,
+				"internal_idp_target":   defaultInternalIDPTarget,
 				"role_fallback_enabled": false,
 			},
 		},
@@ -49,18 +49,18 @@ func TestIdentityConfig_CELConfig(t *testing.T) {
 				RoleFallbackEnabled: boolPtr(true),
 			},
 			want: map[string]any{
-				"internal_idp_target":    defaultInternalIDPTarget,
+				"internal_idp_target":   defaultInternalIDPTarget,
 				"role_fallback_enabled": true,
 			},
 		},
 		{
 			name: "all fields set",
 			identity: IdentityConfig{
-				InternalIDPTarget:     "https://custom.internal/realm",
+				InternalIDPTarget:   "https://custom.internal/realm",
 				RoleFallbackEnabled: boolPtr(false),
 			},
 			want: map[string]any{
-				"internal_idp_target":    "https://custom.internal/realm",
+				"internal_idp_target":   "https://custom.internal/realm",
 				"role_fallback_enabled": false,
 			},
 		},

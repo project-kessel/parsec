@@ -120,7 +120,7 @@ func TestCELMapper_Map(t *testing.T) {
 			"target": config.internal_idp_target,
 			"fallback": config.role_fallback_enabled
 		}`, WithCELConfig(map[string]any{
-			"internal_idp_target":    "https://idp.example.com/internal",
+			"internal_idp_target":   "https://idp.example.com/internal",
 			"role_fallback_enabled": false,
 		}))
 		if err != nil {
@@ -146,7 +146,7 @@ func TestCELMapper_Map(t *testing.T) {
 			"by_role": config.role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") : false
 		}`
 		mapper, err := NewCELMapper(script, WithCELConfig(map[string]any{
-			"internal_idp_target":    "https://sso.redhat.com/auth/realms/internal",
+			"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
 			"role_fallback_enabled": true,
 		}))
 		if err != nil {
@@ -189,7 +189,7 @@ func TestCELMapper_Map(t *testing.T) {
 
 		t.Run("role fallback disabled", func(t *testing.T) {
 			disabled, err := NewCELMapper(script, WithCELConfig(map[string]any{
-				"internal_idp_target":    "https://sso.redhat.com/auth/realms/internal",
+				"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
 				"role_fallback_enabled": false,
 			}))
 			if err != nil {
