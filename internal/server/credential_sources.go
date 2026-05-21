@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"strings"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 
@@ -17,22 +16,6 @@ const (
 	CredentialSourceTypeQuery  = "query"
 )
 
-var credentialSourceTypes = []string{
-	CredentialSourceTypeBearer,
-	CredentialSourceTypeCookie,
-	CredentialSourceTypeCert,
-	CredentialSourceTypeQuery,
-}
-
-// CredentialSourceSpec configures a credential extraction source.
-type CredentialSourceSpec struct {
-	Name          string // unique credential source name
-	Type          string
-	CookieName    string
-	ParameterName string
-	Header        string // HTTP header for cert extraction
-}
-
 // CredentialSource extracts a subject credential from an ext_authz CheckRequest.
 type CredentialSource interface {
 	Extract(req *authv3.CheckRequest) (*CredentialExtraction, error)
@@ -45,37 +28,6 @@ type CredentialExtraction struct {
 	HeaderSets          map[string]string // header names to set/override on the upstream request
 	QueryParamsToRemove []string          // query parameter names to remove before forwarding upstream
 	SourceName          string // configured credential source name
-}
-
-// NewCredentialSource builds a configured credential source implementation.
-func NewCredentialSource(spec CredentialSourceSpec) (CredentialSource, error) {
-	if spec.Name == "" {
-		return nil, fmt.Errorf("name is required")
-	}
-	if spec.Type == "" {
-		return nil, fmt.Errorf("type is required")
-	}
-	switch spec.Type {
-	case CredentialSourceTypeBearer:
-		return &BearerCredentialSource{SourceName: spec.Name}, nil
-	case CredentialSourceTypeCookie:
-		if spec.CookieName == "" {
-			return nil, fmt.Errorf("cookie_name is required for type %q", spec.Type)
-		}
-		return &CookieCredentialSource{SourceName: spec.Name, CookieName: spec.CookieName}, nil
-	case CredentialSourceTypeQuery:
-		if spec.ParameterName == "" {
-			return nil, fmt.Errorf("parameter_name is required for type %q", spec.Type)
-		}
-		return &QueryCredentialSource{SourceName: spec.Name, ParameterName: spec.ParameterName}, nil
-	case CredentialSourceTypeCert:
-		if spec.Header == "" {
-			return nil, fmt.Errorf("header is required for type %q", spec.Type)
-		}
-		return &CertCredentialSource{SourceName: spec.Name, Header: spec.Header}, nil
-	default:
-		return nil, fmt.Errorf("unknown type %q (allowed: %s)", spec.Type, strings.Join(credentialSourceTypes, ", "))
-	}
 }
 
 func defaultCredentialSources() []CredentialSource {

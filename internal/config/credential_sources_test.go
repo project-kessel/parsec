@@ -1,0 +1,86 @@
+package config
+
+import (
+	"testing"
+
+	"github.com/project-kessel/parsec/internal/server"
+)
+
+func Test_newCredentialSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  CredentialSourceConfig
+		want server.CredentialSource
+	}{
+		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "bearer"}, want: &server.BearerCredentialSource{SourceName: "authorization-bearer"}},
+		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"}, want: &server.CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}},
+		{name: "query", cfg: CredentialSourceConfig{Name: "query-token", Type: "query", ParameterName: "token"}, want: &server.QueryCredentialSource{SourceName: "query-token", ParameterName: "token"}},
+		{name: "cert", cfg: CredentialSourceConfig{Name: "forwarded-client-cert", Type: "cert", Header: "x-forwarded-client-cert"}, want: &server.CertCredentialSource{SourceName: "forwarded-client-cert", Header: "x-forwarded-client-cert"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := newCredentialSource(tt.cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			switch want := tt.want.(type) {
+			case *server.BearerCredentialSource:
+				gotBearer, ok := got.(*server.BearerCredentialSource)
+				if !ok || gotBearer.SourceName != want.SourceName {
+					t.Fatalf("got %+v, want %+v", got, want)
+				}
+			case *server.CookieCredentialSource:
+				gotCookie, ok := got.(*server.CookieCredentialSource)
+				if !ok || gotCookie.SourceName != want.SourceName || gotCookie.CookieName != want.CookieName {
+					t.Fatalf("got %+v, want %+v", got, want)
+				}
+			case *server.QueryCredentialSource:
+				gotQuery, ok := got.(*server.QueryCredentialSource)
+				if !ok || gotQuery.SourceName != want.SourceName || gotQuery.ParameterName != want.ParameterName {
+					t.Fatalf("got %+v, want %+v", got, want)
+				}
+			case *server.CertCredentialSource:
+				gotCert, ok := got.(*server.CertCredentialSource)
+				if !ok || gotCert.SourceName != want.SourceName || gotCert.Header != want.Header {
+					t.Fatalf("got %+v, want %+v", got, want)
+				}
+			}
+		})
+	}
+
+	t.Run("missing name", func(t *testing.T) {
+		t.Parallel()
+		_, err := newCredentialSource(CredentialSourceConfig{Type: "bearer"})
+		if err == nil {
+			t.Fatal("expected error for missing name")
+		}
+	})
+
+	t.Run("missing type", func(t *testing.T) {
+		t.Parallel()
+		_, err := newCredentialSource(CredentialSourceConfig{Name: "x"})
+		if err == nil {
+			t.Fatal("expected error for missing type")
+		}
+	})
+
+	t.Run("cookie without cookie_name", func(t *testing.T) {
+		t.Parallel()
+		_, err := newCredentialSource(CredentialSourceConfig{Name: "cookie", Type: "cookie"})
+		if err == nil {
+			t.Fatal("expected error for cookie without cookie_name")
+		}
+	})
+
+	t.Run("unknown type", func(t *testing.T) {
+		t.Parallel()
+		_, err := newCredentialSource(CredentialSourceConfig{Name: "x", Type: "header"})
+		if err == nil {
+			t.Fatal("expected error for unknown type")
+		}
+	})
+}
