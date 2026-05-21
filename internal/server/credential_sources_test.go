@@ -32,18 +32,18 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.sourceType != "bearer" {
-			t.Fatalf("expected bearer, got %q", ext.sourceType)
+		if ext.SourceType != "bearer" {
+			t.Fatalf("expected bearer, got %q", ext.SourceType)
 		}
-		bearer, ok := ext.credential.(*trust.BearerCredential)
+		bearer, ok := ext.Credential.(*trust.BearerCredential)
 		if !ok {
-			t.Fatalf("expected BearerCredential, got %T", ext.credential)
+			t.Fatalf("expected BearerCredential, got %T", ext.Credential)
 		}
 		if bearer.Token != "jwt-token" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
-		if len(ext.headers) != 1 || ext.headers[0] != "authorization" {
-			t.Fatalf("unexpected headers: %v", ext.headers)
+		if len(ext.Headers) != 1 || ext.Headers[0] != "authorization" {
+			t.Fatalf("unexpected headers: %v", ext.Headers)
 		}
 	})
 
@@ -55,7 +55,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		bearer := ext.credential.(*trust.BearerCredential)
+		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "jwt-token" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
@@ -63,77 +63,77 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{{Type: "cookie", Name: "cs_jwt"}}
+		sources := []CredentialSource{&CookieCredentialSource{Name: "cs_jwt"}}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"cookie": "session=abc; cs_jwt=cookie-jwt; other=1",
 		}, "/"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.sourceType != "cookie" {
-			t.Fatalf("expected cookie, got %q", ext.sourceType)
+		if ext.SourceType != "cookie" {
+			t.Fatalf("expected cookie, got %q", ext.SourceType)
 		}
-		bearer := ext.credential.(*trust.BearerCredential)
+		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "cookie-jwt" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
-		if len(ext.headers) != 0 {
-			t.Fatalf("expected no header removals, got %v", ext.headers)
+		if len(ext.Headers) != 0 {
+			t.Fatalf("expected no header removals, got %v", ext.Headers)
 		}
-		if ext.headerSets["cookie"] != "session=abc; other=1" {
-			t.Fatalf("expected sanitized cookie header, got %q", ext.headerSets["cookie"])
+		if ext.HeaderSets["cookie"] != "session=abc; other=1" {
+			t.Fatalf("expected sanitized cookie header, got %q", ext.HeaderSets["cookie"])
 		}
 	})
 
 	t.Run("cookie only credential is removed entirely", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{{Type: "cookie", Name: "cs_jwt"}}
+		sources := []CredentialSource{&CookieCredentialSource{Name: "cs_jwt"}}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
 		}, "/"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(ext.headers) != 1 || ext.headers[0] != "cookie" {
-			t.Fatalf("expected cookie header removal, got %v", ext.headers)
+		if len(ext.Headers) != 1 || ext.Headers[0] != "cookie" {
+			t.Fatalf("expected cookie header removal, got %v", ext.Headers)
 		}
-		if len(ext.headerSets) != 0 {
-			t.Fatalf("expected no header overrides, got %v", ext.headerSets)
+		if len(ext.HeaderSets) != 0 {
+			t.Fatalf("expected no header overrides, got %v", ext.HeaderSets)
 		}
 	})
 
 	t.Run("query", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{{Type: "query", Name: "token"}}
+		sources := []CredentialSource{&QueryCredentialSource{Param: "token"}}
 		ext, err := extractCredentialFromSources(makeReq(nil, "/api?token=query-jwt&foo=bar"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.sourceType != "query" {
-			t.Fatalf("expected query, got %q", ext.sourceType)
+		if ext.SourceType != "query" {
+			t.Fatalf("expected query, got %q", ext.SourceType)
 		}
-		bearer := ext.credential.(*trust.BearerCredential)
+		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "query-jwt" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
-		if len(ext.queryParamsToRemove) != 1 || ext.queryParamsToRemove[0] != "token" {
-			t.Fatalf("expected token query param removal, got %v", ext.queryParamsToRemove)
+		if len(ext.QueryParamsToRemove) != 1 || ext.QueryParamsToRemove[0] != "token" {
+			t.Fatalf("expected token query param removal, got %v", ext.QueryParamsToRemove)
 		}
 	})
 
 	t.Run("cert from x-forwarded-client-cert", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{{Type: "cert", Header: "x-forwarded-client-cert"}}
+		sources := []CredentialSource{&CertCredentialSource{Header: "x-forwarded-client-cert"}}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"x-forwarded-client-cert": "By=spiffe://example/ns/default/sa/app;Hash=abc",
 		}, "/"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.sourceType != "cert" {
-			t.Fatalf("expected cert, got %q", ext.sourceType)
+		if ext.SourceType != "cert" {
+			t.Fatalf("expected cert, got %q", ext.SourceType)
 		}
-		bearer := ext.credential.(*trust.BearerCredential)
+		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token == "" {
 			t.Fatal("expected cert material in credential")
 		}
@@ -141,7 +141,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cert does not fall back to x-rh-certauth-cn", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{{Type: "cert", Header: "x-forwarded-client-cert"}}
+		sources := []CredentialSource{&CertCredentialSource{Header: "x-forwarded-client-cert"}}
 		_, err := extractCredentialFromSources(makeReq(map[string]string{
 			"x-rh-certauth-cn": "must-not-use",
 		}, "/"), sources)
@@ -153,8 +153,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("first matching source wins", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{
-			{Type: "bearer"},
-			{Type: "cookie", Name: "cs_jwt"},
+			&BearerCredentialSource{},
+			&CookieCredentialSource{Name: "cs_jwt"},
 		}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"authorization": "Bearer header-jwt",
@@ -163,10 +163,10 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.sourceType != "bearer" {
-			t.Fatalf("expected bearer first, got %q", ext.sourceType)
+		if ext.SourceType != "bearer" {
+			t.Fatalf("expected bearer first, got %q", ext.SourceType)
 		}
-		bearer := ext.credential.(*trust.BearerCredential)
+		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "header-jwt" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
@@ -175,8 +175,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("falls through to second source", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{
-			{Type: "bearer"},
-			{Type: "cookie", Name: "cs_jwt"},
+			&BearerCredentialSource{},
+			&CookieCredentialSource{Name: "cs_jwt"},
 		}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
@@ -184,8 +184,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.sourceType != "cookie" {
-			t.Fatalf("expected cookie, got %q", ext.sourceType)
+		if ext.SourceType != "cookie" {
+			t.Fatalf("expected cookie, got %q", ext.SourceType)
 		}
 	})
 
@@ -202,7 +202,65 @@ func TestNewAuthzServer_defaultCredentialSources(t *testing.T) {
 	t.Parallel()
 
 	srv := NewAuthzServer(nil, nil, nil, nil)
-	if len(srv.credentialSources) != 1 || srv.credentialSources[0].Type != "bearer" {
-		t.Fatalf("expected default bearer source, got %+v", srv.credentialSources)
+	if len(srv.credentialSources) != 1 {
+		t.Fatalf("expected one default source, got %d", len(srv.credentialSources))
 	}
+	if _, ok := srv.credentialSources[0].(*BearerCredentialSource); !ok {
+		t.Fatalf("expected default bearer source, got %T", srv.credentialSources[0])
+	}
+}
+
+func TestNewCredentialSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		typ    string
+		name   string
+		header string
+		want   CredentialSource
+	}{
+		{typ: "bearer", want: &BearerCredentialSource{}},
+		{typ: "cookie", name: "cs_jwt", want: &CookieCredentialSource{Name: "cs_jwt"}},
+		{typ: "query", name: "token", want: &QueryCredentialSource{Param: "token"}},
+		{typ: "cert", header: "x-forwarded-client-cert", want: &CertCredentialSource{Header: "x-forwarded-client-cert"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.typ, func(t *testing.T) {
+			t.Parallel()
+			got, err := NewCredentialSource(tt.typ, tt.name, tt.header)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			switch want := tt.want.(type) {
+			case *BearerCredentialSource:
+				if _, ok := got.(*BearerCredentialSource); !ok {
+					t.Fatalf("got %T, want *BearerCredentialSource", got)
+				}
+			case *CookieCredentialSource:
+				gotCookie, ok := got.(*CookieCredentialSource)
+				if !ok || gotCookie.Name != want.Name {
+					t.Fatalf("got %+v, want %+v", got, want)
+				}
+			case *QueryCredentialSource:
+				gotQuery, ok := got.(*QueryCredentialSource)
+				if !ok || gotQuery.Param != want.Param {
+					t.Fatalf("got %+v, want %+v", got, want)
+				}
+			case *CertCredentialSource:
+				gotCert, ok := got.(*CertCredentialSource)
+				if !ok || gotCert.Header != want.Header {
+					t.Fatalf("got %+v, want %+v", got, want)
+				}
+			}
+		})
+	}
+
+	t.Run("unknown type", func(t *testing.T) {
+		t.Parallel()
+		_, err := NewCredentialSource("header", "", "")
+		if err == nil {
+			t.Fatal("expected error for unknown type")
+		}
+	})
 }

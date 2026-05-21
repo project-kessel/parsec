@@ -395,11 +395,11 @@ func (p *Provider) AuthzServerCredentialSources() ([]server.CredentialSource, er
 		if err := validateCredentialSourceConfig(i, srcCfg); err != nil {
 			return nil, err
 		}
-		sources = append(sources, server.CredentialSource{
-			Type:   srcCfg.Type,
-			Name:   srcCfg.Name,
-			Header: srcCfg.Header,
-		})
+		src, err := server.NewCredentialSource(srcCfg.Type, srcCfg.Name, srcCfg.Header)
+		if err != nil {
+			return nil, fmt.Errorf("credential_sources[%d]: %w", i, err)
+		}
+		sources = append(sources, src)
 	}
 
 	return sources, nil

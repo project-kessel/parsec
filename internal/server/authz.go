@@ -134,11 +134,11 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
-	p.SubjectCredentialExtracted(ext.credential, ext.headers)
+	p.SubjectCredentialExtracted(ext.Credential, ext.Headers)
 
 	// 5. Validate subject credentials against filtered trust store
 	// The filtered store only includes validators the actor is allowed to use
-	result, err := filteredStore.Validate(ctx, ext.credential)
+	result, err := filteredStore.Validate(ctx, ext.Credential)
 	if err != nil {
 		p.SubjectValidationFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", err)), nil
@@ -156,7 +156,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		Actor:                actor,
 		RequestAttributes:    reqAttrs,
 		TokenTypes:           tokenTypes,
-		CredentialSourceType: ext.sourceType,
+		CredentialSourceType: ext.SourceType,
 		// TODO: Get scope from configuration or request
 		Scope: "",
 	})
@@ -165,7 +165,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	// 7. Build response headers from issued tokens and credential sanitization
-	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.headerSets))
+	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.HeaderSets))
 	for _, spec := range s.TokenTypesToIssue {
 		if token, ok := issuedTokens[spec.Type]; ok {
 			responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
@@ -176,7 +176,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			})
 		}
 	}
-	for name, value := range ext.headerSets {
+	for name, value := range ext.HeaderSets {
 		responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
 				Key:   name,
@@ -196,9 +196,9 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			OkResponse: &authv3.OkHttpResponse{
 				Headers: responseHeaders,
 				// Remove external credential headers - security boundary
-				HeadersToRemove: ext.headers,
+				HeadersToRemove: ext.Headers,
 				// Remove credential query parameters before forwarding upstream
-				QueryParametersToRemove: ext.queryParamsToRemove,
+				QueryParametersToRemove: ext.QueryParamsToRemove,
 			},
 		},
 	}, nil
