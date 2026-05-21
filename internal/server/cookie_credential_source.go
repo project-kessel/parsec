@@ -11,7 +11,8 @@ import (
 
 // CookieCredentialSource extracts a bearer token from a named cookie.
 type CookieCredentialSource struct {
-	Name string
+	SourceName string
+	CookieName string
 }
 
 func (s *CookieCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExtraction, error) {
@@ -20,7 +21,7 @@ func (s *CookieCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialE
 		return nil, err
 	}
 
-	name := s.Name
+	name := s.CookieName
 	if name == "" {
 		name = "cs_jwt"
 	}
@@ -37,7 +38,7 @@ func (s *CookieCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialE
 
 	ext := &CredentialExtraction{
 		Credential: &trust.BearerCredential{Token: token},
-		SourceType: CredentialSourceTypeCookie,
+		SourceType: s.sourceName(),
 	}
 	sanitized := sanitizeCookieHeader(cookieHeader, name)
 	if sanitized == "" {
@@ -46,6 +47,13 @@ func (s *CookieCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialE
 		ext.HeaderSets = map[string]string{"cookie": sanitized}
 	}
 	return ext, nil
+}
+
+func (s *CookieCredentialSource) sourceName() string {
+	if s.SourceName != "" {
+		return s.SourceName
+	}
+	return CredentialSourceTypeCookie
 }
 
 func cookieValue(cookieHeader, name string) (string, bool) {

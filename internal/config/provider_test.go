@@ -9,10 +9,10 @@ func TestProvider_AuthzServerCredentialSources(t *testing.T) {
 	t.Parallel()
 
 	valid := []CredentialSourceConfig{
-		{Type: "bearer"},
-		{Type: "cookie", Name: "cs_jwt"},
-		{Type: "cert", Header: "x-forwarded-client-cert"},
-		{Type: "query", Name: "token"},
+		{Name: "authorization-bearer", Type: "bearer"},
+		{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"},
+		{Name: "forwarded-client-cert", Type: "cert", Header: "x-forwarded-client-cert"},
+		{Name: "query-token", Type: "query", ParameterName: "token"},
 	}
 
 	tests := []struct {
@@ -29,28 +29,41 @@ func TestProvider_AuthzServerCredentialSources(t *testing.T) {
 			sources: valid,
 		},
 		{
+			name:    "missing source name",
+			sources: []CredentialSourceConfig{{Type: "bearer"}},
+			wantErr: "credential_sources[0]: name is required",
+		},
+		{
+			name: "duplicate source name",
+			sources: []CredentialSourceConfig{
+				{Name: "bearer-a", Type: "bearer"},
+				{Name: "bearer-a", Type: "bearer"},
+			},
+			wantErr: "duplicate credential source name: bearer-a",
+		},
+		{
 			name:    "missing type",
 			sources: []CredentialSourceConfig{{Name: "x"}},
 			wantErr: "credential_sources[0]: type is required",
 		},
 		{
 			name:    "unknown type",
-			sources: []CredentialSourceConfig{{Type: "header"}},
+			sources: []CredentialSourceConfig{{Name: "x", Type: "header"}},
 			wantErr: `unknown type "header"`,
 		},
 		{
-			name:    "cookie without name",
-			sources: []CredentialSourceConfig{{Type: "cookie"}},
-			wantErr: `name is required for type "cookie"`,
+			name:    "cookie without cookie_name",
+			sources: []CredentialSourceConfig{{Name: "cookie", Type: "cookie"}},
+			wantErr: `cookie_name is required for type "cookie"`,
 		},
 		{
-			name:    "query without name",
-			sources: []CredentialSourceConfig{{Type: "query"}},
-			wantErr: `name is required for type "query"`,
+			name:    "query without parameter_name",
+			sources: []CredentialSourceConfig{{Name: "query", Type: "query"}},
+			wantErr: `parameter_name is required for type "query"`,
 		},
 		{
 			name:    "cert without header",
-			sources: []CredentialSourceConfig{{Type: "cert"}},
+			sources: []CredentialSourceConfig{{Name: "cert", Type: "cert"}},
 			wantErr: `header is required for type "cert"`,
 		},
 	}

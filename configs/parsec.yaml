@@ -65,13 +65,17 @@ issuers:
 # Authorization server configuration (ext_authz)
 authz_server:
   credential_sources:
-    - type: bearer    # Authorization: Bearer header (default when omitted)
-    - type: cookie    # cs_jwt cookie
-      name: cs_jwt
-    - type: cert      # X-Forwarded-Client-Cert header
+    - name: authorization-bearer
+      type: bearer    # Authorization: Bearer header
+    - name: cs-jwt-cookie
+      type: cookie
+      cookie_name: cs_jwt
+    - name: forwarded-client-cert
+      type: cert
       header: x-forwarded-client-cert
-    - type: query     # ?token= query param
-      name: token
+    - name: query-token
+      type: query
+      parameter_name: token
   token_types:
     - type: "urn:ietf:params:oauth:token-type:txn_token"
       header_name: "Transaction-Token"

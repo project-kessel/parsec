@@ -12,7 +12,8 @@ import (
 // CertCredentialSource extracts client certificate material from an HTTP header
 // (for example x-forwarded-client-cert set by Envoy).
 type CertCredentialSource struct {
-	Header string
+	SourceName string
+	Header     string
 }
 
 func (s *CertCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExtraction, error) {
@@ -35,6 +36,13 @@ func (s *CertCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExt
 	return &CredentialExtraction{
 		Credential: &trust.BearerCredential{Token: certHeader},
 		Headers:    []string{header},
-		SourceType: CredentialSourceTypeCert,
+		SourceType: s.sourceName(),
 	}, nil
+}
+
+func (s *CertCredentialSource) sourceName() string {
+	if s.SourceName != "" {
+		return s.SourceName
+	}
+	return CredentialSourceTypeCert
 }

@@ -10,7 +10,9 @@ import (
 )
 
 // BearerCredentialSource extracts a bearer token from the Authorization header.
-type BearerCredentialSource struct{}
+type BearerCredentialSource struct {
+	SourceName string
+}
 
 func (s *BearerCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExtraction, error) {
 	headers, _, err := httpRequestFromCheck(req)
@@ -31,6 +33,13 @@ func (s *BearerCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialE
 	return &CredentialExtraction{
 		Credential: &trust.BearerCredential{Token: token},
 		Headers:    []string{"authorization"},
-		SourceType: CredentialSourceTypeBearer,
+		SourceType: s.sourceName(),
 	}, nil
+}
+
+func (s *BearerCredentialSource) sourceName() string {
+	if s.SourceName != "" {
+		return s.SourceName
+	}
+	return CredentialSourceTypeBearer
 }

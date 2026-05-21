@@ -31,7 +31,7 @@ type IssueContext struct {
 	// DataSourceRegistry provides access to data sources for lazy fetching
 	DataSourceRegistry *DataSourceRegistry
 
-	// CredentialSourceType is how the subject credential was extracted (bearer, cookie, cert, query)
+	// CredentialSourceType is the configured credential source name that matched
 	CredentialSourceType string
 }
 

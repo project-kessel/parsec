@@ -63,15 +63,15 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{&CookieCredentialSource{Name: "cs_jwt"}}
+		sources := []CredentialSource{&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"cookie": "session=abc; cs_jwt=cookie-jwt; other=1",
 		}, "/"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "cookie" {
-			t.Fatalf("expected cookie, got %q", ext.SourceType)
+		if ext.SourceType != "cs-jwt-cookie" {
+			t.Fatalf("expected cs-jwt-cookie, got %q", ext.SourceType)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "cookie-jwt" {
@@ -87,7 +87,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie only credential is removed entirely", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{&CookieCredentialSource{Name: "cs_jwt"}}
+		sources := []CredentialSource{&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
 		}, "/"), sources)
@@ -104,13 +104,13 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{&QueryCredentialSource{Param: "token"}}
+		sources := []CredentialSource{&QueryCredentialSource{SourceName: "query-token", ParameterName: "token"}}
 		ext, err := extractCredentialFromSources(makeReq(nil, "/api?token=query-jwt&foo=bar"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "query" {
-			t.Fatalf("expected query, got %q", ext.SourceType)
+		if ext.SourceType != "query-token" {
+			t.Fatalf("expected query-token, got %q", ext.SourceType)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "query-jwt" {
@@ -123,15 +123,15 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cert from x-forwarded-client-cert", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{&CertCredentialSource{Header: "x-forwarded-client-cert"}}
+		sources := []CredentialSource{&CertCredentialSource{SourceName: "forwarded-client-cert", Header: "x-forwarded-client-cert"}}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"x-forwarded-client-cert": "By=spiffe://example/ns/default/sa/app;Hash=abc",
 		}, "/"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "cert" {
-			t.Fatalf("expected cert, got %q", ext.SourceType)
+		if ext.SourceType != "forwarded-client-cert" {
+			t.Fatalf("expected forwarded-client-cert, got %q", ext.SourceType)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token == "" {
@@ -141,7 +141,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cert does not fall back to x-rh-certauth-cn", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{&CertCredentialSource{Header: "x-forwarded-client-cert"}}
+		sources := []CredentialSource{&CertCredentialSource{SourceName: "forwarded-client-cert", Header: "x-forwarded-client-cert"}}
 		_, err := extractCredentialFromSources(makeReq(map[string]string{
 			"x-rh-certauth-cn": "must-not-use",
 		}, "/"), sources)
@@ -153,8 +153,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("first matching source wins", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{
-			&BearerCredentialSource{},
-			&CookieCredentialSource{Name: "cs_jwt"},
+			&BearerCredentialSource{SourceName: "authorization-bearer"},
+			&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"},
 		}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"authorization": "Bearer header-jwt",
@@ -163,8 +163,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "bearer" {
-			t.Fatalf("expected bearer first, got %q", ext.SourceType)
+		if ext.SourceType != "authorization-bearer" {
+			t.Fatalf("expected authorization-bearer first, got %q", ext.SourceType)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "header-jwt" {
@@ -175,8 +175,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("falls through to second source", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{
-			&BearerCredentialSource{},
-			&CookieCredentialSource{Name: "cs_jwt"},
+			&BearerCredentialSource{SourceName: "authorization-bearer"},
+			&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"},
 		}
 		ext, err := extractCredentialFromSources(makeReq(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
@@ -184,8 +184,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "cookie" {
-			t.Fatalf("expected cookie, got %q", ext.SourceType)
+		if ext.SourceType != "cs-jwt-cookie" {
+			t.Fatalf("expected cs-jwt-cookie, got %q", ext.SourceType)
 		}
 	})
 
@@ -218,10 +218,10 @@ func TestNewCredentialSource(t *testing.T) {
 		spec CredentialSourceSpec
 		want CredentialSource
 	}{
-		{name: "bearer", spec: CredentialSourceSpec{Type: CredentialSourceTypeBearer}, want: &BearerCredentialSource{}},
-		{name: "cookie", spec: CredentialSourceSpec{Type: CredentialSourceTypeCookie, Name: "cs_jwt"}, want: &CookieCredentialSource{Name: "cs_jwt"}},
-		{name: "query", spec: CredentialSourceSpec{Type: CredentialSourceTypeQuery, Name: "token"}, want: &QueryCredentialSource{Param: "token"}},
-		{name: "cert", spec: CredentialSourceSpec{Type: CredentialSourceTypeCert, Header: "x-forwarded-client-cert"}, want: &CertCredentialSource{Header: "x-forwarded-client-cert"}},
+		{name: "bearer", spec: CredentialSourceSpec{Name: "authorization-bearer", Type: CredentialSourceTypeBearer}, want: &BearerCredentialSource{SourceName: "authorization-bearer"}},
+		{name: "cookie", spec: CredentialSourceSpec{Name: "cs-jwt-cookie", Type: CredentialSourceTypeCookie, CookieName: "cs_jwt"}, want: &CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}},
+		{name: "query", spec: CredentialSourceSpec{Name: "query-token", Type: CredentialSourceTypeQuery, ParameterName: "token"}, want: &QueryCredentialSource{SourceName: "query-token", ParameterName: "token"}},
+		{name: "cert", spec: CredentialSourceSpec{Name: "forwarded-client-cert", Type: CredentialSourceTypeCert, Header: "x-forwarded-client-cert"}, want: &CertCredentialSource{SourceName: "forwarded-client-cert", Header: "x-forwarded-client-cert"}},
 	}
 
 	for _, tt := range tests {
@@ -233,41 +233,50 @@ func TestNewCredentialSource(t *testing.T) {
 			}
 			switch want := tt.want.(type) {
 			case *BearerCredentialSource:
-				if _, ok := got.(*BearerCredentialSource); !ok {
-					t.Fatalf("got %T, want *BearerCredentialSource", got)
+				gotBearer, ok := got.(*BearerCredentialSource)
+				if !ok || gotBearer.SourceName != want.SourceName {
+					t.Fatalf("got %+v, want %+v", got, want)
 				}
 			case *CookieCredentialSource:
 				gotCookie, ok := got.(*CookieCredentialSource)
-				if !ok || gotCookie.Name != want.Name {
+				if !ok || gotCookie.SourceName != want.SourceName || gotCookie.CookieName != want.CookieName {
 					t.Fatalf("got %+v, want %+v", got, want)
 				}
 			case *QueryCredentialSource:
 				gotQuery, ok := got.(*QueryCredentialSource)
-				if !ok || gotQuery.Param != want.Param {
+				if !ok || gotQuery.SourceName != want.SourceName || gotQuery.ParameterName != want.ParameterName {
 					t.Fatalf("got %+v, want %+v", got, want)
 				}
 			case *CertCredentialSource:
 				gotCert, ok := got.(*CertCredentialSource)
-				if !ok || gotCert.Header != want.Header {
+				if !ok || gotCert.SourceName != want.SourceName || gotCert.Header != want.Header {
 					t.Fatalf("got %+v, want %+v", got, want)
 				}
 			}
 		})
 	}
 
+	t.Run("missing name", func(t *testing.T) {
+		t.Parallel()
+		_, err := NewCredentialSource(CredentialSourceSpec{Type: CredentialSourceTypeBearer})
+		if err == nil {
+			t.Fatal("expected error for missing name")
+		}
+	})
+
 	t.Run("missing type", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewCredentialSource(CredentialSourceSpec{})
+		_, err := NewCredentialSource(CredentialSourceSpec{Name: "x"})
 		if err == nil {
 			t.Fatal("expected error for missing type")
 		}
 	})
 
-	t.Run("cookie without name", func(t *testing.T) {
+	t.Run("cookie without cookie_name", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewCredentialSource(CredentialSourceSpec{Type: CredentialSourceTypeCookie})
+		_, err := NewCredentialSource(CredentialSourceSpec{Name: "cookie", Type: CredentialSourceTypeCookie})
 		if err == nil {
-			t.Fatal("expected error for cookie without name")
+			t.Fatal("expected error for cookie without cookie_name")
 		}
 	})
 

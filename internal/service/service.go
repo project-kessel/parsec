@@ -61,7 +61,7 @@ type IssueRequest struct {
 	// Scope for the tokens
 	Scope string
 
-	// CredentialSourceType is how the subject credential was extracted (bearer, cookie, cert, query)
+	// CredentialSourceType is the configured credential source name that matched
 	CredentialSourceType string
 }
 

@@ -391,11 +391,22 @@ func (p *Provider) AuthzServerCredentialSources() ([]server.CredentialSource, er
 	}
 
 	sources := make([]server.CredentialSource, 0, len(p.config.AuthzServer.CredentialSources))
+	seen := make(map[string]struct{}, len(p.config.AuthzServer.CredentialSources))
 	for i, srcCfg := range p.config.AuthzServer.CredentialSources {
+		if srcCfg.Name == "" {
+			return nil, fmt.Errorf("credential_sources[%d]: name is required", i)
+		}
+		if _, exists := seen[srcCfg.Name]; exists {
+			return nil, fmt.Errorf("duplicate credential source name: %s", srcCfg.Name)
+		}
+		seen[srcCfg.Name] = struct{}{}
+
 		src, err := server.NewCredentialSource(server.CredentialSourceSpec{
-			Type:   srcCfg.Type,
-			Name:   srcCfg.Name,
-			Header: srcCfg.Header,
+			Name:          srcCfg.Name,
+			Type:          srcCfg.Type,
+			CookieName:    srcCfg.CookieName,
+			ParameterName: srcCfg.ParameterName,
+			Header:        srcCfg.Header,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("credential_sources[%d]: %w", i, err)

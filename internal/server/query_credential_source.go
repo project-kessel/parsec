@@ -11,7 +11,8 @@ import (
 
 // QueryCredentialSource extracts a bearer token from a query parameter.
 type QueryCredentialSource struct {
-	Param string
+	SourceName    string
+	ParameterName string
 }
 
 func (s *QueryCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExtraction, error) {
@@ -20,7 +21,7 @@ func (s *QueryCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialEx
 		return nil, err
 	}
 
-	param := s.Param
+	param := s.ParameterName
 	if param == "" {
 		param = "token"
 	}
@@ -42,6 +43,13 @@ func (s *QueryCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialEx
 	return &CredentialExtraction{
 		Credential:          &trust.BearerCredential{Token: token},
 		QueryParamsToRemove: []string{param},
-		SourceType:          CredentialSourceTypeQuery,
+		SourceType:          s.sourceName(),
 	}, nil
+}
+
+func (s *QueryCredentialSource) sourceName() string {
+	if s.SourceName != "" {
+		return s.SourceName
+	}
+	return CredentialSourceTypeQuery
 }

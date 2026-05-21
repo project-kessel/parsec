@@ -57,13 +57,19 @@ type AuthzServerConfig struct {
 
 // CredentialSourceConfig configures a credential extraction location for ext_authz
 type CredentialSourceConfig struct {
+	// Name uniquely identifies this credential source (multiple sources may share a type)
+	Name string `koanf:"name"`
+
 	// Type is the source kind: bearer, cookie, cert, query
 	Type string `koanf:"type"`
 
-	// Name is the cookie or query parameter name (cookie, query types)
-	Name string `koanf:"name"`
+	// CookieName is the cookie to read (cookie type)
+	CookieName string `koanf:"cookie_name"`
 
-	// Header is the HTTP header for cert extraction (default: x-forwarded-client-cert)
+	// ParameterName is the query parameter to read (query type)
+	ParameterName string `koanf:"parameter_name"`
+
+	// Header is the HTTP header for cert extraction (cert type)
 	Header string `koanf:"header"`
 }
 
