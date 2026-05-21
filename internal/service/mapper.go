@@ -54,6 +54,6 @@ type MapperInput struct {
 	// DataSourceInput is the input to use when fetching from data sources
 	DataSourceInput *DataSourceInput
 
-	// CredentialSourceType is the configured credential source name that matched
-	CredentialSourceType string
+	// CredentialSourceName is the configured credential source name that matched
+	CredentialSourceName string
 }

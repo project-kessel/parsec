@@ -9,7 +9,7 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// Credential source type strings used in config and CredentialExtraction.SourceType.
+// Credential source type strings used in config.
 const (
 	CredentialSourceTypeBearer = "bearer"
 	CredentialSourceTypeCookie = "cookie"
@@ -44,7 +44,7 @@ type CredentialExtraction struct {
 	Headers             []string          // header names to remove entirely
 	HeaderSets          map[string]string // header names to set/override on the upstream request
 	QueryParamsToRemove []string          // query parameter names to remove before forwarding upstream
-	SourceType          string // configured credential source name
+	SourceName          string // configured credential source name
 }
 
 // NewCredentialSource builds a configured credential source implementation.

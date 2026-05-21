@@ -31,8 +31,8 @@ type IssueContext struct {
 	// DataSourceRegistry provides access to data sources for lazy fetching
 	DataSourceRegistry *DataSourceRegistry
 
-	// CredentialSourceType is the configured credential source name that matched
-	CredentialSourceType string
+	// CredentialSourceName is the configured credential source name that matched
+	CredentialSourceName string
 }
 
 // ToClaims applies a set of claim mappers to produce claims
@@ -52,7 +52,7 @@ func (ic *IssueContext) ToClaims(ctx context.Context, mappers []ClaimMapper) (cl
 		RequestAttributes:    ic.RequestAttributes,
 		DataSourceRegistry:   ic.DataSourceRegistry,
 		DataSourceInput:      dataSourceInput,
-		CredentialSourceType: ic.CredentialSourceType,
+		CredentialSourceName: ic.CredentialSourceName,
 	}
 
 	// Apply mappers

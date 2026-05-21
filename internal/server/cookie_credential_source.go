@@ -38,7 +38,7 @@ func (s *CookieCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialE
 
 	ext := &CredentialExtraction{
 		Credential: &trust.BearerCredential{Token: token},
-		SourceType: s.sourceName(),
+		SourceName: s.sourceName(),
 	}
 	sanitized := sanitizeCookieHeader(cookieHeader, name)
 	if sanitized == "" {

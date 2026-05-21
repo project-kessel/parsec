@@ -32,8 +32,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "bearer" {
-			t.Fatalf("expected bearer, got %q", ext.SourceType)
+		if ext.SourceName != "bearer" {
+			t.Fatalf("expected bearer, got %q", ext.SourceName)
 		}
 		bearer, ok := ext.Credential.(*trust.BearerCredential)
 		if !ok {
@@ -70,8 +70,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "cs-jwt-cookie" {
-			t.Fatalf("expected cs-jwt-cookie, got %q", ext.SourceType)
+		if ext.SourceName != "cs-jwt-cookie" {
+			t.Fatalf("expected cs-jwt-cookie, got %q", ext.SourceName)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "cookie-jwt" {
@@ -109,8 +109,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "query-token" {
-			t.Fatalf("expected query-token, got %q", ext.SourceType)
+		if ext.SourceName != "query-token" {
+			t.Fatalf("expected query-token, got %q", ext.SourceName)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "query-jwt" {
@@ -130,8 +130,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "forwarded-client-cert" {
-			t.Fatalf("expected forwarded-client-cert, got %q", ext.SourceType)
+		if ext.SourceName != "forwarded-client-cert" {
+			t.Fatalf("expected forwarded-client-cert, got %q", ext.SourceName)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token == "" {
@@ -163,8 +163,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "authorization-bearer" {
-			t.Fatalf("expected authorization-bearer first, got %q", ext.SourceType)
+		if ext.SourceName != "authorization-bearer" {
+			t.Fatalf("expected authorization-bearer first, got %q", ext.SourceName)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
 		if bearer.Token != "header-jwt" {
@@ -184,8 +184,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceType != "cs-jwt-cookie" {
-			t.Fatalf("expected cs-jwt-cookie, got %q", ext.SourceType)
+		if ext.SourceName != "cs-jwt-cookie" {
+			t.Fatalf("expected cs-jwt-cookie, got %q", ext.SourceName)
 		}
 	})
 

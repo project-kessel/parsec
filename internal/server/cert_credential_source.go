@@ -36,7 +36,7 @@ func (s *CertCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExt
 	return &CredentialExtraction{
 		Credential: &trust.BearerCredential{Token: certHeader},
 		Headers:    []string{header},
-		SourceType: s.sourceName(),
+		SourceName: s.sourceName(),
 	}, nil
 }
 

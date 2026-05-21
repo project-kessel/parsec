@@ -140,19 +140,19 @@ func TestCELMapper_Map(t *testing.T) {
 		}
 	})
 
-	t.Run("cred_type from credential source", func(t *testing.T) {
-		mapper, err := NewCELMapper(`{"source": cred_type}`)
+	t.Run("cred_source_name from credential source", func(t *testing.T) {
+		mapper, err := NewCELMapper(`{"source": cred_source_name}`)
 		if err != nil {
 			t.Fatalf("failed to create mapper: %v", err)
 		}
 
-		input := &service.MapperInput{CredentialSourceType: "cookie"}
+		input := &service.MapperInput{CredentialSourceName: "cs-jwt-cookie"}
 		result, err := mapper.Map(ctx, input)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result["source"] != "cookie" {
-			t.Errorf("expected source=cookie, got %v", result["source"])
+		if result["source"] != "cs-jwt-cookie" {
+			t.Errorf("expected source=cs-jwt-cookie, got %v", result["source"])
 		}
 	})
 

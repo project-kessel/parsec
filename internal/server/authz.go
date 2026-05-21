@@ -156,7 +156,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		Actor:                actor,
 		RequestAttributes:    reqAttrs,
 		TokenTypes:           tokenTypes,
-		CredentialSourceType: ext.SourceType,
+		CredentialSourceName: ext.SourceName,
 		// TODO: Get scope from configuration or request
 		Scope: "",
 	})

@@ -61,8 +61,8 @@ type IssueRequest struct {
 	// Scope for the tokens
 	Scope string
 
-	// CredentialSourceType is the configured credential source name that matched
-	CredentialSourceType string
+	// CredentialSourceName is the configured credential source name that matched
+	CredentialSourceName string
 }
 
 // IssueTokens orchestrates the complete token issuance process
@@ -81,7 +81,7 @@ func (ts *TokenService) IssueTokens(ctx context.Context, req *IssueRequest) (map
 		Audience:             ts.trustDomain,
 		Scope:                req.Scope,
 		DataSourceRegistry:   ts.dataSources,
-		CredentialSourceType: req.CredentialSourceType,
+		CredentialSourceName: req.CredentialSourceName,
 	}
 
 	// Issue tokens for each requested type

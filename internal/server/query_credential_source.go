@@ -43,7 +43,7 @@ func (s *QueryCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialEx
 	return &CredentialExtraction{
 		Credential:          &trust.BearerCredential{Token: token},
 		QueryParamsToRemove: []string{param},
-		SourceType:          s.sourceName(),
+		SourceName:          s.sourceName(),
 	}, nil
 }
 
