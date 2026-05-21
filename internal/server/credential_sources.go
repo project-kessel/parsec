@@ -27,7 +27,7 @@ type CredentialExtraction struct {
 	Headers             []string          // header names to remove entirely
 	HeaderSets          map[string]string // header names to set/override on the upstream request
 	QueryParamsToRemove []string          // query parameter names to remove before forwarding upstream
-	SourceName          string // configured credential source name
+	SourceName          string            // configured credential source name
 }
 
 func defaultCredentialSources() []CredentialSource {
