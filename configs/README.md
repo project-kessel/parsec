@@ -236,6 +236,11 @@ Data sources enrich tokens with external data:
 
 ```yaml
 data_sources:
+  - name: identity-policy
+    type: static
+    config:
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
   - name: user_roles
     type: lua
     script_file: ./scripts/user_roles.lua  # Or use inline script

@@ -50,7 +50,7 @@ func NewIssuerRegistry(cfg Config, obs observer.Observer) (service.Registry, err
 		tokenType := service.TokenType(issuerCfg.TokenType)
 
 		// Create issuer (now using signer registry instead of building signers inline)
-		iss, err := newIssuer(issuerCfg, signerRegistry, cfg.Identity)
+		iss, err := newIssuer(issuerCfg, signerRegistry)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create issuer for token type %s: %w", issuerCfg.TokenType, err)
 		}
@@ -235,21 +235,21 @@ func buildSignerRegistry(configs []SignerConfig, trustDomain string, providerReg
 }
 
 // newIssuer creates an issuer from configuration
-func newIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegistry, identity IdentityConfig) (service.Issuer, error) {
+func newIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegistry) (service.Issuer, error) {
 	switch cfg.Type {
 	case "stub":
-		return newStubIssuer(cfg, identity)
+		return newStubIssuer(cfg)
 	case "unsigned":
-		return newUnsignedIssuer(cfg, identity)
+		return newUnsignedIssuer(cfg)
 	case "transaction_token":
-		return newTransactionTokenIssuer(cfg, signerRegistry, identity)
+		return newTransactionTokenIssuer(cfg, signerRegistry)
 	default:
 		return nil, fmt.Errorf("unknown issuer type: %s (supported: stub, unsigned, transaction_token)", cfg.Type)
 	}
 }
 
 // newStubIssuer creates a stub issuer for testing
-func newStubIssuer(cfg IssuerConfig, identity IdentityConfig) (service.Issuer, error) {
+func newStubIssuer(cfg IssuerConfig) (service.Issuer, error) {
 	if cfg.IssuerURL == "" {
 		return nil, fmt.Errorf("stub issuer requires issuer_url")
 	}
@@ -267,7 +267,7 @@ func newStubIssuer(cfg IssuerConfig, identity IdentityConfig) (service.Issuer, e
 	// Create transaction context mappers
 	var txnMappers []service.ClaimMapper
 	for i, mapperCfg := range cfg.TransactionContextMappers {
-		m, err := newClaimMapper(mapperCfg, identity)
+		m, err := newClaimMapper(mapperCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create transaction context mapper %d: %w", i, err)
 		}
@@ -277,7 +277,7 @@ func newStubIssuer(cfg IssuerConfig, identity IdentityConfig) (service.Issuer, e
 	// Create request context mappers
 	var reqMappers []service.ClaimMapper
 	for i, mapperCfg := range cfg.RequestContextMappers {
-		m, err := newClaimMapper(mapperCfg, identity)
+		m, err := newClaimMapper(mapperCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request context mapper %d: %w", i, err)
 		}
@@ -294,7 +294,7 @@ func newStubIssuer(cfg IssuerConfig, identity IdentityConfig) (service.Issuer, e
 
 // newTransactionTokenIssuer creates a transaction token issuer.
 // This issuer signs transaction tokens using a signer from the global signer registry.
-func newTransactionTokenIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegistry, identity IdentityConfig) (service.Issuer, error) {
+func newTransactionTokenIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegistry) (service.Issuer, error) {
 	if cfg.IssuerURL == "" {
 		return nil, fmt.Errorf("transaction_token issuer requires issuer_url")
 	}
@@ -323,7 +323,7 @@ func newTransactionTokenIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegi
 	// Create transaction context mappers
 	var txnMappers []service.ClaimMapper
 	for i, mapperCfg := range cfg.TransactionContextMappers {
-		m, err := newClaimMapper(mapperCfg, identity)
+		m, err := newClaimMapper(mapperCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create transaction context mapper %d: %w", i, err)
 		}
@@ -333,7 +333,7 @@ func newTransactionTokenIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegi
 	// Create request context mappers
 	var reqMappers []service.ClaimMapper
 	for i, mapperCfg := range cfg.RequestContextMappers {
-		m, err := newClaimMapper(mapperCfg, identity)
+		m, err := newClaimMapper(mapperCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request context mapper %d: %w", i, err)
 		}
@@ -350,11 +350,11 @@ func newTransactionTokenIssuer(cfg IssuerConfig, signerRegistry *keys.SignerRegi
 }
 
 // newUnsignedIssuer creates an unsigned issuer (for development/testing)
-func newUnsignedIssuer(cfg IssuerConfig, identity IdentityConfig) (service.Issuer, error) {
+func newUnsignedIssuer(cfg IssuerConfig) (service.Issuer, error) {
 	// Create claim mappers
 	var mappers []service.ClaimMapper
 	for i, mapperCfg := range cfg.ClaimMappers {
-		m, err := newClaimMapper(mapperCfg, identity)
+		m, err := newClaimMapper(mapperCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create claim mapper %d: %w", i, err)
 		}
@@ -368,10 +368,10 @@ func newUnsignedIssuer(cfg IssuerConfig, identity IdentityConfig) (service.Issue
 }
 
 // newClaimMapper creates a claim mapper from configuration
-func newClaimMapper(cfg ClaimMapperConfig, identity IdentityConfig) (service.ClaimMapper, error) {
+func newClaimMapper(cfg ClaimMapperConfig) (service.ClaimMapper, error) {
 	switch cfg.Type {
 	case "cel":
-		return newCELMapper(cfg, identity)
+		return newCELMapper(cfg)
 	case "passthrough":
 		return service.NewPassthroughSubjectMapper(), nil
 	case "request_attributes":
@@ -384,7 +384,7 @@ func newClaimMapper(cfg ClaimMapperConfig, identity IdentityConfig) (service.Cla
 }
 
 // newCELMapper creates a CEL-based claim mapper
-func newCELMapper(cfg ClaimMapperConfig, identity IdentityConfig) (service.ClaimMapper, error) {
+func newCELMapper(cfg ClaimMapperConfig) (service.ClaimMapper, error) {
 	script := cfg.Script
 
 	// Load from file if script_file is specified
@@ -400,7 +400,7 @@ func newCELMapper(cfg ClaimMapperConfig, identity IdentityConfig) (service.Claim
 		return nil, fmt.Errorf("cel mapper requires script or script_file")
 	}
 
-	return mapper.NewCELMapper(script, mapper.WithCELConfig(identity.CELConfig()))
+	return mapper.NewCELMapper(script)
 }
 
 // newStubMapper creates a stub claim mapper that returns fixed claims

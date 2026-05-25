@@ -8,6 +8,32 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
+func TestNewDataSourceRegistry_Static(t *testing.T) {
+	t.Parallel()
+
+	reg, err := NewDataSourceRegistry([]DataSourceConfig{
+		{
+			Name: "identity-policy",
+			Type: "static",
+			Config: map[string]any{
+				"internal_idp_target":   "https://idp.example.com/internal",
+				"role_fallback_enabled": true,
+			},
+		},
+	}, nil, observer.NoOp())
+	if err != nil {
+		t.Fatalf("NewDataSourceRegistry: %v", err)
+	}
+
+	ds := reg.Get("identity-policy")
+	if ds == nil {
+		t.Fatal("expected registered data source")
+	}
+	if _, ok := ds.(*datasource.StaticDataSource); !ok {
+		t.Fatalf("got %T, want *datasource.StaticDataSource", ds)
+	}
+}
+
 func TestNewDataSourceRegistry_CacheableLuaUsesObserver(t *testing.T) {
 	const luaScript = `
 function fetch(input)

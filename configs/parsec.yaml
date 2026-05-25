@@ -17,11 +17,6 @@ observability:
 # Used as the audience (aud) claim in all issued tokens
 trust_domain: "parsec.example.com"
 
-# Identity mapping settings (exposed to CEL as config.*)
-identity:
-  internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
-  role_fallback_enabled: true
-
 # Exchange server configuration
 exchange_server:
   # Claims filter (determines which request_context claims actors can provide)
@@ -39,8 +34,13 @@ trust_store:
       trust_domain: "https://sso.redhat.com/auth/realms/redhat-external"
       refresh_interval: "15m"
 
-# Data sources for token enrichment (none configured by default)
-data_sources: []
+# Data sources for token enrichment
+data_sources:
+  - name: identity-policy
+    type: static
+    config:
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
 
 # Token issuers
 issuers:

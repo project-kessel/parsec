@@ -23,10 +23,6 @@ objects:
 
         trust_domain: "parsec.example.com"
 
-        identity:
-          internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
-          role_fallback_enabled: true
-
         exchange_server:
           claims_filter:
             type: stub
@@ -41,7 +37,12 @@ objects:
               trust_domain: "https://sso.redhat.com/auth/realms/redhat-external"
               refresh_interval: "15m"
 
-        data_sources: []
+        data_sources:
+          - name: identity-policy
+            type: static
+            config:
+              internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+              role_fallback_enabled: true
 
         issuers:
           - token_type: "urn:ietf:params:oauth:token-type:txn_token"
@@ -126,9 +127,9 @@ objects:
                 "last_name": has(subject.claims.family_name) ? subject.claims.family_name : "",
                 "is_active": true,
                 "is_org_admin": hasRole(subject.claims, "admin:org:all"),
-                "is_internal": has(subject.claims.idp) ? (subject.claims.idp == config.internal_idp_target) :
+                "is_internal": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) :
                                has(subject.claims.is_internal) ? subject.claims.is_internal :
-                               config.role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
+                               datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
                                false,
                 "locale": has(subject.claims.locale) ? subject.claims.locale : "",
                 "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : ""

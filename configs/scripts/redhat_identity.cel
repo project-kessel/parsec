@@ -53,9 +53,9 @@ isServiceAccountToken(subject.claims) ? {
         "last_name": has(subject.claims.family_name) ? subject.claims.family_name : "",
         "is_active": true,
         "is_org_admin": hasRole(subject.claims, "admin:org:all"),
-        "is_internal": has(subject.claims.idp) ? (subject.claims.idp == config.internal_idp_target) :
+        "is_internal": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) :
                        has(subject.claims.is_internal) ? subject.claims.is_internal :
-                       config.role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
+                       datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
                        false,
         "locale": has(subject.claims.locale) ? subject.claims.locale : "",
         "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : ""

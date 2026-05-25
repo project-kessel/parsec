@@ -115,46 +115,62 @@ func TestCELMapper_Map(t *testing.T) {
 		}
 	})
 
-	t.Run("config variable exposes identity settings", func(t *testing.T) {
+	t.Run("identity-policy datasource exposes settings", func(t *testing.T) {
 		mapper, err := NewCELMapper(`{
-			"target": config.internal_idp_target,
-			"fallback": config.role_fallback_enabled
-		}`, WithCELConfig(map[string]any{
-			"internal_idp_target":   "https://idp.example.com/internal",
-			"role_fallback_enabled": false,
-		}))
+			"target": datasource("identity-policy").internal_idp_target,
+			"fallback": datasource("identity-policy").role_fallback_enabled
+		}`)
 		if err != nil {
 			t.Fatalf("failed to create mapper: %v", err)
 		}
 
-		result, err := mapper.Map(ctx, &service.MapperInput{})
+		registry := service.NewDataSourceRegistry()
+		registry.Register(&mockDataSource{
+			name: "identity-policy",
+			data: map[string]any{
+				"internal_idp_target":   "https://idp.example.com/internal",
+				"role_fallback_enabled": false,
+			},
+		})
+
+		result, err := mapper.Map(ctx, &service.MapperInput{
+			DataSourceRegistry: registry,
+			DataSourceInput:    &service.DataSourceInput{},
+		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		if result["target"] != "https://idp.example.com/internal" {
-			t.Errorf("expected target from config, got %v", result["target"])
+			t.Errorf("expected target from datasource, got %v", result["target"])
 		}
 		if result["fallback"] != false {
-			t.Errorf("expected fallback=false from config, got %v", result["fallback"])
+			t.Errorf("expected fallback=false from datasource, got %v", result["fallback"])
 		}
 	})
 
-	t.Run("is_internal uses config for idp match and role fallback", func(t *testing.T) {
+	t.Run("is_internal uses identity-policy for idp match and role fallback", func(t *testing.T) {
 		script := `{
-			"by_idp": has(subject.claims.idp) ? (subject.claims.idp == config.internal_idp_target) : false,
-			"by_role": !has(subject.claims.idp) && config.role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") : false
+			"by_idp": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) : false,
+			"by_role": !has(subject.claims.idp) && datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") : false
 		}`
-		mapper, err := NewCELMapper(script, WithCELConfig(map[string]any{
-			"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
-			"role_fallback_enabled": true,
-		}))
+		mapper, err := NewCELMapper(script)
 		if err != nil {
 			t.Fatalf("failed to create mapper: %v", err)
 		}
 
+		registry := service.NewDataSourceRegistry()
+		registry.Register(&mockDataSource{
+			name: "identity-policy",
+			data: map[string]any{
+				"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
+				"role_fallback_enabled": true,
+			},
+		})
 		t.Run("internal idp claim", func(t *testing.T) {
 			result, err := mapper.Map(ctx, &service.MapperInput{
+				DataSourceRegistry: registry,
+				DataSourceInput:    &service.DataSourceInput{},
 				Subject: &trust.Result{
 					Claims: map[string]any{
 						"idp": "https://sso.redhat.com/auth/realms/internal",
@@ -171,6 +187,8 @@ func TestCELMapper_Map(t *testing.T) {
 
 		t.Run("role fallback skipped when idp present but non-matching", func(t *testing.T) {
 			result, err := mapper.Map(ctx, &service.MapperInput{
+				DataSourceRegistry: registry,
+				DataSourceInput:    &service.DataSourceInput{},
 				Subject: &trust.Result{
 					Claims: map[string]any{
 						"idp": "https://other.example.com/realms/external",
@@ -193,6 +211,8 @@ func TestCELMapper_Map(t *testing.T) {
 
 		t.Run("role fallback when idp absent", func(t *testing.T) {
 			result, err := mapper.Map(ctx, &service.MapperInput{
+				DataSourceRegistry: registry,
+				DataSourceInput:    &service.DataSourceInput{},
 				Subject: &trust.Result{
 					Claims: map[string]any{
 						"realm_access": map[string]any{
@@ -210,15 +230,18 @@ func TestCELMapper_Map(t *testing.T) {
 		})
 
 		t.Run("role fallback disabled", func(t *testing.T) {
-			disabled, err := NewCELMapper(script, WithCELConfig(map[string]any{
-				"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
-				"role_fallback_enabled": false,
-			}))
-			if err != nil {
-				t.Fatalf("failed to create mapper: %v", err)
-			}
+			disabledRegistry := service.NewDataSourceRegistry()
+			disabledRegistry.Register(&mockDataSource{
+				name: "identity-policy",
+				data: map[string]any{
+					"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
+					"role_fallback_enabled": false,
+				},
+			})
 
-			result, err := disabled.Map(ctx, &service.MapperInput{
+			result, err := mapper.Map(ctx, &service.MapperInput{
+				DataSourceRegistry: disabledRegistry,
+				DataSourceInput:    &service.DataSourceInput{},
 				Subject: &trust.Result{
 					Claims: map[string]any{
 						"realm_access": map[string]any{

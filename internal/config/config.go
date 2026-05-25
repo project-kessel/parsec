@@ -35,38 +35,7 @@ type Config struct {
 
 	// Observability configuration (logging, metrics, tracing)
 	Observability *ObservabilityConfig `koanf:"observability"`
-
-	// Identity settings exposed to CEL mappers as the config variable
-	Identity IdentityConfig `koanf:"identity"`
 }
-
-// IdentityConfig controls Red Hat identity mapping behavior in CEL scripts.
-type IdentityConfig struct {
-	// InternalIDPTarget is the idp claim value for internal users (tier 1).
-	InternalIDPTarget string `koanf:"internal_idp_target"`
-
-	// RoleFallbackEnabled gates the redhat:employees role fallback (tier 3).
-	// Defaults to true when unset.
-	RoleFallbackEnabled *bool `koanf:"role_fallback_enabled"`
-}
-
-// CELConfig returns identity settings for CEL mapper activation (config.*).
-func (c IdentityConfig) CELConfig() map[string]any {
-	target := c.InternalIDPTarget
-	if target == "" {
-		target = defaultInternalIDPTarget
-	}
-	roleFallback := true
-	if c.RoleFallbackEnabled != nil {
-		roleFallback = *c.RoleFallbackEnabled
-	}
-	return map[string]any{
-		"internal_idp_target":   target,
-		"role_fallback_enabled": roleFallback,
-	}
-}
-
-const defaultInternalIDPTarget = "https://sso.redhat.com/auth/realms/internal"
 
 // ServerConfig contains network-level server settings
 type ServerConfig struct {
@@ -163,7 +132,7 @@ type DataSourceConfig struct {
 	Name string `koanf:"name"`
 
 	// Type selects the data source implementation
-	// Options: "lua"
+	// Options: "lua", "static"
 	Type string `koanf:"type"`
 
 	// Lua data source fields

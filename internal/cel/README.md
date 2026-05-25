@@ -20,8 +20,6 @@ This package provides CEL extensions specifically for claim mapping in Parsec:
   - `subject.audience` - Intended audience
   - `subject.scope` - OAuth2 scope
 
-- **`config`** - Configuration values from parsec.yaml identity section (map)
-
 - **`workload`** - Workload identity information (map, same structure as subject)
 
 - **`request`** - Request attributes (map)
@@ -79,6 +77,25 @@ isSupportedToken(subject.claims)
   "roles": datasource("user_roles").roles,
   "region": datasource("geo_lookup").region
 }
+```
+
+### Deployment Policy via Static Data Sources
+
+Deployment-specific policy (for example Red Hat identity mapping thresholds) belongs in a `static` data source, not top-level parsec config:
+
+```yaml
+data_sources:
+  - name: identity-policy
+    type: static
+    config:
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+```
+
+CEL mappers read it like any other datasource:
+
+```cel
+subject.claims.idp == datasource("identity-policy").internal_idp_target
 ```
 
 ### Complex Expressions
