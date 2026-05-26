@@ -10,8 +10,9 @@ import (
 
 // Common validation errors
 var (
-	ErrInvalidToken = errors.New("invalid token")
-	ErrExpiredToken = errors.New("token expired")
+	ErrInvalidToken   = errors.New("invalid token")
+	ErrExpiredToken   = errors.New("token expired")
+	ErrForbiddenToken = errors.New("forbidden token")
 )
 
 // Validator validates external credentials and returns claims about the authenticated subject

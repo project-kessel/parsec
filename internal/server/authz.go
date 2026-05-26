@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -86,7 +87,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		actor, validationErr = s.trustStore.Validate(ctx, actorCred)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)
-			return s.denyResponse(codes.Unauthenticated,
+			return s.denyResponse(validationDenialCode(validationErr),
 				fmt.Sprintf("actor validation failed: %v", validationErr)), nil
 		}
 		p.ActorValidationSucceeded(actor)
@@ -116,7 +117,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	result, err := filteredStore.Validate(ctx, cred)
 	if err != nil {
 		p.SubjectValidationFailed(err)
-		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", err)), nil
+		return s.denyResponse(validationDenialCode(err), fmt.Sprintf("validation failed: %v", err)), nil
 	}
 	p.SubjectValidationSucceeded(result)
 
@@ -230,6 +231,13 @@ func (s *AuthzServer) buildRequestAttributes(req *authv3.CheckRequest) *request.
 		Headers:    httpReq.GetHeaders(),
 		Additional: additional,
 	}
+}
+
+func validationDenialCode(err error) codes.Code {
+	if errors.Is(err, trust.ErrForbiddenToken) {
+		return codes.PermissionDenied
+	}
+	return codes.Unauthenticated
 }
 
 // denyResponse creates a denial response

@@ -12,23 +12,49 @@ import (
 
 // NewTrustStore creates a trust store from configuration
 func NewTrustStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Store, error) {
+	claimRules, err := buildClaimRules(cfg.ClaimRules)
+	if err != nil {
+		return nil, fmt.Errorf("invalid claim_rules: %w", err)
+	}
+
 	switch cfg.Type {
 	case "stub_store":
-		return newStubStore(cfg, transport, trustObs)
+		return newStubStore(cfg, transport, trustObs, claimRules)
 	case "filtered_store":
-		return newFilteredStore(cfg, transport, trustObs)
+		return newFilteredStore(cfg, transport, trustObs, claimRules)
 	default:
 		return nil, fmt.Errorf("unknown trust store type: %s (supported: stub_store, filtered_store)", cfg.Type)
 	}
 }
 
+func buildClaimRules(cfg *ClaimRulesConfig) (*trust.ClaimRules, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+
+	var maxAge time.Duration
+	if cfg.MaxTokenAge != "" {
+		d, err := time.ParseDuration(cfg.MaxTokenAge)
+		if err != nil {
+			return nil, fmt.Errorf("invalid max_token_age: %w", err)
+		}
+		maxAge = d
+	}
+
+	return trust.NewClaimRules(&trust.ClaimRulesConfig{
+		RejectActClaim: cfg.RejectActClaim,
+		AllowedIssuers: cfg.AllowedIssuers,
+		MaxTokenAge:    maxAge,
+	}), nil
+}
+
 // newStubStore creates a stub trust store (no filtering)
-func newStubStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Store, error) {
+func newStubStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver, claimRules *trust.ClaimRules) (trust.Store, error) {
 	store := trust.NewStubStore()
 
 	// Add validators
 	for _, validatorCfg := range cfg.Validators {
-		validator, err := newValidator(validatorCfg.ValidatorConfig, transport, trustObs)
+		validator, err := newValidator(validatorCfg.ValidatorConfig, transport, trustObs, claimRules)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create validator: %w", err)
 		}
@@ -39,7 +65,7 @@ func newStubStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs tr
 }
 
 // newFilteredStore creates a filtered trust store with validator filtering
-func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Store, error) {
+func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustObs trust.TrustObserver, claimRules *trust.ClaimRules) (trust.Store, error) {
 	var opts []trust.FilteredStoreOption
 
 	// Add validator filter if configured
@@ -64,7 +90,7 @@ func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustOb
 			return nil, fmt.Errorf("validator name is required for filtered store")
 		}
 
-		validator, err := newValidator(validatorCfg.ValidatorConfig, transport, trustObs)
+		validator, err := newValidator(validatorCfg.ValidatorConfig, transport, trustObs, claimRules)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create validator %s: %w", validatorCfg.Name, err)
 		}
@@ -76,10 +102,10 @@ func newFilteredStore(cfg TrustStoreConfig, transport http.RoundTripper, trustOb
 }
 
 // newValidator creates a validator from configuration
-func newValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Validator, error) {
+func newValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs trust.TrustObserver, claimRules *trust.ClaimRules) (trust.Validator, error) {
 	switch cfg.Type {
 	case "jwt_validator":
-		return newJWTValidator(cfg, transport, trustObs)
+		return newJWTValidator(cfg, transport, trustObs, claimRules)
 	case "json_validator":
 		return newJSONValidator(cfg)
 	case "stub_validator":
@@ -90,7 +116,7 @@ func newValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs tru
 }
 
 // newJWTValidator creates a JWT validator
-func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs trust.TrustObserver) (trust.Validator, error) {
+func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs trust.TrustObserver, claimRules *trust.ClaimRules) (trust.Validator, error) {
 	if cfg.Issuer == "" {
 		return nil, fmt.Errorf("jwt_validator requires issuer")
 	}
@@ -103,6 +129,7 @@ func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs 
 		JWKSURL:          cfg.JWKSURL,
 		TrustDomain:      cfg.TrustDomain,
 		AllowedAudiences: cfg.Audiences,
+		ClaimRules:       claimRules,
 	}
 
 	// Parse refresh interval if provided

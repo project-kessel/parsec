@@ -8,6 +8,7 @@ import (
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/project-kessel/parsec/internal/issuer"
@@ -141,6 +142,37 @@ func TestAuthzServer_Check(t *testing.T) {
 		if deniedResp == nil {
 			t.Fatal("expected denied response, got nil")
 		}
+	})
+
+	t.Run("forbidden token returns PermissionDenied", func(t *testing.T) {
+		stubValidator.WithError(trust.ErrForbiddenToken)
+
+		req := &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization": "Bearer forbidden-token",
+						},
+					},
+				},
+			},
+		}
+
+		resp, err := authzServer.Check(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code == 0 {
+			t.Fatal("expected denial, got OK")
+		}
+		if codes.Code(resp.Status.Code) != codes.PermissionDenied {
+			t.Fatalf("expected PermissionDenied (403), got code %d", resp.Status.Code)
+		}
+
+		stubValidator.WithError(nil)
 	})
 
 	t.Run("invalid bearer token", func(t *testing.T) {

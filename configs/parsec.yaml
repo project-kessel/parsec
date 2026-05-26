@@ -26,6 +26,12 @@ exchange_server:
 # Trust store configuration
 trust_store:
   type: stub_store
+  # JWT claim policies (3scale-aligned): block impersonation, IdP allowlist, staleness
+  claim_rules:
+    reject_act_claim: true
+    allowed_issuers:
+      - "https://sso.redhat.com/auth/realms/redhat-external"
+    max_token_age: "24h"
   validators:
     - name: redhat-sso
       type: jwt_validator

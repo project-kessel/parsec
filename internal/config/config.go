@@ -81,8 +81,23 @@ type TrustStoreConfig struct {
 	// Validators is the list of validators to add to the store
 	Validators []NamedValidatorConfig `koanf:"validators"`
 
+	// ClaimRules applies JWT claim policies to all jwt_validator instances.
+	ClaimRules *ClaimRulesConfig `koanf:"claim_rules"`
+
 	// Filter configuration (only used when Type is "filtered_store")
 	Filter *ValidatorFilterConfig `koanf:"filter"`
+}
+
+// ClaimRulesConfig configures JWT claim validation rules for the trust store.
+type ClaimRulesConfig struct {
+	// RejectActClaim rejects tokens with an impersonation (act) claim.
+	RejectActClaim bool `koanf:"reject_act_claim"`
+
+	// AllowedIssuers restricts token iss claims. Empty disables enforcement.
+	AllowedIssuers []string `koanf:"allowed_issuers"`
+
+	// MaxTokenAge is a duration string (e.g. "5m") rejecting tokens whose iat is too old.
+	MaxTokenAge string `koanf:"max_token_age"`
 }
 
 // NamedValidatorConfig is a validator with a name (for FilteredStore)

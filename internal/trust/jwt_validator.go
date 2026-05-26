@@ -27,6 +27,7 @@ type JWTValidator struct {
 	clock            clock.Clock
 	observer         JWTValidatorObserver
 	allowedAudiences []string
+	claimRules       *ClaimRules
 }
 
 // JWTValidatorConfig contains configuration for JWT validation
@@ -59,6 +60,9 @@ type JWTValidatorConfig struct {
 
 	// AllowedAudiences restricts token aud claims. Empty disables enforcement.
 	AllowedAudiences []string
+
+	// ClaimRules applies additional JWT claim policies after signature validation.
+	ClaimRules *ClaimRules
 }
 
 // NewJWTValidator creates a new JWT validator with JWKS support
@@ -120,6 +124,7 @@ func NewJWTValidator(cfg JWTValidatorConfig) (*JWTValidator, error) {
 		clock:            clk,
 		observer:         obs,
 		allowedAudiences: slices.Clone(cfg.AllowedAudiences),
+		claimRules:       cfg.ClaimRules,
 	}, nil
 }
 
@@ -194,13 +199,19 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 		return nil, err
 	}
 
+	issuedAt, _ := token.IssuedAt()
+	tokenIssuer, _ := token.Issuer()
+	if err := v.claimRules.Evaluate(allClaims, tokenIssuer, issuedAt, v.clock.Now()); err != nil {
+		p.TokenInvalid(err)
+		return nil, err
+	}
+
 	scope := ""
 	if err := token.Get("scope", &scope); err != nil {
 		scope = ""
 	}
 
 	expiresAt, _ := token.Expiration()
-	issuedAt, _ := token.IssuedAt()
 
 	return &Result{
 		Subject:     subject,
