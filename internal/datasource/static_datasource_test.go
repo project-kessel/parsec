@@ -13,7 +13,7 @@ func TestNewStaticDataSource(t *testing.T) {
 
 	t.Run("missing name", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewStaticDataSource("", map[string]any{"k": "v"})
+		_, err := NewStaticDataSource(WithStaticData(map[string]any{"k": "v"}))
 		if err == nil {
 			t.Fatal("expected error for missing name")
 		}
@@ -21,7 +21,7 @@ func TestNewStaticDataSource(t *testing.T) {
 
 	t.Run("missing data", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewStaticDataSource("policy", nil)
+		_, err := NewStaticDataSource(WithStaticName("policy"))
 		if err == nil {
 			t.Fatal("expected error for missing data")
 		}
@@ -29,10 +29,13 @@ func TestNewStaticDataSource(t *testing.T) {
 
 	t.Run("returns configured data", func(t *testing.T) {
 		t.Parallel()
-		ds, err := NewStaticDataSource("identity-policy", map[string]any{
-			"internal_idp_target":   "https://idp.example.com/internal",
-			"role_fallback_enabled": true,
-		})
+		ds, err := NewStaticDataSource(
+			WithStaticName("identity-policy"),
+			WithStaticData(map[string]any{
+				"internal_idp_target":   "https://idp.example.com/internal",
+				"role_fallback_enabled": true,
+			}),
+		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -51,6 +54,31 @@ func TestNewStaticDataSource(t *testing.T) {
 		}
 		if got["role_fallback_enabled"] != true {
 			t.Fatalf("unexpected role_fallback_enabled: %v", got["role_fallback_enabled"])
+		}
+	})
+
+	t.Run("fetch returns independent copy", func(t *testing.T) {
+		t.Parallel()
+		ds, err := NewStaticDataSource(
+			WithStaticName("policy"),
+			WithStaticData(map[string]any{"k": "v"}),
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		first, err := ds.Fetch(context.Background(), &service.DataSourceInput{})
+		if err != nil {
+			t.Fatalf("first fetch: %v", err)
+		}
+		first.Data[0] = 'X'
+
+		second, err := ds.Fetch(context.Background(), &service.DataSourceInput{})
+		if err != nil {
+			t.Fatalf("second fetch: %v", err)
+		}
+		if first.Data[0] == second.Data[0] {
+			t.Fatal("expected fetch results to use independent byte slices")
 		}
 	})
 }

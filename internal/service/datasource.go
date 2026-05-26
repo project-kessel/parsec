@@ -59,7 +59,8 @@ const (
 
 // DataSourceResult contains serialized data from a data source
 type DataSourceResult struct {
-	// Data is the serialized data (e.g., JSON bytes)
+	// Data is the serialized data (e.g., JSON bytes).
+	// Callers must treat Data as read-only and must not modify the slice in place.
 	Data []byte
 
 	// ContentType identifies how to deserialize the data

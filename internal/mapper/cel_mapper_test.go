@@ -151,6 +151,10 @@ func TestCELMapper_Map(t *testing.T) {
 
 	t.Run("is_internal uses identity-policy for idp match and role fallback", func(t *testing.T) {
 		script := `{
+			"is_internal": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) :
+			               has(subject.claims.is_internal) ? subject.claims.is_internal :
+			               datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
+			               false,
 			"by_idp": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) : false,
 			"by_role": !has(subject.claims.idp) && datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") : false
 		}`
@@ -255,6 +259,82 @@ func TestCELMapper_Map(t *testing.T) {
 			}
 			if result["by_role"] != false {
 				t.Errorf("expected by_role=false when fallback disabled, got %v", result["by_role"])
+			}
+		})
+
+		t.Run("is_internal claim true without idp", func(t *testing.T) {
+			result, err := mapper.Map(ctx, &service.MapperInput{
+				DataSourceRegistry: registry,
+				DataSourceInput:    &service.DataSourceInput{},
+				Subject: &trust.Result{
+					Claims: map[string]any{
+						"is_internal": true,
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result["is_internal"] != true {
+				t.Errorf("expected is_internal=true from claim, got %v", result["is_internal"])
+			}
+			if result["by_idp"] != false {
+				t.Errorf("expected by_idp=false without idp, got %v", result["by_idp"])
+			}
+			if result["by_role"] != false {
+				t.Errorf("expected by_role=false when is_internal claim present, got %v", result["by_role"])
+			}
+		})
+
+		t.Run("is_internal claim true overrides external idp for is_internal field", func(t *testing.T) {
+			result, err := mapper.Map(ctx, &service.MapperInput{
+				DataSourceRegistry: registry,
+				DataSourceInput:    &service.DataSourceInput{},
+				Subject: &trust.Result{
+					Claims: map[string]any{
+						"idp":         "https://other.example.com/realms/external",
+						"is_internal": true,
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result["is_internal"] != false {
+				t.Errorf("expected is_internal=false when external idp takes precedence, got %v", result["is_internal"])
+			}
+			if result["by_idp"] != false {
+				t.Errorf("expected by_idp=false for non-matching idp, got %v", result["by_idp"])
+			}
+			if result["by_role"] != false {
+				t.Errorf("expected by_role=false when idp present, got %v", result["by_role"])
+			}
+		})
+
+		t.Run("is_internal claim false skips role fallback in is_internal field", func(t *testing.T) {
+			result, err := mapper.Map(ctx, &service.MapperInput{
+				DataSourceRegistry: registry,
+				DataSourceInput:    &service.DataSourceInput{},
+				Subject: &trust.Result{
+					Claims: map[string]any{
+						"is_internal": false,
+						"realm_access": map[string]any{
+							"roles": []any{"redhat:employees"},
+						},
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result["is_internal"] != false {
+				t.Errorf("expected is_internal=false from claim, got %v", result["is_internal"])
+			}
+			if result["by_idp"] != false {
+				t.Errorf("expected by_idp=false without idp, got %v", result["by_idp"])
+			}
+			if result["by_role"] != true {
+				t.Errorf("expected by_role=true with employees role and no idp, got %v", result["by_role"])
 			}
 		})
 	})
