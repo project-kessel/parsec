@@ -286,7 +286,7 @@ func TestCELMapper_Map(t *testing.T) {
 			}
 		})
 
-		t.Run("is_internal claim true overrides external idp for is_internal field", func(t *testing.T) {
+		t.Run("external idp overrides is_internal claim for is_internal field", func(t *testing.T) {
 			result, err := mapper.Map(ctx, &service.MapperInput{
 				DataSourceRegistry: registry,
 				DataSourceInput:    &service.DataSourceInput{},
