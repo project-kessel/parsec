@@ -11,27 +11,28 @@ import (
 
 // StaticDataSource returns fixed JSON data on every fetch.
 type StaticDataSource struct {
-	name string
-	data map[string]any
-}
-
-// StaticDataSourceConfig configures a static data source.
-type StaticDataSourceConfig struct {
-	Name string
-	Data map[string]any
+	name          string
+	marshaledData []byte
 }
 
 // NewStaticDataSource creates a data source that always returns the configured data.
-func NewStaticDataSource(cfg StaticDataSourceConfig) (service.DataSource, error) {
-	if cfg.Name == "" {
+func NewStaticDataSource(name string, data map[string]any) (service.DataSource, error) {
+	if name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
-	if cfg.Data == nil {
+	if data == nil {
 		return nil, fmt.Errorf("data is required")
 	}
+
+	cloned := maps.Clone(data)
+	marshaled, err := json.Marshal(cloned)
+	if err != nil {
+		return nil, fmt.Errorf("marshal static data: %w", err)
+	}
+
 	return &StaticDataSource{
-		name: cfg.Name,
-		data: maps.Clone(cfg.Data),
+		name:          name,
+		marshaledData: marshaled,
 	}, nil
 }
 
@@ -40,12 +41,8 @@ func (s *StaticDataSource) Name() string {
 }
 
 func (s *StaticDataSource) Fetch(context.Context, *service.DataSourceInput) (*service.DataSourceResult, error) {
-	data, err := json.Marshal(s.data)
-	if err != nil {
-		return nil, fmt.Errorf("marshal static data: %w", err)
-	}
 	return &service.DataSourceResult{
-		Data:        data,
+		Data:        s.marshaledData,
 		ContentType: service.ContentTypeJSON,
 	}, nil
 }
