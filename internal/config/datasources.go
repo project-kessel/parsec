@@ -40,12 +40,12 @@ func newDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs observ
 }
 
 func newStaticDataSource(cfg DataSourceConfig) (service.DataSource, error) {
-	if cfg.Config == nil {
-		return nil, fmt.Errorf("static data source requires config")
+	if cfg.Data == nil {
+		return nil, fmt.Errorf("static data source requires data")
 	}
 	return datasource.NewStaticDataSource(
 		datasource.WithStaticName(cfg.Name),
-		datasource.WithStaticData(cfg.Config),
+		datasource.WithStaticData(cfg.Data),
 	)
 }
 

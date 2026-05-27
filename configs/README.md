@@ -238,7 +238,7 @@ Data sources enrich tokens with external data:
 data_sources:
   - name: identity-policy
     type: static
-    config:
+    data:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
   - name: user_roles

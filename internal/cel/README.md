@@ -87,7 +87,7 @@ Deployment-specific policy (for example Red Hat identity mapping thresholds) bel
 data_sources:
   - name: identity-policy
     type: static
-    config:
+    data:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
 ```

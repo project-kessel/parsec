@@ -15,7 +15,7 @@ func TestNewDataSourceRegistry_Static(t *testing.T) {
 		{
 			Name: "identity-policy",
 			Type: "static",
-			Config: map[string]any{
+			Data: map[string]any{
 				"internal_idp_target":   "https://idp.example.com/internal",
 				"role_fallback_enabled": true,
 			},
