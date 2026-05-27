@@ -43,10 +43,7 @@ func newStaticDataSource(cfg DataSourceConfig) (service.DataSource, error) {
 	if cfg.Data == nil {
 		return nil, fmt.Errorf("static data source requires data")
 	}
-	return datasource.NewStaticDataSource(
-		datasource.WithStaticName(cfg.Name),
-		datasource.WithStaticData(cfg.Data),
-	)
+	return datasource.NewStaticDataSource(cfg.Name, cfg.Data)
 }
 
 func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs observer.Observer) (service.DataSource, error) {

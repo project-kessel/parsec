@@ -11,31 +11,28 @@ import (
 func TestNewStaticDataSource(t *testing.T) {
 	t.Parallel()
 
-	t.Run("missing name", func(t *testing.T) {
+	t.Run("empty name", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewStaticDataSource(WithStaticData(map[string]any{"k": "v"}))
+		_, err := NewStaticDataSource("", map[string]any{"k": "v"})
 		if err == nil {
-			t.Fatal("expected error for missing name")
+			t.Fatal("expected error for empty name")
 		}
 	})
 
-	t.Run("missing data", func(t *testing.T) {
+	t.Run("nil data", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewStaticDataSource(WithStaticName("policy"))
+		_, err := NewStaticDataSource("policy", nil)
 		if err == nil {
-			t.Fatal("expected error for missing data")
+			t.Fatal("expected error for nil data")
 		}
 	})
 
 	t.Run("returns configured data", func(t *testing.T) {
 		t.Parallel()
-		ds, err := NewStaticDataSource(
-			WithStaticName("identity-policy"),
-			WithStaticData(map[string]any{
-				"internal_idp_target":   "https://idp.example.com/internal",
-				"role_fallback_enabled": true,
-			}),
-		)
+		ds, err := NewStaticDataSource("identity-policy", map[string]any{
+			"internal_idp_target":   "https://idp.example.com/internal",
+			"role_fallback_enabled": true,
+		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -59,10 +56,7 @@ func TestNewStaticDataSource(t *testing.T) {
 
 	t.Run("fetch returns independent copy", func(t *testing.T) {
 		t.Parallel()
-		ds, err := NewStaticDataSource(
-			WithStaticName("policy"),
-			WithStaticData(map[string]any{"k": "v"}),
-		)
+		ds, err := NewStaticDataSource("policy", map[string]any{"k": "v"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

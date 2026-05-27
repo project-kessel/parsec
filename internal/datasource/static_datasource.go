@@ -16,49 +16,23 @@ type StaticDataSource struct {
 	marshaledData []byte
 }
 
-type staticConfig struct {
-	name string
-	data map[string]any
-}
-
-// StaticDataSourceOption configures a StaticDataSource.
-type StaticDataSourceOption func(*staticConfig)
-
-// WithStaticName sets the data source name.
-func WithStaticName(name string) StaticDataSourceOption {
-	return func(cfg *staticConfig) {
-		cfg.name = name
-	}
-}
-
-// WithStaticData sets the fixed data returned on every fetch.
-func WithStaticData(data map[string]any) StaticDataSourceOption {
-	return func(cfg *staticConfig) {
-		cfg.data = data
-	}
-}
-
-// NewStaticDataSource creates a data source that always returns the configured data.
-func NewStaticDataSource(opts ...StaticDataSourceOption) (service.DataSource, error) {
-	cfg := &staticConfig{}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	if cfg.name == "" {
+// NewStaticDataSource creates a data source that always returns data.
+func NewStaticDataSource(name string, data map[string]any) (service.DataSource, error) {
+	if name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
-	if cfg.data == nil {
+	if data == nil {
 		return nil, fmt.Errorf("data is required")
 	}
 
-	cloned := maps.Clone(cfg.data)
+	cloned := maps.Clone(data)
 	marshaled, err := json.Marshal(cloned)
 	if err != nil {
 		return nil, fmt.Errorf("marshal static data: %w", err)
 	}
 
 	return &StaticDataSource{
-		name:          cfg.name,
+		name:          name,
 		marshaledData: marshaled,
 	}, nil
 }
