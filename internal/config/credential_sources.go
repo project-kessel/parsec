@@ -7,7 +7,7 @@ import (
 	"github.com/project-kessel/parsec/internal/server"
 )
 
-var credentialSourceTypes = []string{"bearer", "cookie", "cert", "query"}
+var credentialSourceTypes = []string{"bearer", "cookie", "query"}
 
 func newAuthzServerCredentialSources(cfgs []CredentialSourceConfig) ([]server.CredentialSource, error) {
 	sources := make([]server.CredentialSource, 0, len(cfgs))
@@ -50,11 +50,6 @@ func newCredentialSource(cfg CredentialSourceConfig) (server.CredentialSource, e
 			return nil, fmt.Errorf("parameter_name is required for type %q", cfg.Type)
 		}
 		return &server.QueryCredentialSource{SourceName: cfg.Name, ParameterName: cfg.ParameterName}, nil
-	case "cert":
-		if cfg.Header == "" {
-			return nil, fmt.Errorf("header is required for type %q", cfg.Type)
-		}
-		return &server.CertCredentialSource{SourceName: cfg.Name, Header: cfg.Header}, nil
 	default:
 		return nil, fmt.Errorf("unknown type %q (allowed: %s)", cfg.Type, strings.Join(credentialSourceTypes, ", "))
 	}

@@ -12,7 +12,6 @@ import (
 const (
 	CredentialSourceTypeBearer = "bearer"
 	CredentialSourceTypeCookie = "cookie"
-	CredentialSourceTypeCert   = "cert"
 	CredentialSourceTypeQuery  = "query"
 )
 

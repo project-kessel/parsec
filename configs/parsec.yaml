@@ -70,9 +70,6 @@ authz_server:
     - name: cs-jwt-cookie
       type: cookie
       cookie_name: cs_jwt
-    - name: forwarded-client-cert
-      type: cert
-      header: x-forwarded-client-cert
     - name: query-token
       type: query
       parameter_name: token

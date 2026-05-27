@@ -11,7 +11,6 @@ func TestProvider_AuthzServerCredentialSources(t *testing.T) {
 	valid := []CredentialSourceConfig{
 		{Name: "authorization-bearer", Type: "bearer"},
 		{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"},
-		{Name: "forwarded-client-cert", Type: "cert", Header: "x-forwarded-client-cert"},
 		{Name: "query-token", Type: "query", ParameterName: "token"},
 	}
 
@@ -60,11 +59,6 @@ func TestProvider_AuthzServerCredentialSources(t *testing.T) {
 			name:    "query without parameter_name",
 			sources: []CredentialSourceConfig{{Name: "query", Type: "query"}},
 			wantErr: `parameter_name is required for type "query"`,
-		},
-		{
-			name:    "cert without header",
-			sources: []CredentialSourceConfig{{Name: "cert", Type: "cert"}},
-			wantErr: `header is required for type "cert"`,
 		},
 	}
 
