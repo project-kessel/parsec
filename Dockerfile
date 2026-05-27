@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7-1778072020 AS builder
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7-1778562320 AS builder
 
 ARG TARGETARCH
 USER root
@@ -19,7 +19,7 @@ COPY Makefile ./
 ARG VERSION
 RUN VERSION=${VERSION} make build
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7-1778072020
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7-1778562320
 
 COPY --from=builder /workspace/bin/parsec /usr/local/bin/
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/lestrrat-go/httprc/v3"
@@ -19,12 +20,13 @@ import (
 
 // JWTValidator validates JWT tokens using JWKS
 type JWTValidator struct {
-	issuer      string
-	jwksURL     string
-	cache       *jwk.Cache
-	trustDomain string
-	clock       clock.Clock
-	observer    JWTValidatorObserver
+	issuer           string
+	jwksURL          string
+	cache            *jwk.Cache
+	trustDomain      string
+	clock            clock.Clock
+	observer         JWTValidatorObserver
+	allowedAudiences []string
 }
 
 // JWTValidatorConfig contains configuration for JWT validation
@@ -54,6 +56,9 @@ type JWTValidatorConfig struct {
 
 	// Observer for JWT validation events. If nil, a no-op observer is used.
 	Observer JWTValidatorObserver
+
+	// AllowedAudiences restricts token aud claims. Empty disables enforcement.
+	AllowedAudiences []string
 }
 
 // NewJWTValidator creates a new JWT validator with JWKS support
@@ -108,12 +113,13 @@ func NewJWTValidator(cfg JWTValidatorConfig) (*JWTValidator, error) {
 	}
 
 	return &JWTValidator{
-		issuer:      cfg.Issuer,
-		jwksURL:     jwksURL,
-		cache:       cache,
-		trustDomain: cfg.TrustDomain,
-		clock:       clk,
-		observer:    obs,
+		issuer:           cfg.Issuer,
+		jwksURL:          jwksURL,
+		cache:            cache,
+		trustDomain:      cfg.TrustDomain,
+		clock:            clk,
+		observer:         obs,
+		allowedAudiences: slices.Clone(cfg.AllowedAudiences),
 	}, nil
 }
 
@@ -152,7 +158,6 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 		jwt.WithClock(jwt.ClockFunc(func() time.Time {
 			return v.clock.Now()
 		})),
-		// TODO: validate aud
 	)
 	if err != nil {
 		if errors.Is(err, jwt.TokenExpiredError()) {
@@ -184,6 +189,10 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	maps.Copy(claimsMap, allClaims)
 
 	audiences, _ := token.Audience()
+	if err := v.validateAudience(audiences); err != nil {
+		p.TokenInvalid(err)
+		return nil, err
+	}
 
 	scope := ""
 	if err := token.Get("scope", &scope); err != nil {
@@ -203,6 +212,21 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 		Audience:    audiences,
 		Scope:       scope,
 	}, nil
+}
+
+func (v *JWTValidator) validateAudience(tokenAudiences []string) error {
+	if len(v.allowedAudiences) == 0 {
+		return nil
+	}
+	if len(tokenAudiences) == 0 {
+		return fmt.Errorf("%w: missing audience claim", ErrInvalidToken)
+	}
+	for _, aud := range tokenAudiences {
+		if slices.Contains(v.allowedAudiences, aud) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: audience not in allowlist", ErrInvalidToken)
 }
 
 // Close cleans up resources (stops JWKS cache refresh)

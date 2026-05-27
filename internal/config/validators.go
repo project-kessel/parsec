@@ -99,9 +99,10 @@ func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs 
 	}
 
 	validatorCfg := trust.JWTValidatorConfig{
-		Issuer:      cfg.Issuer,
-		JWKSURL:     cfg.JWKSURL,
-		TrustDomain: cfg.TrustDomain,
+		Issuer:           cfg.Issuer,
+		JWKSURL:          cfg.JWKSURL,
+		TrustDomain:      cfg.TrustDomain,
+		AllowedAudiences: cfg.Audiences,
 	}
 
 	// Parse refresh interval if provided
