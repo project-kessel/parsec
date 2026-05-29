@@ -70,3 +70,10 @@ authz_server:
       header_name: "Transaction-Token"
     - type: "urn:redhat:params:oauth:token-type:rh-identity"
       header_name: "x-rh-identity"
+  # scope:
+  #   default: "api.read api.write"
+  #   by_trust_domain:
+  #     "https://sso.redhat.com/auth/realms/redhat-external": "api.console"
+  #   from_request:
+  #     header: "x-oauth-scope"
+  #     query_param: "scope"

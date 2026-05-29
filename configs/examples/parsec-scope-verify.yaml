@@ -1,0 +1,46 @@
+# Local verification config for OAuth scope changes.
+# Uses stub trust store/validator so no external JWKS is required.
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+observability:
+  type: logging
+  log_level: info
+  log_format: json
+
+trust_domain: "parsec.example.com"
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+trust_store:
+  type: stub_store
+  validators:
+    - type: stub_validator
+
+data_sources: []
+
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.example.com"
+    ttl: 5m
+    transaction_context:
+      - type: passthrough
+    request_context:
+      - type: request_attributes
+
+authz_server:
+  token_types:
+    - type: "urn:ietf:params:oauth:token-type:txn_token"
+      header_name: "Transaction-Token"
+  scope:
+    default: "api.read api.write"
+    by_trust_domain:
+      "test-domain": "trust-domain:access"
+    from_request:
+      header: "x-oauth-scope"
+      query_param: "scope"

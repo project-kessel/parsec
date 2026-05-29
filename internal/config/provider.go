@@ -382,3 +382,22 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 
 	return tokenTypes, nil
 }
+
+// AuthzServerScopePolicy returns the configured scope policy for ext_authz.
+func (p *Provider) AuthzServerScopePolicy() (server.ScopePolicy, error) {
+	if p.config.AuthzServer == nil || p.config.AuthzServer.Scope == nil {
+		return server.ScopePolicy{}, nil
+	}
+
+	cfg := p.config.AuthzServer.Scope
+	input := server.ScopePolicyConfig{
+		DefaultScope:  cfg.Default,
+		ByTrustDomain: cfg.ByTrustDomain,
+	}
+	if cfg.FromRequest != nil {
+		input.RequestHeader = cfg.FromRequest.Header
+		input.RequestQueryParam = cfg.FromRequest.QueryParam
+	}
+
+	return server.ParseScopePolicy(input)
+}

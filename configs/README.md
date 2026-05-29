@@ -151,9 +151,22 @@ authz_server:
       header_name: "Transaction-Token"
     - type: "urn:ietf:params:oauth:token-type:access_token"
       header_name: "Authorization"
+
+  # Optional OAuth2 scope resolution for issued tokens.
+  # Precedence: request header → request query param → by_trust_domain → default → omit.
+  # Invalid scope config fails at startup.
+  # Resolved scope metadata is available to token mappers via request attributes:
+  # requested_scope, resolved_scope_source (request_header, request_query, trust_domain, or default).
+  scope:
+    default: "api.read api.write"
+    by_trust_domain:
+      "customer.example.com": "customer:access"
+    from_request:
+      header: "x-oauth-scope"
+      query_param: "scope"
 ```
 
-If not specified, defaults to issuing a transaction token in the `Transaction-Token` header.
+If not specified, defaults to issuing a transaction token in the `Transaction-Token` header with no `scope` claim.
 
 ### Exchange Server
 

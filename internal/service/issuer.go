@@ -25,8 +25,8 @@ type IssueContext struct {
 	// Audience for the token (aud claim) - typically the trust domain
 	Audience string
 
-	// Scope for the token (scope claim)
-	Scope string
+	// Scope for the token (scope claim). Zero value omits the claim.
+	Scope OAuthScope
 
 	// DataSourceRegistry provides access to data sources for lazy fetching
 	DataSourceRegistry *DataSourceRegistry

@@ -59,14 +59,14 @@ type IssueRequest struct {
 	TokenTypes []TokenType
 
 	// Scope for the tokens
-	Scope string
+	Scope OAuthScope
 }
 
 // IssueTokens orchestrates the complete token issuance process
 // Returns a map of token type to issued token
 func (ts *TokenService) IssueTokens(ctx context.Context, req *IssueRequest) (map[TokenType]*Token, error) {
 	// Create request-scoped probe that captures execution context
-	ctx, p := ts.observer.TokenIssuanceStarted(ctx, req.Subject, req.Actor, req.Scope, req.TokenTypes)
+	ctx, p := ts.observer.TokenIssuanceStarted(ctx, req.Subject, req.Actor, req.Scope.String(), req.TokenTypes)
 	defer p.End()
 
 	// Build issue context with base information needed for all issuers

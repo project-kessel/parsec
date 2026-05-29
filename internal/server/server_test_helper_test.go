@@ -97,14 +97,9 @@ func startTestServer(t *testing.T, cfg Config) *testEnv {
 	}
 }
 
-// setupStubDependencies creates stub implementations for testing server
-// endpoints. Returns a trust store, token service, and issuer registry.
-func setupStubDependencies() (trust.Store, *service.TokenService, service.Registry) {
-	trustStore := trust.NewStubStore()
+const stubTrustDomain = "parsec.test"
 
-	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
-	trustStore.AddValidator(stubValidator)
-
+func newStubTokenService(observer service.TokenServiceObserver) (*service.TokenService, service.Registry) {
 	dataSourceRegistry := service.NewDataSourceRegistry()
 
 	issuerRegistry := service.NewSimpleRegistry()
@@ -118,10 +113,42 @@ func setupStubDependencies() (trust.Store, *service.TokenService, service.Regist
 	})
 	issuerRegistry.Register(service.TokenTypeTransactionToken, txnTokenIssuer)
 
-	trustDomain := "parsec.test"
-	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
+	tokenService := service.NewTokenService(stubTrustDomain, dataSourceRegistry, issuerRegistry, observer)
+	return tokenService, issuerRegistry
+}
 
+// setupStubDependencies creates stub implementations for testing server
+// endpoints. Returns a trust store, token service, and issuer registry.
+func setupStubDependencies() (trust.Store, *service.TokenService, service.Registry) {
+	trustStore := trust.NewStubStore()
+
+	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
+	trustStore.AddValidator(stubValidator)
+
+	tokenService, issuerRegistry := newStubTokenService(nil)
 	return trustStore, tokenService, issuerRegistry
+}
+
+// setupScopeTestDependencies creates stub dependencies with a FakeObserver for scope tests.
+func setupScopeTestDependencies(t *testing.T) (trust.Store, *trust.StubValidator, *service.TokenService, *service.FakeObserver) {
+	t.Helper()
+
+	fakeObs := service.NewFakeObserver(t)
+
+	trustStore := trust.NewStubStore()
+	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
+	trustStore.AddValidator(stubValidator)
+
+	tokenService, _ := newStubTokenService(fakeObs)
+	return trustStore, stubValidator, tokenService, fakeObs
+}
+
+func assertTokenIssuanceScope(t *testing.T, fakeObs *service.FakeObserver, wantScope string) {
+	t.Helper()
+
+	fakeObs.AssertSingleProbe("TokenIssuanceStarted", map[string]any{
+		"scope": wantScope,
+	})
 }
 
 // stubServerConfig builds a Config with stub dependencies suitable for most
@@ -131,7 +158,7 @@ func stubServerConfig() Config {
 	trustStore, tokenService, issuerRegistry := setupStubDependencies()
 	claimsFilterRegistry := NewStubClaimsFilterRegistry()
 	return Config{
-		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
+		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, ScopePolicy{}, nil),
 		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
 		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Observer: NoOpServerObserver{}}),
 		Observer:       NoOpServerObserver{},

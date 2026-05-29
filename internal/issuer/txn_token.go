@@ -131,8 +131,8 @@ func (i *TransactionTokenIssuer) Issue(ctx context.Context, issueCtx *service.Is
 	}
 
 	// Scope (if provided)
-	if issueCtx.Scope != "" {
-		if err := token.Set("scope", issueCtx.Scope); err != nil {
+	if issueCtx.Scope.IsPresent() {
+		if err := token.Set("scope", issueCtx.Scope.String()); err != nil {
 			return nil, fmt.Errorf("failed to set scope: %w", err)
 		}
 	}

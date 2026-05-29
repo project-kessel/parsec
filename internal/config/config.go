@@ -50,6 +50,29 @@ type ServerConfig struct {
 type AuthzServerConfig struct {
 	// TokenTypes specifies which token types to issue and how to deliver them
 	TokenTypes []TokenTypeConfig `koanf:"token_types"`
+
+	// Scope configures OAuth2 scope resolution for issued tokens (optional)
+	Scope *ScopeConfig `koanf:"scope"`
+}
+
+// ScopeConfig configures how ext_authz resolves OAuth2 scope for issued tokens.
+type ScopeConfig struct {
+	// Default is the scope used when no other source matches
+	Default string `koanf:"default"`
+
+	// ByTrustDomain maps subject trust domains to scope values
+	ByTrustDomain map[string]string `koanf:"by_trust_domain"`
+
+	// FromRequest extracts scope from the incoming HTTP request
+	FromRequest *RequestScopeConfig `koanf:"from_request"`
+}
+
+// RequestScopeConfig configures scope extraction from HTTP request attributes.
+type RequestScopeConfig struct {
+	// Header is the HTTP header name to read scope from (case-insensitive)
+	Header string `koanf:"header"`
+
+	QueryParam string `koanf:"query_param"`
 }
 
 // TokenTypeConfig specifies a token type to issue via ext_authz

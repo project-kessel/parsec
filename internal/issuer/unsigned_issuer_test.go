@@ -34,7 +34,7 @@ func TestUnsignedIssuer_Issue(t *testing.T) {
 			Subject: "test-subject",
 		},
 		Audience:           "test-audience",
-		Scope:              "test-scope",
+		Scope:              mustOAuthScope(t, "test-scope"),
 		DataSourceRegistry: service.NewDataSourceRegistry(),
 	}
 
@@ -228,4 +228,13 @@ func TestUnsignedIssuer_PublicKeys(t *testing.T) {
 	if len(keys) != 0 {
 		t.Errorf("Expected no public keys for unsigned issuer, got %d", len(keys))
 	}
+}
+
+func mustOAuthScope(t *testing.T, raw string) service.OAuthScope {
+	t.Helper()
+	scope, ok := service.NewOAuthScope(raw)
+	if !ok {
+		t.Fatalf("invalid oauth scope %q", raw)
+	}
+	return scope
 }

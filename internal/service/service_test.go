@@ -32,10 +32,11 @@ func TestTokenService_IssueTokens_Observability(t *testing.T) {
 		service := NewTokenService("trust.example.com", nil, registry, fakeObs)
 
 		// Execute
+		scope, _ := NewOAuthScope("read write")
 		req := &IssueRequest{
 			Subject:    subject,
 			Actor:      actor,
-			Scope:      "read write",
+			Scope:      scope,
 			TokenTypes: []TokenType{TokenTypeTransactionToken},
 		}
 

@@ -854,6 +854,102 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 	})
 }
 
+func TestExchangeServer_Exchange_Scope(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("valid scope is issued echoed and recorded in metadata", func(t *testing.T) {
+		exchangeServer, _, fakeObs := setupExchangeServerForScope(t)
+
+		resp, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
+			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
+			SubjectToken: "valid-token",
+			Audience:     "parsec.test",
+			Scope:        "  read write  ",
+		})
+		if err != nil {
+			t.Fatalf("Exchange failed: %v", err)
+		}
+		if resp.Scope != "read write" {
+			t.Fatalf("response Scope = %q, want %q", resp.Scope, "read write")
+		}
+
+		assertTokenIssuanceScope(t, fakeObs, "read write")
+
+		reqCtx, err := parseTestTokenRequestContext(resp.AccessToken)
+		if err != nil {
+			t.Fatalf("parseTestTokenRequestContext: %v", err)
+		}
+		if got, ok := reqCtx["requested_scope"].(string); !ok || got != "read write" {
+			t.Fatalf("requested_scope = %v, want %q", reqCtx["requested_scope"], "read write")
+		}
+	})
+
+	t.Run("whitespace-only scope is omitted everywhere", func(t *testing.T) {
+		exchangeServer, _, fakeObs := setupExchangeServerForScope(t)
+
+		resp, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
+			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
+			SubjectToken: "valid-token",
+			Audience:     "parsec.test",
+			Scope:        "   ",
+		})
+		if err != nil {
+			t.Fatalf("Exchange failed: %v", err)
+		}
+		if resp.Scope != "" {
+			t.Fatalf("response Scope = %q, want empty", resp.Scope)
+		}
+
+		assertTokenIssuanceScope(t, fakeObs, "")
+
+		reqCtx, err := parseTestTokenRequestContext(resp.AccessToken)
+		if err != nil {
+			t.Fatalf("parseTestTokenRequestContext: %v", err)
+		}
+		if _, ok := reqCtx["requested_scope"]; ok {
+			t.Fatalf("requested_scope should be absent, got %v", reqCtx["requested_scope"])
+		}
+	})
+
+	t.Run("empty scope is omitted everywhere", func(t *testing.T) {
+		exchangeServer, _, fakeObs := setupExchangeServerForScope(t)
+
+		resp, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
+			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
+			SubjectToken: "valid-token",
+			Audience:     "parsec.test",
+		})
+		if err != nil {
+			t.Fatalf("Exchange failed: %v", err)
+		}
+		if resp.Scope != "" {
+			t.Fatalf("response Scope = %q, want empty", resp.Scope)
+		}
+
+		assertTokenIssuanceScope(t, fakeObs, "")
+
+		reqCtx, err := parseTestTokenRequestContext(resp.AccessToken)
+		if err != nil {
+			t.Fatalf("parseTestTokenRequestContext: %v", err)
+		}
+		if _, ok := reqCtx["requested_scope"]; ok {
+			t.Fatalf("requested_scope should be absent, got %v", reqCtx["requested_scope"])
+		}
+	})
+}
+
+func setupExchangeServerForScope(t *testing.T) (*ExchangeServer, *trust.StubValidator, *service.FakeObserver) {
+	t.Helper()
+
+	trustStore, stubValidator, tokenService, fakeObs := setupScopeTestDependencies(t)
+	stubValidator.WithResult(&trust.Result{
+		Subject:     "user-123",
+		TrustDomain: stubTrustDomain,
+	})
+	exchangeServer := NewExchangeServer(trustStore, tokenService, NewStubClaimsFilterRegistry(), nil)
+	return exchangeServer, stubValidator, fakeObs
+}
+
 // parseTestTokenRequestContext extracts the request context from a stub token
 // Format: stub-txn-token.{subject}.{txnID}.{requestContextJSON}
 func parseTestTokenRequestContext(token string) (map[string]any, error) {

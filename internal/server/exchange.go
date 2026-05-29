@@ -39,14 +39,16 @@ func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenServic
 
 // Exchange implements the token exchange endpoint (RFC 8693)
 func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeRequest) (*parsecv1.ExchangeResponse, error) {
-	// Create request-scoped probe
-	ctx, p := s.observer.TokenExchangeStarted(ctx, req.GrantType, req.RequestedTokenType, req.Audience, req.Scope)
-	defer p.End()
-
 	// 1. Validate the grant type
 	if req.GrantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
 		return nil, fmt.Errorf("unsupported grant_type: %s", req.GrantType)
 	}
+
+	requestedScope, _ := service.NewOAuthScope(req.Scope)
+
+	// Create request-scoped probe
+	ctx, p := s.observer.TokenExchangeStarted(ctx, req.GrantType, req.RequestedTokenType, req.Audience, requestedScope.String())
+	defer p.End()
 
 	// 2. Extract actor credential from gRPC context
 	actorCred, err := extractActorCredential(ctx)
@@ -109,9 +111,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	if req.Audience != "" {
 		reqAttrs.Additional["requested_audience"] = req.Audience
 	}
-	if req.Scope != "" {
-		reqAttrs.Additional["requested_scope"] = req.Scope
-	}
+	enrichRequestScope(reqAttrs, ScopeResolution{Scope: requestedScope, Source: ScopeSourceOmit})
 
 	// 4. Filter trust store based on actor permissions
 	filteredStore, err := s.trustStore.ForActor(ctx, actor, reqAttrs)
@@ -158,7 +158,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		Actor:             actor,
 		RequestAttributes: reqAttrs,
 		TokenTypes:        []service.TokenType{requestedTokenType},
-		Scope:             req.Scope,
+		Scope:             requestedScope,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to issue token: %w", err)
@@ -175,6 +175,6 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		IssuedTokenType: string(requestedTokenType),
 		TokenType:       "Bearer",
 		ExpiresIn:       int64(token.ExpiresAt.Sub(token.IssuedAt).Seconds()),
-		Scope:           req.Scope,
+		Scope:           requestedScope.String(),
 	}, nil
 }

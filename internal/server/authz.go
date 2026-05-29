@@ -32,6 +32,7 @@ type AuthzServer struct {
 	trustStore   trust.Store
 	tokenService *service.TokenService
 	observer     service.AuthzCheckObserver
+	scopePolicy  ScopePolicy
 
 	// TokenTypesToIssue specifies which token types to issue and their headers
 	// This could come from configuration in the future
@@ -39,7 +40,7 @@ type AuthzServer struct {
 }
 
 // NewAuthzServer creates a new ext_authz server
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, observer service.AuthzCheckObserver) *AuthzServer {
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, scopePolicy ScopePolicy, observer service.AuthzCheckObserver) *AuthzServer {
 	// Default to transaction tokens if none specified
 	if len(tokenTypes) == 0 {
 		tokenTypes = []TokenTypeSpec{
@@ -59,6 +60,7 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		trustStore:        trustStore,
 		tokenService:      tokenService,
 		TokenTypesToIssue: tokenTypes,
+		scopePolicy:       scopePolicy,
 		observer:          observer,
 	}
 }
@@ -126,13 +128,15 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		tokenTypes[i] = spec.Type
 	}
 
+	resolvedScope := s.scopePolicy.Resolve(reqAttrs, result)
+	enrichRequestScope(reqAttrs, resolvedScope)
+
 	issuedTokens, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
 		Subject:           result,
 		Actor:             actor,
 		RequestAttributes: reqAttrs,
 		TokenTypes:        tokenTypes,
-		// TODO: Get scope from configuration or request
-		Scope: "",
+		Scope:             resolvedScope.Scope,
 	})
 	if err != nil {
 		return s.denyResponse(codes.Internal, fmt.Sprintf("failed to issue tokens: %v", err)), nil
