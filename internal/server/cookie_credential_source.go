@@ -1,10 +1,7 @@
 package server
 
 import (
-	"fmt"
 	"strings"
-
-	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -15,25 +12,20 @@ type CookieCredentialSource struct {
 	CookieName string
 }
 
-func (s *CookieCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExtraction, error) {
-	headers, _, err := httpRequestFromCheck(req)
-	if err != nil {
-		return nil, err
-	}
-
+func (s *CookieCredentialSource) Extract(tc TransportContext) (*CredentialExtraction, error) {
 	name := s.CookieName
 	if name == "" {
 		name = "cs_jwt"
 	}
 
-	cookieHeader := headers["cookie"]
+	cookieHeader := tc.Headers["cookie"]
 	if cookieHeader == "" {
-		return nil, fmt.Errorf("no cookie header")
+		return nil, nil
 	}
 
 	token, ok := cookieValue(cookieHeader, name)
 	if !ok || token == "" {
-		return nil, fmt.Errorf("cookie %q not found", name)
+		return nil, nil
 	}
 
 	ext := &CredentialExtraction{

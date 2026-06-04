@@ -4,75 +4,74 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
-	"strings"
-
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
 
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// extractActorCredential extracts credentials from the gRPC context
-// This identifies the calling actor (e.g., gateway making the request to parsec)
-// Returns nil credential and nil error if no actor authentication is present
-func extractActorCredential(ctx context.Context) (trust.Credential, error) {
-	// 1. Try to extract mTLS certificate from peer
-	if p, ok := peer.FromContext(ctx); ok {
-		if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok {
-			// Check if client certificate is present
-			if len(tlsInfo.State.PeerCertificates) > 0 {
-				clientCert := tlsInfo.State.PeerCertificates[0]
+// extractActorCredential extracts an actor credential from the gRPC context.
+//
+// It first checks for mTLS peer certificates (returned directly as an
+// MTLSCredential since there is no MTLSCredentialSource yet). If no TLS
+// client cert is present, it builds a TransportContext and runs through
+// the configured CredentialSource chain.
+//
+// Returns (nil, nil) if no actor authentication is present.
+func extractActorCredential(ctx context.Context, sources []CredentialSource) (*CredentialExtraction, error) {
+	tc := TransportContextFromGRPC(ctx)
 
-				// Convert certificate to DER encoding
-				certDER := clientCert.Raw
-
-				// Build certificate chain
-				chain := make([][]byte, len(tlsInfo.State.PeerCertificates)-1)
-				for i, cert := range tlsInfo.State.PeerCertificates[1:] {
-					chain[i] = cert.Raw
-				}
-
-				// Extract issuer identity from certificate
-				issuerIdentity := extractIssuerFromCert(clientCert)
-
-				return &trust.MTLSCredential{
-					Certificate:    certDER,
-					Chain:          chain,
-					IssuerIdentity: issuerIdentity,
-				}, nil
-			}
-		}
+	// mTLS takes priority. A future MTLSCredentialSource can replace this
+	// once the interface supports TLS peer info natively.
+	if tc.TLSPeer != nil && len(tc.TLSPeer.Certificates) > 0 {
+		return mtlsExtractionFromPeer(tc.TLSPeer), nil
 	}
 
-	// 2. Try to extract bearer token from gRPC metadata as fallback
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		if authHeaders := md.Get("authorization"); len(authHeaders) > 0 {
-			authHeader := authHeaders[0]
-			if token, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
-				return &trust.BearerCredential{
-					Token: token,
-				}, nil
-			}
-		}
+	if tc.Headers == nil {
+		return nil, nil
 	}
 
-	// No actor credentials found - this is not an error
-	return nil, nil
+	if len(sources) == 0 {
+		sources = defaultActorCredentialSources()
+	}
+
+	ext, err := extractCredentialFromSources(tc, sources)
+	if err != nil {
+		if errors.Is(err, ErrNoCredentials) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("actor credential extraction failed: %w", err)
+	}
+	return ext, nil
 }
 
-// extractIssuerFromCert extracts an issuer identity from a certificate
-// This uses the certificate's issuer DN as the identity
+// mtlsExtractionFromPeer builds a CredentialExtraction from TLS peer info.
+func mtlsExtractionFromPeer(peer *TLSPeerInfo) *CredentialExtraction {
+	clientCert := peer.Certificates[0]
+
+	chain := make([][]byte, len(peer.Certificates)-1)
+	for i, cert := range peer.Certificates[1:] {
+		chain[i] = cert.Raw
+	}
+
+	return &CredentialExtraction{
+		Credential: &trust.MTLSCredential{
+			Certificate:    clientCert.Raw,
+			Chain:          chain,
+			IssuerIdentity: extractIssuerFromCert(clientCert),
+		},
+		SourceName: "mtls",
+	}
+}
+
+func defaultActorCredentialSources() []CredentialSource {
+	return []CredentialSource{&BearerCredentialSource{SourceName: "bearer"}}
+}
+
 func extractIssuerFromCert(cert *x509.Certificate) string {
-	// Use the issuer's Distinguished Name as the identity
-	// Format: CN=..., O=..., etc.
 	return cert.Issuer.String()
 }
 
-// encodeCertToPEM converts a certificate to PEM encoding
-// This is a helper function for debugging/logging
-//
 //nolint:unused // kept for debugging/logging use
 func encodeCertToPEM(certDER []byte) string {
 	pemBlock := &pem.Block{
@@ -82,9 +81,6 @@ func encodeCertToPEM(certDER []byte) string {
 	return string(pem.EncodeToMemory(pemBlock))
 }
 
-// parseCertFromPEM parses a PEM-encoded certificate
-// This is a helper function for testing
-//
 //nolint:unused // kept for testing use
 func parseCertFromPEM(pemData string) (*x509.Certificate, error) {
 	block, _ := pem.Decode([]byte(pemData))

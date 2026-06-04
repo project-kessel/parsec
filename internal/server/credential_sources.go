@@ -1,12 +1,14 @@
 package server
 
 import (
-	"fmt"
-
-	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	"errors"
 
 	"github.com/project-kessel/parsec/internal/trust"
 )
+
+// ErrNoCredentials is returned by extractCredentialFromSources when none of
+// the configured sources found a credential in the transport context.
+var ErrNoCredentials = errors.New("no credentials found in configured sources")
 
 // Credential source type strings used in config.
 const (
@@ -15,9 +17,11 @@ const (
 	CredentialSourceTypeQuery  = "query"
 )
 
-// CredentialSource extracts a subject credential from an ext_authz CheckRequest.
+// CredentialSource extracts a credential from a transport-neutral context.
+// Implementations handle specific credential presentation protocols (bearer
+// header, cookie, query parameter, etc.).
 type CredentialSource interface {
-	Extract(req *authv3.CheckRequest) (*CredentialExtraction, error)
+	Extract(tc TransportContext) (*CredentialExtraction, error)
 }
 
 // CredentialExtraction is the result of extracting a credential from a request.
@@ -33,14 +37,14 @@ func defaultCredentialSources() []CredentialSource {
 	return []CredentialSource{&BearerCredentialSource{SourceName: "bearer"}}
 }
 
-func extractCredentialFromSources(req *authv3.CheckRequest, sources []CredentialSource) (*CredentialExtraction, error) {
+func extractCredentialFromSources(tc TransportContext, sources []CredentialSource) (*CredentialExtraction, error) {
 	if len(sources) == 0 {
 		sources = defaultCredentialSources()
 	}
 
 	var lastErr error
 	for _, src := range sources {
-		ext, err := src.Extract(req)
+		ext, err := src.Extract(tc)
 		if err != nil {
 			lastErr = err
 			continue
@@ -53,13 +57,5 @@ func extractCredentialFromSources(req *authv3.CheckRequest, sources []Credential
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, fmt.Errorf("no credentials found in configured sources")
-}
-
-func httpRequestFromCheck(req *authv3.CheckRequest) (headers map[string]string, path string, err error) {
-	httpReq := req.GetAttributes().GetRequest().GetHttp()
-	if httpReq == nil {
-		return nil, "", fmt.Errorf("no HTTP request attributes")
-	}
-	return httpReq.GetHeaders(), httpReq.GetPath(), nil
+	return nil, ErrNoCredentials
 }

@@ -536,6 +536,18 @@ type compositeTokenExchangeProbe struct {
 	probes []service.TokenExchangeProbe
 }
 
+func (m *compositeTokenExchangeProbe) ActorCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	for _, p := range m.probes {
+		p.ActorCredentialExtracted(cred, headersUsed)
+	}
+}
+
+func (m *compositeTokenExchangeProbe) ActorCredentialExtractionFailed(err error) {
+	for _, p := range m.probes {
+		p.ActorCredentialExtractionFailed(err)
+	}
+}
+
 func (m *compositeTokenExchangeProbe) ActorValidationSucceeded(actor *trust.Result) {
 	for _, p := range m.probes {
 		p.ActorValidationSucceeded(actor)
@@ -585,6 +597,18 @@ type compositeAuthzCheckProbe struct {
 func (m *compositeAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
 	for _, p := range m.probes {
 		p.RequestAttributesParsed(attrs)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) ActorCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	for _, p := range m.probes {
+		p.ActorCredentialExtracted(cred, headersUsed)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) ActorCredentialExtractionFailed(err error) {
+	for _, p := range m.probes {
+		p.ActorCredentialExtractionFailed(err)
 	}
 }
 

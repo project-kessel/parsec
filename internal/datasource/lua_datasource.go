@@ -160,35 +160,11 @@ func (ds *LuaDataSource) inputToLuaTable(L *lua.LState, input *service.DataSourc
 	tbl := L.NewTable()
 
 	if input.Subject != nil {
-		subjectTbl := L.NewTable()
-		L.SetField(subjectTbl, "subject", lua.LString(input.Subject.Subject))
-		L.SetField(subjectTbl, "issuer", lua.LString(input.Subject.Issuer))
-
-		if len(input.Subject.Claims) > 0 {
-			claimsTbl := L.NewTable()
-			for key, value := range input.Subject.Claims {
-				claimsTbl.RawSetString(key, luaservices.GoToLua(L, value))
-			}
-			L.SetField(subjectTbl, "claims", claimsTbl)
-		}
-
-		L.SetField(tbl, "subject", subjectTbl)
+		L.SetField(tbl, "subject", ds.trustResultToLuaTable(L, input.Subject))
 	}
 
 	if input.Actor != nil {
-		actorTbl := L.NewTable()
-		L.SetField(actorTbl, "subject", lua.LString(input.Actor.Subject))
-		L.SetField(actorTbl, "issuer", lua.LString(input.Actor.Issuer))
-
-		if len(input.Actor.Claims) > 0 {
-			claimsTbl := L.NewTable()
-			for key, value := range input.Actor.Claims {
-				claimsTbl.RawSetString(key, luaservices.GoToLua(L, value))
-			}
-			L.SetField(actorTbl, "claims", claimsTbl)
-		}
-
-		L.SetField(tbl, "actor", actorTbl)
+		L.SetField(tbl, "actor", ds.trustResultToLuaTable(L, input.Actor))
 	}
 
 	if input.RequestAttributes != nil {
@@ -228,6 +204,27 @@ func (ds *LuaDataSource) inputToLuaTable(L *lua.LState, input *service.DataSourc
 	return tbl
 }
 
+// trustResultToLuaTable converts a trust.Result to a Lua table for script access.
+func (ds *LuaDataSource) trustResultToLuaTable(L *lua.LState, result *trust.Result) *lua.LTable {
+	tbl := L.NewTable()
+	L.SetField(tbl, "subject", lua.LString(result.Subject))
+	L.SetField(tbl, "issuer", lua.LString(result.Issuer))
+
+	if result.CredentialSource != "" {
+		L.SetField(tbl, "credential_source", lua.LString(result.CredentialSource))
+	}
+
+	if len(result.Claims) > 0 {
+		claimsTbl := L.NewTable()
+		for key, value := range result.Claims {
+			claimsTbl.RawSetString(key, luaservices.GoToLua(L, value))
+		}
+		L.SetField(tbl, "claims", claimsTbl)
+	}
+
+	return tbl
+}
+
 // luaTableToResult converts a Lua table to a DataSourceResult
 func (ds *LuaDataSource) luaTableToResult(tbl *lua.LTable) (*service.DataSourceResult, error) {
 	dataField := tbl.RawGetString("data")
@@ -261,32 +258,12 @@ func (ds *LuaDataSource) luaTableToInput(tbl *lua.LTable) service.DataSourceInpu
 
 	// Parse subject
 	if subjectLV := tbl.RawGetString("subject"); subjectLV.Type() == lua.LTTable {
-		subjectTbl := subjectLV.(*lua.LTable)
-		subject := &trust.Result{
-			Subject: lua.LVAsString(subjectTbl.RawGetString("subject")),
-			Issuer:  lua.LVAsString(subjectTbl.RawGetString("issuer")),
-		}
-
-		if claimsLV := subjectTbl.RawGetString("claims"); claimsLV.Type() == lua.LTTable {
-			subject.Claims = luaTableToMap(claimsLV.(*lua.LTable))
-		}
-
-		input.Subject = subject
+		input.Subject = luaTableToTrustResult(subjectLV.(*lua.LTable))
 	}
 
 	// Parse actor
 	if actorLV := tbl.RawGetString("actor"); actorLV.Type() == lua.LTTable {
-		actorTbl := actorLV.(*lua.LTable)
-		actor := &trust.Result{
-			Subject: lua.LVAsString(actorTbl.RawGetString("subject")),
-			Issuer:  lua.LVAsString(actorTbl.RawGetString("issuer")),
-		}
-
-		if claimsLV := actorTbl.RawGetString("claims"); claimsLV.Type() == lua.LTTable {
-			actor.Claims = luaTableToMap(claimsLV.(*lua.LTable))
-		}
-
-		input.Actor = actor
+		input.Actor = luaTableToTrustResult(actorLV.(*lua.LTable))
 	}
 
 	// Parse request attributes
@@ -317,6 +294,21 @@ func (ds *LuaDataSource) luaTableToInput(tbl *lua.LTable) service.DataSourceInpu
 	}
 
 	return input
+}
+
+// luaTableToTrustResult converts a Lua table to a trust.Result.
+func luaTableToTrustResult(tbl *lua.LTable) *trust.Result {
+	result := &trust.Result{
+		Subject:          lua.LVAsString(tbl.RawGetString("subject")),
+		Issuer:           lua.LVAsString(tbl.RawGetString("issuer")),
+		CredentialSource: lua.LVAsString(tbl.RawGetString("credential_source")),
+	}
+
+	if claimsLV := tbl.RawGetString("claims"); claimsLV.Type() == lua.LTTable {
+		result.Claims = luaTableToMap(claimsLV.(*lua.LTable))
+	}
+
+	return result
 }
 
 // luaTableToMap converts a Lua table to a Go map

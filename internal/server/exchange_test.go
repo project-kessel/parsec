@@ -813,6 +813,7 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 
 		p := fakeObs.AssertSingleProbe("TokenExchangeStarted", nil)
 		p.AssertProbeSequence(
+			"ActorCredentialExtracted",
 			"ActorValidationFailed",
 			"End",
 		)

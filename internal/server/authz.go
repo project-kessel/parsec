@@ -28,6 +28,10 @@ type TokenTypeSpec struct {
 type authzServerConfig struct {
 	// credentialSources configures where subject credentials are extracted from.
 	credentialSources []CredentialSource
+
+	// actorCredentialSources configures where actor credentials are extracted from.
+	// Defaults to bearer-only if unset.
+	actorCredentialSources []CredentialSource
 }
 
 // AuthzServer implements Envoy's ext_authz Authorization service
@@ -51,6 +55,14 @@ type AuthzServerOption func(*authzServerConfig)
 func WithCredentialSources(sources []CredentialSource) AuthzServerOption {
 	return func(cfg *authzServerConfig) {
 		cfg.credentialSources = sources
+	}
+}
+
+// WithActorCredentialSources sets credential extraction sources for actor
+// (caller) validation. Defaults to bearer-only if unset.
+func WithActorCredentialSources(sources []CredentialSource) AuthzServerOption {
+	return func(cfg *authzServerConfig) {
+		cfg.actorCredentialSources = sources
 	}
 }
 
@@ -99,21 +111,24 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	p.RequestAttributesParsed(reqAttrs)
 
 	// 2. Extract actor credential from gRPC context
-	actorCred, err := extractActorCredential(ctx)
+	actorExt, err := extractActorCredential(ctx, s.actorCredentialSources)
 	if err != nil {
+		p.ActorCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Internal,
 			fmt.Sprintf("failed to extract actor credential: %v", err)), nil
 	}
 
 	var actor *trust.Result
-	if actorCred != nil {
+	if actorExt != nil {
+		p.ActorCredentialExtracted(actorExt.Credential, actorExt.Headers)
 		var validationErr error
-		actor, validationErr = s.trustStore.Validate(ctx, actorCred)
+		actor, validationErr = s.trustStore.Validate(ctx, actorExt.Credential)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)
 			return s.denyResponse(codes.Unauthenticated,
 				fmt.Sprintf("actor validation failed: %v", validationErr)), nil
 		}
+		actor.CredentialSource = actorExt.SourceName
 		p.ActorValidationSucceeded(actor)
 	} else {
 		actor = trust.AnonymousResult()
@@ -128,8 +143,13 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	// 4. Extract subject credentials from request
-	// The extraction layer returns both the credential and which headers were used
-	ext, err := extractCredentialFromSources(req, s.credentialSources)
+	tc, err := TransportContextFromCheckRequest(req)
+	if err != nil {
+		p.SubjectCredentialExtractionFailed(err)
+		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
+	}
+
+	ext, err := extractCredentialFromSources(tc, s.credentialSources)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
@@ -137,12 +157,12 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	p.SubjectCredentialExtracted(ext.Credential, ext.Headers)
 
 	// 5. Validate subject credentials against filtered trust store
-	// The filtered store only includes validators the actor is allowed to use
 	result, err := filteredStore.Validate(ctx, ext.Credential)
 	if err != nil {
 		p.SubjectValidationFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", err)), nil
 	}
+	result.CredentialSource = ext.SourceName
 	p.SubjectValidationSucceeded(result)
 
 	// 6. Issue tokens via TokenService
@@ -152,11 +172,10 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	issuedTokens, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
-		Subject:              result,
-		Actor:                actor,
-		RequestAttributes:    reqAttrs,
-		TokenTypes:           tokenTypes,
-		CredentialSourceName: ext.SourceName,
+		Subject:           result,
+		Actor:             actor,
+		RequestAttributes: reqAttrs,
+		TokenTypes:        tokenTypes,
 		// TODO: Get scope from configuration or request
 		Scope: "",
 	})

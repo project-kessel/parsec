@@ -19,10 +19,9 @@ This package provides CEL extensions specifically for claim mapping in Parsec:
   - `subject.claims` - Additional claims from the credential
   - `subject.audience` - Intended audience
   - `subject.scope` - OAuth2 scope
+  - `subject.credential_source` - How the credential was presented (e.g. "bearer", "cookie")
 
-- **`cred_source_name`** - Configured credential source name that matched (string, unique per source)
-
-- **`workload`** - Workload identity information (map, same structure as subject)
+- **`actor`** - Actor identity information (map, same structure as subject)
 
 - **`request`** - Request attributes (map)
   - `request.method` - HTTP method

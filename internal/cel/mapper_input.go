@@ -75,8 +75,6 @@ func (lib *mapperInputLib) CompileOptions() []cel.EnvOption {
 		cel.Variable("subject", cel.DynType),
 		cel.Variable("actor", cel.DynType),
 		cel.Variable("request", cel.DynType),
-		// cred_source_name is the configured credential source name that matched (unique per source).
-		cel.Variable("cred_source_name", cel.StringType),
 	}
 }
 

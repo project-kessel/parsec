@@ -187,6 +187,14 @@ func (p *FakeProbe) IssuerNotFound(tokenType TokenType, err error) {
 }
 
 // TokenExchangeProbe methods
+func (p *FakeProbe) ActorCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	p.recordCall("ActorCredentialExtracted", cred, headersUsed)
+}
+
+func (p *FakeProbe) ActorCredentialExtractionFailed(err error) {
+	p.recordCall("ActorCredentialExtractionFailed", err)
+}
+
 func (p *FakeProbe) ActorValidationSucceeded(actor *trust.Result) {
 	p.recordCall("ActorValidationSucceeded", actor)
 }

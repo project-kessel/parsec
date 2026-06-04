@@ -3,30 +3,22 @@ package server
 import (
 	"testing"
 
-	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
-
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func TestExtractCredentialFromSources(t *testing.T) {
 	t.Parallel()
 
-	makeReq := func(headers map[string]string, path string) *authv3.CheckRequest {
-		return &authv3.CheckRequest{
-			Attributes: &authv3.AttributeContext{
-				Request: &authv3.AttributeContext_Request{
-					Http: &authv3.AttributeContext_HttpRequest{
-						Headers: headers,
-						Path:    path,
-					},
-				},
-			},
+	makeTC := func(headers map[string]string, path string) TransportContext {
+		return TransportContext{
+			Headers: headers,
+			Path:    path,
 		}
 	}
 
 	t.Run("bearer from authorization header", func(t *testing.T) {
 		t.Parallel()
-		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+		ext, err := extractCredentialFromSources(makeTC(map[string]string{
 			"authorization": "Bearer jwt-token",
 		}, "/"), defaultCredentialSources())
 		if err != nil {
@@ -49,7 +41,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("bearer scheme is case-insensitive", func(t *testing.T) {
 		t.Parallel()
-		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+		ext, err := extractCredentialFromSources(makeTC(map[string]string{
 			"authorization": "bearer jwt-token",
 		}, "/"), defaultCredentialSources())
 		if err != nil {
@@ -64,7 +56,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("cookie", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}}
-		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+		ext, err := extractCredentialFromSources(makeTC(map[string]string{
 			"cookie": "session=abc; cs_jwt=cookie-jwt; other=1",
 		}, "/"), sources)
 		if err != nil {
@@ -88,7 +80,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("cookie only credential is removed entirely", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}}
-		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+		ext, err := extractCredentialFromSources(makeTC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
 		}, "/"), sources)
 		if err != nil {
@@ -105,7 +97,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("query", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{&QueryCredentialSource{SourceName: "query-token", ParameterName: "token"}}
-		ext, err := extractCredentialFromSources(makeReq(nil, "/api?token=query-jwt&foo=bar"), sources)
+		ext, err := extractCredentialFromSources(makeTC(nil, "/api?token=query-jwt&foo=bar"), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -127,7 +119,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 			&BearerCredentialSource{SourceName: "authorization-bearer"},
 			&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"},
 		}
-		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+		ext, err := extractCredentialFromSources(makeTC(map[string]string{
 			"authorization": "Bearer header-jwt",
 			"cookie":        "cs_jwt=cookie-jwt",
 		}, "/"), sources)
@@ -149,7 +141,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 			&BearerCredentialSource{SourceName: "authorization-bearer"},
 			&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"},
 		}
-		ext, err := extractCredentialFromSources(makeReq(map[string]string{
+		ext, err := extractCredentialFromSources(makeTC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
 		}, "/"), sources)
 		if err != nil {
@@ -162,7 +154,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("no credentials found", func(t *testing.T) {
 		t.Parallel()
-		_, err := extractCredentialFromSources(makeReq(nil, "/"), defaultCredentialSources())
+		_, err := extractCredentialFromSources(makeTC(nil, "/"), defaultCredentialSources())
 		if err == nil {
 			t.Fatal("expected error when no credentials present")
 		}

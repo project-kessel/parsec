@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
-
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
@@ -14,15 +12,10 @@ type BearerCredentialSource struct {
 	SourceName string
 }
 
-func (s *BearerCredentialSource) Extract(req *authv3.CheckRequest) (*CredentialExtraction, error) {
-	headers, _, err := httpRequestFromCheck(req)
-	if err != nil {
-		return nil, err
-	}
-
-	authHeader := headers["authorization"]
+func (s *BearerCredentialSource) Extract(tc TransportContext) (*CredentialExtraction, error) {
+	authHeader := tc.Headers["authorization"]
 	if authHeader == "" {
-		return nil, fmt.Errorf("no authorization header")
+		return nil, nil
 	}
 
 	scheme, token, ok := strings.Cut(authHeader, " ")

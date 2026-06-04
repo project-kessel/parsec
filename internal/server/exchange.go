@@ -13,6 +13,24 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
+// exchangeServerConfig holds ExchangeServer settings applied via options.
+type exchangeServerConfig struct {
+	// callerCredentialSources configures where caller (actor) credentials are
+	// extracted from. Defaults to bearer-only if unset.
+	callerCredentialSources []CredentialSource
+}
+
+// ExchangeServerOption configures an ExchangeServer.
+type ExchangeServerOption func(*exchangeServerConfig)
+
+// WithCallerCredentialSources sets credential extraction sources for caller
+// (actor) validation on the exchange endpoint.
+func WithCallerCredentialSources(sources []CredentialSource) ExchangeServerOption {
+	return func(cfg *exchangeServerConfig) {
+		cfg.callerCredentialSources = sources
+	}
+}
+
 // ExchangeServer implements the TokenExchange gRPC service
 type ExchangeServer struct {
 	parsecv1.UnimplementedTokenExchangeServiceServer
@@ -21,19 +39,27 @@ type ExchangeServer struct {
 	tokenService         *service.TokenService
 	claimsFilterRegistry ClaimsFilterRegistry
 	observer             service.TokenExchangeObserver
+
+	exchangeServerConfig
 }
 
 // NewExchangeServer creates a new token exchange server
-func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, observer service.TokenExchangeObserver) *ExchangeServer {
-	// Use null object pattern - default to no-op observer if none provided
+func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, observer service.TokenExchangeObserver, opts ...ExchangeServerOption) *ExchangeServer {
 	if observer == nil {
 		observer = service.NoOpTokenExchangeObserver{}
 	}
+
+	cfg := exchangeServerConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	return &ExchangeServer{
 		trustStore:           trustStore,
 		tokenService:         tokenService,
 		claimsFilterRegistry: claimsFilterRegistry,
 		observer:             observer,
+		exchangeServerConfig: cfg,
 	}
 }
 
@@ -49,19 +75,22 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	}
 
 	// 2. Extract actor credential from gRPC context
-	actorCred, err := extractActorCredential(ctx)
+	actorExt, err := extractActorCredential(ctx, s.callerCredentialSources)
 	if err != nil {
+		p.ActorCredentialExtractionFailed(err)
 		return nil, fmt.Errorf("failed to extract actor credential: %w", err)
 	}
 
 	var actor *trust.Result
-	if actorCred != nil {
+	if actorExt != nil {
+		p.ActorCredentialExtracted(actorExt.Credential, actorExt.Headers)
 		var validationErr error
-		actor, validationErr = s.trustStore.Validate(ctx, actorCred)
+		actor, validationErr = s.trustStore.Validate(ctx, actorExt.Credential)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)
 			return nil, fmt.Errorf("actor validation failed: %w", validationErr)
 		}
+		actor.CredentialSource = actorExt.SourceName
 		p.ActorValidationSucceeded(actor)
 	} else {
 		actor = trust.AnonymousResult()
@@ -135,6 +164,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		p.SubjectTokenValidationFailed(err)
 		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
+	result.CredentialSource = "token_exchange"
 	p.SubjectTokenValidationSucceeded(result)
 
 	// 6. Determine which token type to issue

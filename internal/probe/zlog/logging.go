@@ -178,6 +178,19 @@ type loggingTokenExchangeProbe struct {
 	startTime time.Time
 }
 
+func (p *loggingTokenExchangeProbe) ActorCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	p.logger.Debug().
+		Str("credential_type", string(cred.Type())).
+		Strs("headers_used", headersUsed).
+		Msg("Actor credential extracted")
+}
+
+func (p *loggingTokenExchangeProbe) ActorCredentialExtractionFailed(err error) {
+	p.logger.Error().
+		Err(err).
+		Msg("Actor credential extraction failed")
+}
+
 func (p *loggingTokenExchangeProbe) ActorValidationSucceeded(actor *trust.Result) {
 	event := p.logger.Debug()
 	if actor != nil {
@@ -256,6 +269,19 @@ func (p *loggingAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestA
 			Str("path", attrs.Path)
 	}
 	event.Msg("Request attributes parsed")
+}
+
+func (p *loggingAuthzCheckProbe) ActorCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	p.logger.Debug().
+		Str("credential_type", string(cred.Type())).
+		Strs("headers_used", headersUsed).
+		Msg("Actor credential extracted")
+}
+
+func (p *loggingAuthzCheckProbe) ActorCredentialExtractionFailed(err error) {
+	p.logger.Error().
+		Err(err).
+		Msg("Actor credential extraction failed")
 }
 
 func (p *loggingAuthzCheckProbe) ActorValidationSucceeded(actor *trust.Result) {

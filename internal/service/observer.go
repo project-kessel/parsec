@@ -54,6 +54,13 @@ type TokenExchangeObserver interface {
 
 // TokenExchangeProbe provides request-scoped observability for a single token exchange operation.
 type TokenExchangeProbe interface {
+	// ActorCredentialExtracted is called when actor (caller) credentials are
+	// successfully extracted from the gRPC context.
+	ActorCredentialExtracted(cred trust.Credential, headersUsed []string)
+
+	// ActorCredentialExtractionFailed is called when actor credential extraction fails.
+	ActorCredentialExtractionFailed(err error)
+
 	// ActorValidationSucceeded is called when actor credential validation succeeds.
 	ActorValidationSucceeded(actor *trust.Result)
 
@@ -88,6 +95,13 @@ type AuthzCheckObserver interface {
 type AuthzCheckProbe interface {
 	// RequestAttributesParsed is called when request attributes are built from the incoming request.
 	RequestAttributesParsed(attrs *request.RequestAttributes)
+
+	// ActorCredentialExtracted is called when actor credentials are successfully
+	// extracted from the gRPC context.
+	ActorCredentialExtracted(cred trust.Credential, headersUsed []string)
+
+	// ActorCredentialExtractionFailed is called when actor credential extraction fails.
+	ActorCredentialExtractionFailed(err error)
 
 	// ActorValidationSucceeded is called when actor credential validation succeeds.
 	ActorValidationSucceeded(actor *trust.Result)
@@ -136,8 +150,10 @@ func (NoOpTokenIssuanceProbe) End()                                         {}
 // Embed this in concrete probe types for forward compatibility.
 type NoOpTokenExchangeProbe struct{}
 
-func (NoOpTokenExchangeProbe) ActorValidationSucceeded(*trust.Result)          {}
-func (NoOpTokenExchangeProbe) ActorValidationFailed(error)                     {}
+func (NoOpTokenExchangeProbe) ActorCredentialExtracted(trust.Credential, []string) {}
+func (NoOpTokenExchangeProbe) ActorCredentialExtractionFailed(error)               {}
+func (NoOpTokenExchangeProbe) ActorValidationSucceeded(*trust.Result)              {}
+func (NoOpTokenExchangeProbe) ActorValidationFailed(error)                         {}
 func (NoOpTokenExchangeProbe) RequestContextParsed(*request.RequestAttributes) {}
 func (NoOpTokenExchangeProbe) RequestContextParseFailed(error)                 {}
 func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)   {}
@@ -149,6 +165,8 @@ func (NoOpTokenExchangeProbe) End()                                            {
 type NoOpAuthzCheckProbe struct{}
 
 func (NoOpAuthzCheckProbe) RequestAttributesParsed(*request.RequestAttributes)    {}
+func (NoOpAuthzCheckProbe) ActorCredentialExtracted(trust.Credential, []string)   {}
+func (NoOpAuthzCheckProbe) ActorCredentialExtractionFailed(error)                 {}
 func (NoOpAuthzCheckProbe) ActorValidationSucceeded(*trust.Result)                {}
 func (NoOpAuthzCheckProbe) ActorValidationFailed(error)                           {}
 func (NoOpAuthzCheckProbe) SubjectCredentialExtracted(trust.Credential, []string) {}
