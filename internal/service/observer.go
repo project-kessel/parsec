@@ -154,11 +154,11 @@ func (NoOpTokenExchangeProbe) ActorCredentialExtracted(trust.Credential, []strin
 func (NoOpTokenExchangeProbe) ActorCredentialExtractionFailed(error)               {}
 func (NoOpTokenExchangeProbe) ActorValidationSucceeded(*trust.Result)              {}
 func (NoOpTokenExchangeProbe) ActorValidationFailed(error)                         {}
-func (NoOpTokenExchangeProbe) RequestContextParsed(*request.RequestAttributes) {}
-func (NoOpTokenExchangeProbe) RequestContextParseFailed(error)                 {}
-func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)   {}
-func (NoOpTokenExchangeProbe) SubjectTokenValidationFailed(error)              {}
-func (NoOpTokenExchangeProbe) End()                                            {}
+func (NoOpTokenExchangeProbe) RequestContextParsed(*request.RequestAttributes)     {}
+func (NoOpTokenExchangeProbe) RequestContextParseFailed(error)                     {}
+func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)       {}
+func (NoOpTokenExchangeProbe) SubjectTokenValidationFailed(error)                  {}
+func (NoOpTokenExchangeProbe) End()                                                {}
 
 // NoOpAuthzCheckProbe is a no-op implementation of AuthzCheckProbe.
 // Embed this in concrete probe types for forward compatibility.

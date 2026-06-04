@@ -25,7 +25,7 @@ type TLSPeerInfo struct {
 type TransportContext struct {
 	Headers map[string]string // normalized lowercase header keys
 	Path    string            // request path; empty for gRPC-native calls
-	TLSPeer *TLSPeerInfo     // mTLS client cert info; nil when absent
+	TLSPeer *TLSPeerInfo      // mTLS client cert info; nil when absent
 }
 
 // TransportContextFromCheckRequest builds a TransportContext from an Envoy
