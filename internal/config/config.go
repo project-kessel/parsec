@@ -33,6 +33,10 @@ type Config struct {
 	// Fixtures for hermetic testing (HTTP rules, etc.)
 	Fixtures []FixtureConfig `koanf:"fixtures"`
 
+	// CredentialSources configures where to extract credentials, in priority
+	// order. Shared by authz (subject extraction) and exchange (caller extraction).
+	CredentialSources []CredentialSourceConfig `koanf:"credential_sources"`
+
 	// Observability configuration (logging, metrics, tracing)
 	Observability *ObservabilityConfig `koanf:"observability"`
 }
@@ -50,12 +54,9 @@ type ServerConfig struct {
 type AuthzServerConfig struct {
 	// TokenTypes specifies which token types to issue and how to deliver them
 	TokenTypes []TokenTypeConfig `koanf:"token_types"`
-
-	// CredentialSources lists where to extract subject credentials, in order
-	CredentialSources []CredentialSourceConfig `koanf:"credential_sources"`
 }
 
-// CredentialSourceConfig configures a credential extraction location for ext_authz
+// CredentialSourceConfig configures a credential extraction source
 type CredentialSourceConfig struct {
 	// Name uniquely identifies this credential source (multiple sources may share a type)
 	Name string `koanf:"name"`

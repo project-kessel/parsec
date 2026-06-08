@@ -18,33 +18,33 @@ type TLSPeerInfo struct {
 	Certificates []*x509.Certificate
 }
 
-// TransportContext is a transport-neutral representation of request metadata
-// used by CredentialSource implementations. Callers normalize their specific
-// transport (Envoy CheckRequest, gRPC context, etc.) into this struct before
-// credential extraction.
-type TransportContext struct {
+// CredentialContext holds the normalized context needed by CredentialSource
+// implementations to extract credentials. Callers build a CredentialContext
+// from their specific transport (Envoy CheckRequest, gRPC context, etc.)
+// before credential extraction.
+type CredentialContext struct {
 	Headers map[string]string // normalized lowercase header keys
 	Path    string            // request path; empty for gRPC-native calls
 	TLSPeer *TLSPeerInfo      // mTLS client cert info; nil when absent
 }
 
-// TransportContextFromCheckRequest builds a TransportContext from an Envoy
+// CredentialContextFromCheckRequest builds a CredentialContext from an Envoy
 // ext_authz CheckRequest's HTTP attributes.
-func TransportContextFromCheckRequest(req *authv3.CheckRequest) (TransportContext, error) {
+func CredentialContextFromCheckRequest(req *authv3.CheckRequest) (CredentialContext, error) {
 	httpReq := req.GetAttributes().GetRequest().GetHttp()
 	if httpReq == nil {
-		return TransportContext{}, fmt.Errorf("no HTTP request attributes")
+		return CredentialContext{}, fmt.Errorf("no HTTP request attributes")
 	}
-	return TransportContext{
+	return CredentialContext{
 		Headers: normalizeHeaderKeys(httpReq.GetHeaders()),
 		Path:    httpReq.GetPath(),
 	}, nil
 }
 
-// TransportContextFromGRPC builds a TransportContext from a gRPC server
+// CredentialContextFromGRPC builds a CredentialContext from a gRPC server
 // context, extracting metadata headers and TLS peer certificate info.
-func TransportContextFromGRPC(ctx context.Context) TransportContext {
-	tc := TransportContext{}
+func CredentialContextFromGRPC(ctx context.Context) CredentialContext {
+	tc := CredentialContext{}
 
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		tc.Headers = make(map[string]string, len(md))

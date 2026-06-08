@@ -14,20 +14,20 @@ import (
 //
 // It first checks for mTLS peer certificates (returned directly as an
 // MTLSCredential since there is no MTLSCredentialSource yet). If no TLS
-// client cert is present, it builds a TransportContext and runs through
+// client cert is present, it builds a CredentialContext and runs through
 // the configured CredentialSource chain.
 //
 // Returns (nil, nil) if no actor authentication is present.
 func extractActorCredential(ctx context.Context, sources []CredentialSource) (*CredentialExtraction, error) {
-	tc := TransportContextFromGRPC(ctx)
+	cc := CredentialContextFromGRPC(ctx)
 
 	// mTLS takes priority. A future MTLSCredentialSource can replace this
 	// once the interface supports TLS peer info natively.
-	if tc.TLSPeer != nil && len(tc.TLSPeer.Certificates) > 0 {
-		return mtlsExtractionFromPeer(tc.TLSPeer), nil
+	if cc.TLSPeer != nil && len(cc.TLSPeer.Certificates) > 0 {
+		return mtlsExtractionFromPeer(cc.TLSPeer), nil
 	}
 
-	if tc.Headers == nil {
+	if cc.Headers == nil {
 		return nil, nil
 	}
 
@@ -35,7 +35,7 @@ func extractActorCredential(ctx context.Context, sources []CredentialSource) (*C
 		sources = defaultActorCredentialSources()
 	}
 
-	ext, err := extractCredentialFromSources(tc, sources)
+	ext, err := extractCredentialFromSources(cc, sources)
 	if err != nil {
 		if errors.Is(err, ErrNoCredentials) {
 			return nil, nil

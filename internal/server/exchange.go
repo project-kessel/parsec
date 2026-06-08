@@ -85,12 +85,11 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	if actorExt != nil {
 		p.ActorCredentialExtracted(actorExt.Credential, actorExt.Headers)
 		var validationErr error
-		actor, validationErr = s.trustStore.Validate(ctx, actorExt.Credential)
+		actor, validationErr = validateCredential(ctx, s.trustStore, actorExt)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)
 			return nil, fmt.Errorf("actor validation failed: %w", validationErr)
 		}
-		actor.CredentialSource = actorExt.SourceName
 		p.ActorValidationSucceeded(actor)
 	} else {
 		actor = trust.AnonymousResult()
@@ -158,13 +157,15 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	}
 
 	// Validate subject credential against filtered trust store
-	// The filtered store only includes validators the actor is allowed to use
-	result, err := filteredStore.Validate(ctx, cred)
+	subjectExt := &CredentialExtraction{
+		Credential: cred,
+		SourceName: "token_exchange",
+	}
+	result, err := validateCredential(ctx, filteredStore, subjectExt)
 	if err != nil {
 		p.SubjectTokenValidationFailed(err)
 		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
-	result.CredentialSource = "token_exchange"
 	p.SubjectTokenValidationSucceeded(result)
 
 	// 6. Determine which token type to issue

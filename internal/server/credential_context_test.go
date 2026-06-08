@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
-func TestTransportContextFromCheckRequest(t *testing.T) {
+func TestCredentialContextFromCheckRequest(t *testing.T) {
 	t.Parallel()
 
 	t.Run("extracts headers and path", func(t *testing.T) {
@@ -37,7 +37,7 @@ func TestTransportContextFromCheckRequest(t *testing.T) {
 			},
 		}
 
-		tc, err := TransportContextFromCheckRequest(req)
+		tc, err := CredentialContextFromCheckRequest(req)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -70,7 +70,7 @@ func TestTransportContextFromCheckRequest(t *testing.T) {
 			},
 		}
 
-		tc, err := TransportContextFromCheckRequest(req)
+		tc, err := CredentialContextFromCheckRequest(req)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -91,7 +91,7 @@ func TestTransportContextFromCheckRequest(t *testing.T) {
 			},
 		}
 
-		_, err := TransportContextFromCheckRequest(req)
+		_, err := CredentialContextFromCheckRequest(req)
 		if err == nil {
 			t.Fatal("expected error for missing HTTP attributes")
 		}
@@ -109,7 +109,7 @@ func TestTransportContextFromCheckRequest(t *testing.T) {
 			},
 		}
 
-		tc, err := TransportContextFromCheckRequest(req)
+		tc, err := CredentialContextFromCheckRequest(req)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -119,7 +119,7 @@ func TestTransportContextFromCheckRequest(t *testing.T) {
 	})
 }
 
-func TestTransportContextFromGRPC(t *testing.T) {
+func TestCredentialContextFromGRPC(t *testing.T) {
 	t.Parallel()
 
 	t.Run("extracts metadata headers", func(t *testing.T) {
@@ -130,7 +130,7 @@ func TestTransportContextFromGRPC(t *testing.T) {
 		})
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
-		tc := TransportContextFromGRPC(ctx)
+		tc := CredentialContextFromGRPC(ctx)
 
 		if tc.Headers["authorization"] != "Bearer grpc-token" {
 			t.Errorf("expected authorization header, got %q", tc.Headers["authorization"])
@@ -158,7 +158,7 @@ func TestTransportContextFromGRPC(t *testing.T) {
 			},
 		})
 
-		tc := TransportContextFromGRPC(ctx)
+		tc := CredentialContextFromGRPC(ctx)
 
 		if tc.TLSPeer == nil {
 			t.Fatal("expected TLSPeer to be set")
@@ -171,9 +171,9 @@ func TestTransportContextFromGRPC(t *testing.T) {
 		}
 	})
 
-	t.Run("empty context produces empty TransportContext", func(t *testing.T) {
+	t.Run("empty context produces empty CredentialContext", func(t *testing.T) {
 		t.Parallel()
-		tc := TransportContextFromGRPC(context.Background())
+		tc := CredentialContextFromGRPC(context.Background())
 
 		if tc.Headers != nil {
 			t.Errorf("expected nil headers, got %v", tc.Headers)
@@ -187,7 +187,7 @@ func TestTransportContextFromGRPC(t *testing.T) {
 		t.Parallel()
 		ctx := peer.NewContext(context.Background(), &peer.Peer{})
 
-		tc := TransportContextFromGRPC(ctx)
+		tc := CredentialContextFromGRPC(ctx)
 
 		if tc.TLSPeer != nil {
 			t.Error("expected nil TLSPeer for non-TLS peer")

@@ -122,13 +122,12 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	if actorExt != nil {
 		p.ActorCredentialExtracted(actorExt.Credential, actorExt.Headers)
 		var validationErr error
-		actor, validationErr = s.trustStore.Validate(ctx, actorExt.Credential)
+		actor, validationErr = validateCredential(ctx, s.trustStore, actorExt)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)
 			return s.denyResponse(codes.Unauthenticated,
 				fmt.Sprintf("actor validation failed: %v", validationErr)), nil
 		}
-		actor.CredentialSource = actorExt.SourceName
 		p.ActorValidationSucceeded(actor)
 	} else {
 		actor = trust.AnonymousResult()
@@ -143,13 +142,13 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	// 4. Extract subject credentials from request
-	tc, err := TransportContextFromCheckRequest(req)
+	cc, err := CredentialContextFromCheckRequest(req)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
-	ext, err := extractCredentialFromSources(tc, s.credentialSources)
+	ext, err := extractCredentialFromSources(cc, s.credentialSources)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
@@ -157,12 +156,11 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	p.SubjectCredentialExtracted(ext.Credential, ext.Headers)
 
 	// 5. Validate subject credentials against filtered trust store
-	result, err := filteredStore.Validate(ctx, ext.Credential)
+	result, err := validateCredential(ctx, filteredStore, ext)
 	if err != nil {
 		p.SubjectValidationFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", err)), nil
 	}
-	result.CredentialSource = ext.SourceName
 	p.SubjectValidationSucceeded(result)
 
 	// 6. Issue tokens via TokenService

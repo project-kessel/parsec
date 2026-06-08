@@ -13,17 +13,17 @@ type QueryCredentialSource struct {
 	ParameterName string
 }
 
-func (s *QueryCredentialSource) Extract(tc TransportContext) (*CredentialExtraction, error) {
+func (s *QueryCredentialSource) Extract(cc CredentialContext) (*CredentialExtraction, error) {
 	param := s.ParameterName
 	if param == "" {
 		param = "token"
 	}
 
-	if tc.Path == "" {
+	if cc.Path == "" {
 		return nil, nil
 	}
 
-	parsed, err := url.Parse(tc.Path)
+	parsed, err := url.Parse(cc.Path)
 	if err != nil {
 		return nil, fmt.Errorf("invalid request path: %w", err)
 	}

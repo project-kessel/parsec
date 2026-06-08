@@ -12,8 +12,8 @@ type BearerCredentialSource struct {
 	SourceName string
 }
 
-func (s *BearerCredentialSource) Extract(tc TransportContext) (*CredentialExtraction, error) {
-	authHeader := tc.Headers["authorization"]
+func (s *BearerCredentialSource) Extract(cc CredentialContext) (*CredentialExtraction, error) {
+	authHeader := cc.Headers["authorization"]
 	if authHeader == "" {
 		return nil, nil
 	}

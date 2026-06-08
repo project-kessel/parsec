@@ -9,7 +9,7 @@ import (
 
 var credentialSourceTypes = []string{"bearer", "cookie", "query"}
 
-func newAuthzServerCredentialSources(cfgs []CredentialSourceConfig) ([]server.CredentialSource, error) {
+func newCredentialSources(cfgs []CredentialSourceConfig) ([]server.CredentialSource, error) {
 	sources := make([]server.CredentialSource, 0, len(cfgs))
 	seen := make(map[string]struct{}, len(cfgs))
 	for i, cfg := range cfgs {

@@ -12,13 +12,13 @@ type CookieCredentialSource struct {
 	CookieName string
 }
 
-func (s *CookieCredentialSource) Extract(tc TransportContext) (*CredentialExtraction, error) {
+func (s *CookieCredentialSource) Extract(cc CredentialContext) (*CredentialExtraction, error) {
 	name := s.CookieName
 	if name == "" {
 		name = "cs_jwt"
 	}
 
-	cookieHeader := tc.Headers["cookie"]
+	cookieHeader := cc.Headers["cookie"]
 	if cookieHeader == "" {
 		return nil, nil
 	}

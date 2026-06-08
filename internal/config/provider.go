@@ -383,12 +383,12 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 	return tokenTypes, nil
 }
 
-// AuthzServerCredentialSources returns configured credential extraction sources for ext_authz.
-// Returns nil when unset so the server applies bearer-only defaults.
-func (p *Provider) AuthzServerCredentialSources() ([]server.CredentialSource, error) {
-	if p.config.AuthzServer == nil || len(p.config.AuthzServer.CredentialSources) == 0 {
+// CredentialSources returns the configured credential extraction sources.
+// Returns nil when unset so servers apply bearer-only defaults.
+func (p *Provider) CredentialSources() ([]server.CredentialSource, error) {
+	if len(p.config.CredentialSources) == 0 {
 		return nil, nil
 	}
 
-	return newAuthzServerCredentialSources(p.config.AuthzServer.CredentialSources)
+	return newCredentialSources(p.config.CredentialSources)
 }

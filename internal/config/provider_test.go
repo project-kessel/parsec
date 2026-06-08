@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestProvider_AuthzServerCredentialSources(t *testing.T) {
+func TestProvider_CredentialSources(t *testing.T) {
 	t.Parallel()
 
 	valid := []CredentialSourceConfig{
@@ -20,7 +20,7 @@ func TestProvider_AuthzServerCredentialSources(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "nil authz server",
+			name:    "nil credential sources",
 			sources: nil,
 		},
 		{
@@ -66,13 +66,9 @@ func TestProvider_AuthzServerCredentialSources(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var authz *AuthzServerConfig
-			if tt.sources != nil || tt.name != "nil authz server" {
-				authz = &AuthzServerConfig{CredentialSources: tt.sources}
-			}
-			p := NewProvider(&Config{AuthzServer: authz})
+			p := NewProvider(&Config{CredentialSources: tt.sources})
 
-			got, err := p.AuthzServerCredentialSources()
+			got, err := p.CredentialSources()
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -85,7 +81,7 @@ func TestProvider_AuthzServerCredentialSources(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tt.name == "nil authz server" {
+			if tt.name == "nil credential sources" {
 				if got != nil {
 					t.Fatalf("expected nil sources, got %+v", got)
 				}

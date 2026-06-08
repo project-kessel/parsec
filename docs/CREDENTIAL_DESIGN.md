@@ -2,26 +2,26 @@
 
 ## Overview
 
-Credentials in parsec are strongly typed values that encapsulate only the material needed for validation. The extraction layer uses a `CredentialSource` interface to parse credentials from a transport-neutral `TransportContext`, tracking which headers were consumed. Source provenance is carried on `trust.Result` so both actor and subject results know how their credential was presented.
+Credentials in parsec are strongly typed values that encapsulate only the material needed for validation. The extraction layer uses a `CredentialSource` interface to parse credentials from a `CredentialContext`, tracking which headers were consumed. Source provenance is carried on `trust.Result` so both actor and subject results know how their credential was presented.
 
 ## Extraction Architecture
 
 Three extraction paths share one `CredentialSource` interface:
 
-| Path | Transport | TransportContext built by |
+| Path | Transport | CredentialContext built by |
 |------|-----------|--------------------------|
-| ext_authz **subject** | Envoy CheckRequest HTTP attrs | `TransportContextFromCheckRequest` |
-| ext_authz **actor** | gRPC peer + metadata | `TransportContextFromGRPC` |
-| exchange **caller** | gRPC peer + metadata | `TransportContextFromGRPC` |
+| ext_authz **subject** | Envoy CheckRequest HTTP attrs | `CredentialContextFromCheckRequest` |
+| ext_authz **actor** | gRPC peer + metadata | `CredentialContextFromGRPC` |
+| exchange **caller** | gRPC peer + metadata | `CredentialContextFromGRPC` |
 
-Exchange body tokens (`subject_token`, `actor_token`) are a **protocol-level concern** above transport extraction. They are wrapped directly as `BearerCredential` without going through `CredentialSource`.
+Exchange body tokens (`subject_token`, `actor_token`) are a **protocol-level concern** above credential extraction. They are wrapped directly as `BearerCredential` without going through `CredentialSource`. See "Exchange Subject Token Mapping" below for future direction.
 
-### TransportContext
+### CredentialContext
 
-`TransportContext` is a normalized struct holding headers, path, and TLS peer info. Callers build one from their specific transport before credential extraction:
+`CredentialContext` holds the normalized context needed for credential extraction -- headers, path, and TLS peer info. Callers build one from their specific transport before calling `CredentialSource.Extract`:
 
 ```go
-type TransportContext struct {
+type CredentialContext struct {
     Headers map[string]string  // normalized lowercase keys
     Path    string             // request path; empty for gRPC-native calls
     TLSPeer *TLSPeerInfo      // mTLS client cert info; nil when absent
@@ -29,14 +29,14 @@ type TransportContext struct {
 ```
 
 Normalization constructors:
-- `TransportContextFromCheckRequest(req)` -- Envoy ext_authz
-- `TransportContextFromGRPC(ctx)` -- gRPC metadata + peer TLS
+- `CredentialContextFromCheckRequest(req)` -- Envoy ext_authz
+- `CredentialContextFromGRPC(ctx)` -- gRPC metadata + peer TLS
 
 ### CredentialSource interface
 
 ```go
 type CredentialSource interface {
-    Extract(tc TransportContext) (*CredentialExtraction, error)
+    Extract(cc CredentialContext) (*CredentialExtraction, error)
 }
 ```
 
@@ -44,7 +44,30 @@ Built-in implementations: `BearerCredentialSource`, `CookieCredentialSource`, `Q
 
 ### Source provenance on Result
 
-After extraction and validation, callers stamp `result.CredentialSource = ext.SourceName`. This makes the credential's presentation protocol available in CEL as `subject.credential_source` and `actor.credential_source`.
+The `validateCredential` helper encapsulates validation and source stamping:
+
+```go
+result, err := validateCredential(ctx, store, ext)
+// result.CredentialSource is set to ext.SourceName
+```
+
+This makes the credential's presentation protocol available in CEL as `subject.credential_source` and `actor.credential_source`.
+
+### Configuration
+
+Credential sources are configured at the top level and shared by both the ext_authz and token exchange servers:
+
+```yaml
+credential_sources:
+  - name: authorization-bearer
+    type: bearer
+  - name: cs-jwt-cookie
+    type: cookie
+    cookie_name: cs_jwt
+  - name: query-token
+    type: query
+    parameter_name: token
+```
 
 ## Design Principles
 
@@ -76,32 +99,14 @@ type MTLSCredential struct {
 }
 ```
 
-**Benefits:**
-- Type safety at compile time
-- Type-specific methods available (e.g., `JWTCredential` could have `GetClaims()`)
-- Clear documentation of what data each credential type needs
-- No `map[string]string` soup
-- IssuerIdentity field on JWT/OIDC/mTLS credentials enables multi-trust-domain support
-- Bearer tokens use a default issuer determined by the validator store
-
 ### 2. Issuer Identification for Validator Store
 
-Most credentials contain issuer information that the validator store uses to select the appropriate validator. Bearer tokens are an exception - the store determines their issuer based on configuration:
-
-```go
-cred := &JWTCredential{
-    Token:          token,
-    IssuerIdentity: "https://accounts.google.com",
-}
-
-result, err := store.Validate(ctx, cred)
-```
+Most credentials contain issuer information that the validator store uses to select the appropriate validator. Bearer tokens are an exception -- the store determines their issuer based on configuration.
 
 **How issuers are determined:**
 - **JWT/OIDC**: Parsed from the `iss` claim in the token during extraction
 - **Bearer (opaque)**: Uses default "bearer" issuer; store configured with appropriate validator
 - **mTLS**: From the certificate authority identifier
-- **API Key**: From configuration mapping key to issuer
 
 ### 3. Separation of Concerns
 
@@ -111,24 +116,23 @@ Credentials contain **only validation data**, not transport metadata:
 - Credentials do NOT know how they were extracted
 - Credentials ARE just the material needed for validation
 
-The **extraction layer** handles transport concerns via `CredentialSource.Extract(TransportContext)` and returns a `CredentialExtraction` containing the credential, consumed headers, and sanitization info.
+The **extraction layer** handles transport concerns via `CredentialSource.Extract(CredentialContext)` and returns a `CredentialExtraction` containing the credential, consumed headers, and sanitization info.
 
 ### 4. Security Boundary in ext_authz
 
 The extraction layer tracks which headers were used, and ext_authz removes them from requests forwarded to backends:
 
 ```go
-// 1. Normalize transport to TransportContext
-tc, err := TransportContextFromCheckRequest(req)
+// 1. Build CredentialContext from transport
+cc, err := CredentialContextFromCheckRequest(req)
 
 // 2. Extract credential via CredentialSource chain
-ext, err := extractCredentialFromSources(tc, sources)
+ext, err := extractCredentialFromSources(cc, sources)
 
-// 3. Validate and stamp provenance
-result, err := store.Validate(ctx, ext.Credential)
-result.CredentialSource = ext.SourceName
+// 3. Validate with source provenance
+result, err := validateCredential(ctx, store, ext)
 
-// 4. Remove external credential headers - security boundary
+// 4. Remove external credential headers -- security boundary
 return &CheckResponse{
     OkResponse: &OkHttpResponse{
         HeadersToRemove:         ext.Headers,
@@ -137,41 +141,15 @@ return &CheckResponse{
 }
 ```
 
-**Why this matters:**
-- External credentials (OAuth tokens, API keys, etc.) stay at the perimeter
-- Backend services only see transaction tokens
-- Prevents credential leakage to untrusted services
-- Clear trust boundary enforcement
-
-## Type Assertions in Validators
-
-Validators can use type assertions to access type-specific fields:
-
-```go
-type JWTValidator struct {
-    jwksClient *jwks.Client
-}
-
-func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Result, error) {
-    jwtCred, ok := credential.(*JWTCredential)
-    if !ok {
-        return nil, fmt.Errorf("expected JWTCredential, got %T", credential)
-    }
-    
-    key, err := v.jwksClient.GetKey(jwtCred.KeyID)
-    if err != nil {
-        return nil, err
-    }
-    
-    return validateJWT(jwtCred.Token, key, jwtCred.Algorithm)
-}
-```
-
 ## Future Enhancements
 
 ### mTLS CredentialSource
 
-`TransportContext.TLSPeer` is ready for a future `MTLSCredentialSource` that reads client certificates from the peer info.
+`CredentialContext.TLSPeer` is ready for a future `MTLSCredentialSource` that reads client certificates from the peer info. Currently, mTLS actor extraction is handled directly in `extractActorCredential` as a priority check before the source chain.
+
+### Exchange Subject Token Mapping
+
+The exchange endpoint currently wraps `subject_token` as a `BearerCredential` regardless of `subject_token_type`. A future enhancement should map RFC 8693 token types (e.g., `urn:ietf:params:oauth:token-type:jwt`) to specific credential types. This mapping likely belongs on the exchange server configuration or a top-level token type registry, not on `CredentialSource` (since exchange body tokens have exactly one extraction path by definition).
 
 ### Composite Credentials
 
@@ -203,18 +181,19 @@ type DPoPCredential struct {
 |--------|----------|
 | **Credential Type** | Strongly typed structs implementing `Credential` interface |
 | **Credential Content** | Only validation material, no transport metadata |
-| **Transport Abstraction** | `TransportContext` struct normalizes headers/path/TLS from any transport |
-| **Extraction Interface** | `CredentialSource.Extract(TransportContext)` -- transport-neutral |
-| **Source Provenance** | `trust.Result.CredentialSource` carries how the credential was presented |
+| **Credential Context** | `CredentialContext` struct normalizes headers/path/TLS from any transport |
+| **Extraction Interface** | `CredentialSource.Extract(CredentialContext)` -- transport-neutral |
+| **Source Provenance** | `validateCredential` stamps `trust.Result.CredentialSource` |
 | **Per-Role Provenance** | Both actor and subject results carry their own credential source |
+| **Configuration** | Top-level `credential_sources` shared by authz and exchange |
 | **Issuer Identification** | Each credential identifies its issuer for trust store lookup |
 | **Security Boundary** | ext_authz removes headers used for external credentials |
 | **Exchange Body Tokens** | Protocol-level concern, separate from `CredentialSource` |
 | **Extensibility** | Easy to add new credential types or sources without changing contracts |
 
 This design cleanly separates:
-1. **Normalization** (transport -> TransportContext)
-2. **Extraction** (TransportContext -> credential via CredentialSource)
-3. **Validation** (credential -> claims via trust.Store)
+1. **Normalization** (transport -> CredentialContext)
+2. **Extraction** (CredentialContext -> credential via CredentialSource)
+3. **Validation** (credential -> claims via validateCredential)
 4. **Provenance** (CredentialSource name stamped on trust.Result)
 5. **Security** (removing external credentials at boundary)

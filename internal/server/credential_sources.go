@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 
 	"github.com/project-kessel/parsec/internal/trust"
@@ -21,7 +22,7 @@ const (
 // Implementations handle specific credential presentation protocols (bearer
 // header, cookie, query parameter, etc.).
 type CredentialSource interface {
-	Extract(tc TransportContext) (*CredentialExtraction, error)
+	Extract(cc CredentialContext) (*CredentialExtraction, error)
 }
 
 // CredentialExtraction is the result of extracting a credential from a request.
@@ -33,18 +34,30 @@ type CredentialExtraction struct {
 	SourceName          string            // configured credential source name
 }
 
+// validateCredential validates a credential from a CredentialExtraction against
+// a trust.Store and stamps the source name on the result. This encapsulates the
+// extract-then-stamp pattern so callers don't mutate Result directly.
+func validateCredential(ctx context.Context, store trust.Store, ext *CredentialExtraction) (*trust.Result, error) {
+	result, err := store.Validate(ctx, ext.Credential)
+	if err != nil {
+		return nil, err
+	}
+	result.CredentialSource = ext.SourceName
+	return result, nil
+}
+
 func defaultCredentialSources() []CredentialSource {
 	return []CredentialSource{&BearerCredentialSource{SourceName: "bearer"}}
 }
 
-func extractCredentialFromSources(tc TransportContext, sources []CredentialSource) (*CredentialExtraction, error) {
+func extractCredentialFromSources(cc CredentialContext, sources []CredentialSource) (*CredentialExtraction, error) {
 	if len(sources) == 0 {
 		sources = defaultCredentialSources()
 	}
 
 	var lastErr error
 	for _, src := range sources {
-		ext, err := src.Extract(tc)
+		ext, err := src.Extract(cc)
 		if err != nil {
 			lastErr = err
 			continue
