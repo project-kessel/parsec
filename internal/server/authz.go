@@ -25,6 +25,18 @@ type TokenTypeSpec struct {
 	HeaderName string
 }
 
+// AuthzOption configures optional AuthzServer behavior.
+type AuthzOption func(*AuthzServer)
+
+// WithOptionalAuthPathMatcher sets path patterns that allow unauthenticated access.
+// Requests to matching paths proceed without credentials; when credentials are
+// present they are validated normally.
+func WithOptionalAuthPathMatcher(m *request.PathMatcher) AuthzOption {
+	return func(s *AuthzServer) {
+		s.optionalAuthMatcher = m
+	}
+}
+
 // AuthzServer implements Envoy's ext_authz Authorization service
 type AuthzServer struct {
 	authv3.UnimplementedAuthorizationServer
@@ -36,10 +48,13 @@ type AuthzServer struct {
 	// TokenTypesToIssue specifies which token types to issue and their headers
 	// This could come from configuration in the future
 	TokenTypesToIssue []TokenTypeSpec
+
+	optionalAuthMatcher *request.PathMatcher
 }
 
-// NewAuthzServer creates a new ext_authz server
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, observer service.AuthzCheckObserver) *AuthzServer {
+// NewAuthzServer creates a new ext_authz server.
+// Required parameters are positional; use AuthzOption values for optional config.
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, observer service.AuthzCheckObserver, opts ...AuthzOption) *AuthzServer {
 	// Default to transaction tokens if none specified
 	if len(tokenTypes) == 0 {
 		tokenTypes = []TokenTypeSpec{
@@ -55,12 +70,18 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		observer = service.NoOpAuthzCheckObserver{}
 	}
 
-	return &AuthzServer{
+	s := &AuthzServer{
 		trustStore:        trustStore,
 		tokenService:      tokenService,
 		TokenTypesToIssue: tokenTypes,
 		observer:          observer,
 	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
 }
 
 // Check implements the ext_authz check endpoint
@@ -72,6 +93,13 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	// 1. Build request attributes
 	reqAttrs := s.buildRequestAttributes(req)
 	p.RequestAttributesParsed(reqAttrs)
+
+	// 1b. Optional auth: if the path matches and no credentials are present,
+	// allow the request through without issuing any identity headers.
+	if s.optionalAuthMatcher.Matches(reqAttrs.Path) && reqAttrs.Headers["authorization"] == "" {
+		p.OptionalAuthPassThrough(reqAttrs)
+		return s.allowResponse(), nil
+	}
 
 	// 2. Extract actor credential from gRPC context
 	actorCred, err := extractActorCredential(ctx)
@@ -229,6 +257,19 @@ func (s *AuthzServer) buildRequestAttributes(req *authv3.CheckRequest) *request.
 		UserAgent:  httpReq.GetHeaders()["user-agent"],
 		Headers:    httpReq.GetHeaders(),
 		Additional: additional,
+	}
+}
+
+// allowResponse creates an OK response with no headers set and nothing removed.
+// Used for optional-auth paths when no credentials are present.
+func (s *AuthzServer) allowResponse() *authv3.CheckResponse {
+	return &authv3.CheckResponse{
+		Status: &status.Status{
+			Code: int32(codes.OK),
+		},
+		HttpResponse: &authv3.CheckResponse_OkResponse{
+			OkResponse: &authv3.OkHttpResponse{},
+		},
 	}
 }
 

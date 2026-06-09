@@ -75,3 +75,12 @@ authz_server:
       header_name: "Transaction-Token"
     - type: "urn:redhat:params:oauth:token-type:rh-identity"
       header_name: "x-rh-identity"
+
+  # Optional authentication paths — requests to these paths are allowed
+  # without credentials. When credentials are present, they are validated
+  # normally and identity headers are issued.
+  # optional_auth_paths:
+  #   - path: /openapi.json
+  #     match: exact
+  #   - path: /api/docs/
+  #     match: prefix

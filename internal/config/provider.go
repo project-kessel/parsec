@@ -9,6 +9,7 @@ import (
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/probe/otel"
+	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
@@ -381,4 +382,10 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 	}
 
 	return tokenTypes, nil
+}
+
+// OptionalAuthPathMatcher returns the configured path matcher for optional
+// authentication on ext_authz paths. Returns nil when not configured.
+func (p *Provider) OptionalAuthPathMatcher() (*request.PathMatcher, error) {
+	return NewOptionalAuthPathMatcher(p.config.AuthzServer)
 }

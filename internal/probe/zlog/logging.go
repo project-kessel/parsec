@@ -258,6 +258,16 @@ func (p *loggingAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestA
 	event.Msg("Request attributes parsed")
 }
 
+func (p *loggingAuthzCheckProbe) OptionalAuthPassThrough(attrs *request.RequestAttributes) {
+	event := p.logger.Info()
+	if attrs != nil {
+		event = event.
+			Str("method", attrs.Method).
+			Str("path", attrs.Path)
+	}
+	event.Msg("Optional auth pass-through: unauthenticated request allowed")
+}
+
 func (p *loggingAuthzCheckProbe) ActorValidationSucceeded(actor *trust.Result) {
 	event := p.logger.Debug()
 	if actor != nil {

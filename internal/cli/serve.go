@@ -114,8 +114,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create issuer registry: %w", err)
 	}
 
+	optionalAuthMatcher, err := provider.OptionalAuthPathMatcher()
+	if err != nil {
+		return fmt.Errorf("failed to create optional auth path matcher: %w", err)
+	}
+
 	// 4. Create service handlers
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, obs)
+	var authzOpts []server.AuthzOption
+	if optionalAuthMatcher != nil {
+		authzOpts = append(authzOpts, server.WithOptionalAuthPathMatcher(optionalAuthMatcher))
+	}
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, obs, authzOpts...)
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,

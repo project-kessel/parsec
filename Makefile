@@ -103,11 +103,11 @@ all:
 # run go linter with the repositories lint config
 lint:
 	@echo "Running golangci-lint"
-	@$(DOCKER) run -t --rm -v $(PWD):/app:rw,z -w /app golangci/golangci-lint:v2.6.2 golangci-lint run -v
+	@$(DOCKER) run -t --rm -e GOEXPERIMENT=jsonv2 -v $(PWD):/app:rw,z -w /app golangci/golangci-lint:v2.10.1 golangci-lint run -v
 
 lint-fix:
 	@echo "Running golangci-lint run --fix"
-	@$(DOCKER) run -t --rm -v $(PWD):/app:rw,z -w /app golangci/golangci-lint:v2.6.2 golangci-lint run --fix -v
+	@$(DOCKER) run -t --rm -e GOEXPERIMENT=jsonv2 -v $(PWD):/app:rw,z -w /app golangci/golangci-lint:v2.10.1 golangci-lint run --fix -v
 
 .PHONY: pr-check
 # generate pr-check

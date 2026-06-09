@@ -588,6 +588,12 @@ func (m *compositeAuthzCheckProbe) RequestAttributesParsed(attrs *request.Reques
 	}
 }
 
+func (m *compositeAuthzCheckProbe) OptionalAuthPassThrough(attrs *request.RequestAttributes) {
+	for _, p := range m.probes {
+		p.OptionalAuthPassThrough(attrs)
+	}
+}
+
 func (m *compositeAuthzCheckProbe) ActorValidationSucceeded(actor *trust.Result) {
 	for _, p := range m.probes {
 		p.ActorValidationSucceeded(actor)

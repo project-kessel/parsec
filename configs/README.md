@@ -155,6 +155,60 @@ authz_server:
 
 If not specified, defaults to issuing a transaction token in the `Transaction-Token` header.
 
+### Optional Authentication Paths
+
+Configure URL path patterns that allow unauthenticated access via ext_authz. For these paths:
+
+- Requests **without** credentials pass through with no identity headers
+- Requests **with** valid credentials are validated normally and identity headers are issued
+- Requests **with** invalid or expired credentials are **denied** (fail-closed)
+- All other paths continue to require authentication
+
+```yaml
+authz_server:
+  optional_auth_paths:
+    - path: /openapi.json
+      match: exact          # default if omitted
+    - path: /api/docs/
+      match: prefix
+    - path: /api/*.json
+      match: glob
+```
+
+**Match types:**
+
+| Type | Behavior |
+|------|----------|
+| `exact` | Path must equal the pattern exactly (default) |
+| `prefix` | Path must start with the pattern |
+| `glob` | Go [`path.Match`](https://pkg.go.dev/path#Match) semantics (`*` matches any non-`/` characters, `?` matches one character) |
+
+> **Query strings:** Envoy populates the ext_authz path with the full URL including any query string (e.g. `/openapi.json?v=2`). Exact and glob matches compare against this full value, so `/openapi.json` will **not** match `/openapi.json?v=2`. Use `prefix` match if query parameters are expected on the path.
+
+**gRPC backends:** When Envoy proxies gRPC traffic, it populates the ext_authz CheckRequest with the gRPC `:path` pseudo-header (e.g., `/package.Service/Method`). Configure patterns accordingly:
+
+```yaml
+authz_server:
+  optional_auth_paths:
+    # Allow unauthenticated gRPC health checks
+    - path: /grpc.health.v1.Health/
+      match: prefix
+    # A specific unauthenticated RPC
+    - path: /my.api.v1.MetadataService/GetSchema
+      match: exact
+    # All methods on a metadata service
+    - path: /my.api.v1.MetadataService/*
+      match: glob
+```
+
+**Requirements:**
+
+- Patterns must start with `/`; invalid patterns are rejected at startup
+- Requires Envoy's HTTP ext_authz filter (`envoy.filters.http.ext_authz`) — the standard configuration for both HTTP and gRPC-over-HTTP/2
+- If no `optional_auth_paths` are configured, all paths require authentication (existing behavior)
+
+**Security note:** Only configure paths serving non-sensitive content (OpenAPI specs, health endpoints, metadata). Invalid tokens on optional paths are always denied. CEL validator filters that reject anonymous actors will not run on optional-auth pass-throughs because actor extraction is skipped for efficiency.
+
 ### Exchange Server
 
 Configure the token exchange server behavior:

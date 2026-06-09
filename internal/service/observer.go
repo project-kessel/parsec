@@ -89,6 +89,10 @@ type AuthzCheckProbe interface {
 	// RequestAttributesParsed is called when request attributes are built from the incoming request.
 	RequestAttributesParsed(attrs *request.RequestAttributes)
 
+	// OptionalAuthPassThrough is called when an unauthenticated request is allowed
+	// because its path matches an optional-auth pattern.
+	OptionalAuthPassThrough(attrs *request.RequestAttributes)
+
 	// ActorValidationSucceeded is called when actor credential validation succeeds.
 	ActorValidationSucceeded(actor *trust.Result)
 
@@ -149,6 +153,7 @@ func (NoOpTokenExchangeProbe) End()                                            {
 type NoOpAuthzCheckProbe struct{}
 
 func (NoOpAuthzCheckProbe) RequestAttributesParsed(*request.RequestAttributes)    {}
+func (NoOpAuthzCheckProbe) OptionalAuthPassThrough(*request.RequestAttributes)    {}
 func (NoOpAuthzCheckProbe) ActorValidationSucceeded(*trust.Result)                {}
 func (NoOpAuthzCheckProbe) ActorValidationFailed(error)                           {}
 func (NoOpAuthzCheckProbe) SubjectCredentialExtracted(trust.Credential, []string) {}

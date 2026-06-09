@@ -91,6 +91,21 @@ signers:
     rotation_threshold: "48h"  # 2 days
     grace_period: "24h"        # 1 day
 
+# Authorization server configuration
+authz_server:
+  token_types:
+    - type: "urn:ietf:params:oauth:token-type:txn_token"
+      header_name: "Transaction-Token"
+
+  # Paths that do not require authentication.
+  # Requests without credentials pass through; with credentials, normal
+  # validation and token issuance occurs.
+  optional_auth_paths:
+    - path: /openapi.json
+      match: exact
+    - path: /api/docs/
+      match: prefix
+
 # Token issuers
 issuers:
   - token_type: "urn:ietf:params:oauth:token-type:txn_token"

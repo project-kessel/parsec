@@ -216,6 +216,10 @@ func (p *FakeProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
 	p.recordCall("RequestAttributesParsed", attrs)
 }
 
+func (p *FakeProbe) OptionalAuthPassThrough(attrs *request.RequestAttributes) {
+	p.recordCall("OptionalAuthPassThrough", attrs)
+}
+
 func (p *FakeProbe) SubjectCredentialExtracted(cred trust.Credential, headersUsed []string) {
 	p.recordCall("SubjectCredentialExtracted", cred, headersUsed)
 }

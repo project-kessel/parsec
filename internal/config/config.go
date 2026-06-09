@@ -50,6 +50,23 @@ type ServerConfig struct {
 type AuthzServerConfig struct {
 	// TokenTypes specifies which token types to issue and how to deliver them
 	TokenTypes []TokenTypeConfig `koanf:"token_types"`
+
+	// OptionalAuthPaths lists URL path patterns that do not require authentication.
+	// Requests to these paths are allowed through without credentials; if credentials
+	// are present they are validated normally and identity headers are issued.
+	OptionalAuthPaths []OptionalAuthPathConfig `koanf:"optional_auth_paths"`
+}
+
+// OptionalAuthPathConfig defines a single path pattern for optional authentication.
+type OptionalAuthPathConfig struct {
+	// Path is the URL path pattern to match.
+	// Must start with "/".
+	// For gRPC backends, use the Envoy :path value (e.g. "/package.Service/Method").
+	Path string `koanf:"path"`
+
+	// Match selects the matching strategy.
+	// Options: "exact" (default), "prefix", "glob"
+	Match string `koanf:"match"`
 }
 
 // TokenTypeConfig specifies a token type to issue via ext_authz

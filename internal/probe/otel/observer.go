@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -27,6 +28,7 @@ var (
 	resultSubjectTokenValidationFailed      = attribute.String("result", "subject_token_validation_failed")
 	resultSubjectCredentialExtractionFailed = attribute.String("result", "subject_credential_extraction_failed")
 	resultSubjectValidationFailed           = attribute.String("result", "subject_validation_failed")
+	resultOptionalAuthPassThrough           = attribute.String("result", "optional_auth_pass_through")
 )
 
 // serviceObserver implements [service.ServiceObserver] using OTel histograms.
@@ -175,6 +177,9 @@ type authzCheckProbe struct {
 	result    attribute.KeyValue
 }
 
+func (p *authzCheckProbe) OptionalAuthPassThrough(_ *request.RequestAttributes) {
+	p.result = resultOptionalAuthPassThrough
+}
 func (p *authzCheckProbe) ActorValidationFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = resultActorValidationFailed
