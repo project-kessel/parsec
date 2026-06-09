@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -96,9 +97,12 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 	// 1b. Optional auth: if the path matches and no credentials are present,
 	// allow the request through without issuing any identity headers.
-	if s.optionalAuthMatcher.Matches(reqAttrs.Path) && reqAttrs.Headers["authorization"] == "" {
-		p.OptionalAuthPassThrough(reqAttrs)
-		return s.allowResponse(), nil
+	// Canonicalize the path to prevent bypass via percent-encoding or dot-segments.
+	if canonPath, ok := canonicalizePathForMatch(reqAttrs.Path); ok {
+		if s.optionalAuthMatcher.Matches(canonPath) && reqAttrs.Headers["authorization"] == "" {
+			p.OptionalAuthPassThrough(reqAttrs)
+			return s.allowResponse(), nil
+		}
 	}
 
 	// 2. Extract actor credential from gRPC context
@@ -258,6 +262,31 @@ func (s *AuthzServer) buildRequestAttributes(req *authv3.CheckRequest) *request.
 		Headers:    httpReq.GetHeaders(),
 		Additional: additional,
 	}
+}
+
+// canonicalizePathForMatch returns a cleaned path suitable for pattern matching.
+// It strips the query string, decodes percent-encoding, and resolves dot-segments.
+// Returns ("", false) if the path is non-canonical (contains percent-encoded
+// characters that resolve differently, encoded slashes, or dot-segments),
+// indicating a potential bypass attempt — callers should skip optional-auth.
+func canonicalizePathForMatch(raw string) (string, bool) {
+	p := raw
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		p = p[:i]
+	}
+
+	if strings.Contains(p, "%") {
+		return "", false
+	}
+
+	cleaned := path.Clean(p)
+	if cleaned == "." {
+		cleaned = "/"
+	}
+	if cleaned != p {
+		return "", false
+	}
+	return cleaned, true
 }
 
 // allowResponse creates an OK response with no headers set and nothing removed.

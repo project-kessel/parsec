@@ -79,8 +79,17 @@ func (m *PathMatcher) Matches(requestPath string) bool {
 				return true
 			}
 		case MatchPrefix:
-			if strings.HasPrefix(requestPath, p.path) {
+			if requestPath == p.path {
 				return true
+			}
+			if strings.HasPrefix(requestPath, p.path) && len(requestPath) > len(p.path) {
+				if p.path[len(p.path)-1] == '/' {
+					return true
+				}
+				next := requestPath[len(p.path)]
+				if next == '/' || next == '?' {
+					return true
+				}
 			}
 		case MatchGlob:
 			if matched, _ := path.Match(p.path, requestPath); matched {

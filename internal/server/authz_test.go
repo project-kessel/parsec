@@ -994,6 +994,58 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 			t.Error("expected denial when no optional auth configured, got OK")
 		}
 	})
+
+	t.Run("percent-encoded path traversal does not bypass optional auth", func(t *testing.T) {
+		srv, _ := setup(t, request.PathPattern{Path: "/api/docs/", Match: "prefix"})
+
+		bypassPaths := []string{
+			"/api/docs/../secret",
+			"/api/docs/%2e%2e/secret",
+			"/api%2fdocs/secret",
+			"/api/docs%2fsecret",
+			"/api/docs/%2Fsecret",
+		}
+		for _, p := range bypassPaths {
+			resp, err := srv.Check(ctx, makeReq(p, ""))
+			if err != nil {
+				t.Fatalf("path %q: unexpected error: %v", p, err)
+			}
+			if resp.Status.Code == 0 {
+				t.Errorf("path %q: expected denial for traversal attempt, got OK", p)
+			}
+		}
+	})
+
+	t.Run("percent-encoded exact path does not bypass optional auth", func(t *testing.T) {
+		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+
+		bypassPaths := []string{
+			"/openapi%2ejson",
+			"/%6fpenapi.json",
+			"/openapi.json%00extra",
+		}
+		for _, p := range bypassPaths {
+			resp, err := srv.Check(ctx, makeReq(p, ""))
+			if err != nil {
+				t.Fatalf("path %q: unexpected error: %v", p, err)
+			}
+			if resp.Status.Code == 0 {
+				t.Errorf("path %q: expected denial for encoded bypass attempt, got OK", p)
+			}
+		}
+	})
+
+	t.Run("canonicalized path still matches when encoding is benign", func(t *testing.T) {
+		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+
+		resp, err := srv.Check(ctx, makeReq("/openapi.json?version=2", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK for path with query string, got code %d", resp.Status.Code)
+		}
+	})
 }
 
 func TestAuthzServer_OptionalAuth_Observability(t *testing.T) {
