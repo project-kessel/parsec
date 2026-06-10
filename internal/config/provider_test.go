@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/project-kessel/parsec/internal/server"
 )
 
 func TestProvider_CredentialSources(t *testing.T) {
@@ -11,7 +13,6 @@ func TestProvider_CredentialSources(t *testing.T) {
 	valid := []CredentialSourceConfig{
 		{Name: "authorization-bearer", Type: "bearer"},
 		{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"},
-		{Name: "query-token", Type: "query", ParameterName: "token"},
 	}
 
 	tests := []struct {
@@ -55,11 +56,6 @@ func TestProvider_CredentialSources(t *testing.T) {
 			sources: []CredentialSourceConfig{{Name: "cookie", Type: "cookie"}},
 			wantErr: `cookie_name is required for type "cookie"`,
 		},
-		{
-			name:    "query without parameter_name",
-			sources: []CredentialSourceConfig{{Name: "query", Type: "query"}},
-			wantErr: `parameter_name is required for type "query"`,
-		},
 	}
 
 	for _, tt := range tests {
@@ -92,4 +88,147 @@ func TestProvider_CredentialSources(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProvider_PerExtractionCredentialSources(t *testing.T) {
+	t.Parallel()
+
+	globalSources := []CredentialSourceConfig{
+		{Name: "global-bearer", Type: "bearer"},
+	}
+	authzSubject := []CredentialSourceConfig{
+		{Name: "subject-bearer", Type: "bearer"},
+		{Name: "subject-cookie", Type: "cookie", CookieName: "cs_jwt"},
+	}
+	authzActor := []CredentialSourceConfig{
+		{Name: "actor-bearer", Type: "bearer"},
+	}
+	exchangeActor := []CredentialSourceConfig{
+		{Name: "exchange-bearer", Type: "bearer"},
+	}
+
+	t.Run("per-extraction overrides global for authz subject", func(t *testing.T) {
+		t.Parallel()
+		p := NewProvider(&Config{
+			CredentialSources: globalSources,
+			AuthzServer:       &AuthzServerConfig{SubjectCredentialSources: authzSubject},
+		})
+		got, err := p.AuthzSubjectCredentialSources()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("expected 2 sources, got %d", len(got))
+		}
+		if got[0].(*server.BearerCredentialSource).SourceName != "subject-bearer" {
+			t.Fatalf("expected subject-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		}
+	})
+
+	t.Run("authz subject falls back to global", func(t *testing.T) {
+		t.Parallel()
+		p := NewProvider(&Config{
+			CredentialSources: globalSources,
+			AuthzServer:       &AuthzServerConfig{},
+		})
+		got, err := p.AuthzSubjectCredentialSources()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 source from global, got %d", len(got))
+		}
+		if got[0].(*server.BearerCredentialSource).SourceName != "global-bearer" {
+			t.Fatalf("expected global-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		}
+	})
+
+	t.Run("per-extraction overrides global for authz actor", func(t *testing.T) {
+		t.Parallel()
+		p := NewProvider(&Config{
+			CredentialSources: globalSources,
+			AuthzServer:       &AuthzServerConfig{ActorCredentialSources: authzActor},
+		})
+		got, err := p.AuthzActorCredentialSources()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 source, got %d", len(got))
+		}
+		if got[0].(*server.BearerCredentialSource).SourceName != "actor-bearer" {
+			t.Fatalf("expected actor-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		}
+	})
+
+	t.Run("authz actor falls back to global", func(t *testing.T) {
+		t.Parallel()
+		p := NewProvider(&Config{
+			CredentialSources: globalSources,
+		})
+		got, err := p.AuthzActorCredentialSources()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 source from global, got %d", len(got))
+		}
+		if got[0].(*server.BearerCredentialSource).SourceName != "global-bearer" {
+			t.Fatalf("expected global-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		}
+	})
+
+	t.Run("per-extraction overrides global for exchange actor", func(t *testing.T) {
+		t.Parallel()
+		p := NewProvider(&Config{
+			CredentialSources: globalSources,
+			ExchangeServer:    &ExchangeServerConfig{ActorCredentialSources: exchangeActor},
+		})
+		got, err := p.ExchangeActorCredentialSources()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 source, got %d", len(got))
+		}
+		if got[0].(*server.BearerCredentialSource).SourceName != "exchange-bearer" {
+			t.Fatalf("expected exchange-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		}
+	})
+
+	t.Run("exchange actor falls back to global", func(t *testing.T) {
+		t.Parallel()
+		p := NewProvider(&Config{
+			CredentialSources: globalSources,
+			ExchangeServer:    &ExchangeServerConfig{},
+		})
+		got, err := p.ExchangeActorCredentialSources()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected 1 source from global, got %d", len(got))
+		}
+		if got[0].(*server.BearerCredentialSource).SourceName != "global-bearer" {
+			t.Fatalf("expected global-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		}
+	})
+
+	t.Run("nil global and nil per-extraction returns nil", func(t *testing.T) {
+		t.Parallel()
+		p := NewProvider(&Config{})
+		for _, fn := range []func() ([]server.CredentialSource, error){
+			p.AuthzSubjectCredentialSources,
+			p.AuthzActorCredentialSources,
+			p.ExchangeActorCredentialSources,
+		} {
+			got, err := fn()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != nil {
+				t.Fatalf("expected nil sources, got %+v", got)
+			}
+		}
+	})
 }

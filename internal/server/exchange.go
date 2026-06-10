@@ -159,7 +159,6 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// Validate subject credential against filtered trust store
 	subjectExt := &CredentialExtraction{
 		Credential: cred,
-		SourceName: "token_exchange",
 	}
 	result, err := validateCredential(ctx, filteredStore, subjectExt)
 	if err != nil {

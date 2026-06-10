@@ -2,7 +2,7 @@
 
 ## Overview
 
-Credentials in parsec are strongly typed values that encapsulate only the material needed for validation. The extraction layer uses a `CredentialSource` interface to parse credentials from a `CredentialContext`, tracking which headers were consumed. Source provenance is carried on `trust.Result` so both actor and subject results know how their credential was presented.
+Credentials in parsec are strongly typed values that encapsulate only the material needed for validation. The extraction layer uses a `CredentialSource` interface to parse credentials from a `CredentialContext`, tracking which headers were consumed. Policy decisions are based on the verified claims of the credential itself, not the transport mechanism used to present it.
 
 ## Extraction Architecture
 
@@ -40,33 +40,33 @@ type CredentialSource interface {
 }
 ```
 
-Built-in implementations: `BearerCredentialSource`, `CookieCredentialSource`, `QueryCredentialSource`.
-
-### Source provenance on Result
-
-The `validateCredential` helper encapsulates validation and source stamping:
-
-```go
-result, err := validateCredential(ctx, store, ext)
-// result.CredentialSource is set to ext.SourceName
-```
-
-This makes the credential's presentation protocol available in CEL as `subject.credential_source` and `actor.credential_source`.
+Built-in implementations: `BearerCredentialSource`, `CookieCredentialSource`.
 
 ### Configuration
 
-Credential sources are configured at the top level and shared by both the ext_authz and token exchange servers:
+Credential sources are configured at the top level as defaults, and can be overridden per extraction path:
 
 ```yaml
+# Global defaults (used when per-extraction config is absent)
 credential_sources:
   - name: authorization-bearer
     type: bearer
   - name: cs-jwt-cookie
     type: cookie
     cookie_name: cs_jwt
-  - name: query-token
-    type: query
-    parameter_name: token
+
+# Per-extraction overrides
+authz_server:
+  subject_credential_sources:
+    - name: authorization-bearer
+      type: bearer
+    - name: cs-jwt-cookie
+      type: cookie
+      cookie_name: cs_jwt
+  # actor_credential_sources: omitted → uses global defaults
+
+exchange_server:
+  # actor_credential_sources: omitted → uses global defaults
 ```
 
 ## Design Principles
@@ -118,7 +118,11 @@ Credentials contain **only validation data**, not transport metadata:
 
 The **extraction layer** handles transport concerns via `CredentialSource.Extract(CredentialContext)` and returns a `CredentialExtraction` containing the credential, consumed headers, and sanitization info.
 
-### 4. Security Boundary in ext_authz
+### 4. Claims-Based Policy
+
+Policy decisions (claim mappers, validator filtering, etc.) operate on the verified claims of the credential, not how it was presented. The transport mechanism (bearer header, cookie, etc.) is a presentation concern handled by the extraction layer. Once a credential is validated, the resulting `trust.Result` carries only identity and claims.
+
+### 5. Security Boundary in ext_authz
 
 The extraction layer tracks which headers were used, and ext_authz removes them from requests forwarded to backends:
 
@@ -129,14 +133,13 @@ cc, err := CredentialContextFromCheckRequest(req)
 // 2. Extract credential via CredentialSource chain
 ext, err := extractCredentialFromSources(cc, sources)
 
-// 3. Validate with source provenance
+// 3. Validate
 result, err := validateCredential(ctx, store, ext)
 
 // 4. Remove external credential headers -- security boundary
 return &CheckResponse{
     OkResponse: &OkHttpResponse{
-        HeadersToRemove:         ext.Headers,
-        QueryParametersToRemove: ext.QueryParamsToRemove,
+        HeadersToRemove: ext.Headers,
     },
 }
 ```
@@ -183,9 +186,8 @@ type DPoPCredential struct {
 | **Credential Content** | Only validation material, no transport metadata |
 | **Credential Context** | `CredentialContext` struct normalizes headers/path/TLS from any transport |
 | **Extraction Interface** | `CredentialSource.Extract(CredentialContext)` -- transport-neutral |
-| **Source Provenance** | `validateCredential` stamps `trust.Result.CredentialSource` |
-| **Per-Role Provenance** | Both actor and subject results carry their own credential source |
-| **Configuration** | Top-level `credential_sources` shared by authz and exchange |
+| **Policy Basis** | Verified claims from `trust.Result`, not transport/presentation details |
+| **Configuration** | Global `credential_sources` with per-extraction overrides on server configs |
 | **Issuer Identification** | Each credential identifies its issuer for trust store lookup |
 | **Security Boundary** | ext_authz removes headers used for external credentials |
 | **Exchange Body Tokens** | Protocol-level concern, separate from `CredentialSource` |
@@ -194,6 +196,5 @@ type DPoPCredential struct {
 This design cleanly separates:
 1. **Normalization** (transport -> CredentialContext)
 2. **Extraction** (CredentialContext -> credential via CredentialSource)
-3. **Validation** (credential -> claims via validateCredential)
-4. **Provenance** (CredentialSource name stamped on trust.Result)
-5. **Security** (removing external credentials at boundary)
+3. **Validation** (credential -> claims via trust store)
+4. **Security** (removing external credentials at boundary)

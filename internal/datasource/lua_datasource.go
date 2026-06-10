@@ -210,10 +210,6 @@ func (ds *LuaDataSource) trustResultToLuaTable(L *lua.LState, result *trust.Resu
 	L.SetField(tbl, "subject", lua.LString(result.Subject))
 	L.SetField(tbl, "issuer", lua.LString(result.Issuer))
 
-	if result.CredentialSource != "" {
-		L.SetField(tbl, "credential_source", lua.LString(result.CredentialSource))
-	}
-
 	if len(result.Claims) > 0 {
 		claimsTbl := L.NewTable()
 		for key, value := range result.Claims {
@@ -299,9 +295,8 @@ func (ds *LuaDataSource) luaTableToInput(tbl *lua.LTable) service.DataSourceInpu
 // luaTableToTrustResult converts a Lua table to a trust.Result.
 func luaTableToTrustResult(tbl *lua.LTable) *trust.Result {
 	result := &trust.Result{
-		Subject:          lua.LVAsString(tbl.RawGetString("subject")),
-		Issuer:           lua.LVAsString(tbl.RawGetString("issuer")),
-		CredentialSource: lua.LVAsString(tbl.RawGetString("credential_source")),
+		Subject: lua.LVAsString(tbl.RawGetString("subject")),
+		Issuer:  lua.LVAsString(tbl.RawGetString("issuer")),
 	}
 
 	if claimsLV := tbl.RawGetString("claims"); claimsLV.Type() == lua.LTTable {

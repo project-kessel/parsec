@@ -16,7 +16,6 @@ func Test_newCredentialSource(t *testing.T) {
 	}{
 		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "bearer"}, want: &server.BearerCredentialSource{SourceName: "authorization-bearer"}},
 		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"}, want: &server.CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}},
-		{name: "query", cfg: CredentialSourceConfig{Name: "query-token", Type: "query", ParameterName: "token"}, want: &server.QueryCredentialSource{SourceName: "query-token", ParameterName: "token"}},
 	}
 
 	for _, tt := range tests {
@@ -35,11 +34,6 @@ func Test_newCredentialSource(t *testing.T) {
 			case *server.CookieCredentialSource:
 				gotCookie, ok := got.(*server.CookieCredentialSource)
 				if !ok || gotCookie.SourceName != want.SourceName || gotCookie.CookieName != want.CookieName {
-					t.Fatalf("got %+v, want %+v", got, want)
-				}
-			case *server.QueryCredentialSource:
-				gotQuery, ok := got.(*server.QueryCredentialSource)
-				if !ok || gotQuery.SourceName != want.SourceName || gotQuery.ParameterName != want.ParameterName {
 					t.Fatalf("got %+v, want %+v", got, want)
 				}
 			}

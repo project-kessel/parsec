@@ -53,11 +53,6 @@ type Result struct {
 
 	// Scope is the OAuth2 scope if applicable
 	Scope string `json:"scope,omitempty"`
-
-	// CredentialSource identifies how the credential was presented (e.g. "bearer",
-	// "cookie", "query"). Stamped after extraction + validation so both actor
-	// and subject results carry their provenance.
-	CredentialSource string `json:"credential_source,omitempty"`
 }
 
 // AnonymousResult returns a Result representing an anonymous/unauthenticated actor

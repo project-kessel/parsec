@@ -62,16 +62,10 @@ issuers:
         name: redhat-identity-mapper
         script_file: ./configs/scripts/redhat_identity.cel
 
-# Credential sources (shared by ext_authz and token exchange)
+# Credential sources (global defaults, can be overridden per extraction path)
 credential_sources:
   - name: authorization-bearer
     type: bearer    # Authorization: Bearer header
-  - name: cs-jwt-cookie
-    type: cookie
-    cookie_name: cs_jwt
-  - name: query-token
-    type: query
-    parameter_name: token
 
 # Authorization server configuration (ext_authz)
 authz_server:
@@ -80,3 +74,10 @@ authz_server:
       header_name: "Transaction-Token"
     - type: "urn:redhat:params:oauth:token-type:rh-identity"
       header_name: "x-rh-identity"
+  # Cookie source only for subject extraction (web frontends)
+  subject_credential_sources:
+    - name: authorization-bearer
+      type: bearer
+    - name: cs-jwt-cookie
+      type: cookie
+      cookie_name: cs_jwt

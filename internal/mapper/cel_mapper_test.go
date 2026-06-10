@@ -140,27 +140,6 @@ func TestCELMapper_Map(t *testing.T) {
 		}
 	})
 
-	t.Run("credential_source from subject result", func(t *testing.T) {
-		mapper, err := NewCELMapper(`{"source": subject.credential_source}`)
-		if err != nil {
-			t.Fatalf("failed to create mapper: %v", err)
-		}
-
-		input := &service.MapperInput{
-			Subject: &trust.Result{
-				Subject:          "test-user",
-				CredentialSource: "cs-jwt-cookie",
-			},
-		}
-		result, err := mapper.Map(ctx, input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result["source"] != "cs-jwt-cookie" {
-			t.Errorf("expected source=cs-jwt-cookie, got %v", result["source"])
-		}
-	})
-
 	t.Run("access subject", func(t *testing.T) {
 		mapper, err := NewCELMapper(`{
 			"user": subject.subject,

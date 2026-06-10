@@ -94,25 +94,6 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		}
 	})
 
-	t.Run("query", func(t *testing.T) {
-		t.Parallel()
-		sources := []CredentialSource{&QueryCredentialSource{SourceName: "query-token", ParameterName: "token"}}
-		ext, err := extractCredentialFromSources(makeCC(nil, "/api?token=query-jwt&foo=bar"), sources)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if ext.SourceName != "query-token" {
-			t.Fatalf("expected query-token, got %q", ext.SourceName)
-		}
-		bearer := ext.Credential.(*trust.BearerCredential)
-		if bearer.Token != "query-jwt" {
-			t.Fatalf("unexpected token: %q", bearer.Token)
-		}
-		if len(ext.QueryParamsToRemove) != 1 || ext.QueryParamsToRemove[0] != "token" {
-			t.Fatalf("expected token query param removal, got %v", ext.QueryParamsToRemove)
-		}
-	})
-
 	t.Run("first matching source wins", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{

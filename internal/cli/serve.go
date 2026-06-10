@@ -104,9 +104,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get authz token types: %w", err)
 	}
 
-	credentialSources, err := provider.CredentialSources()
+	authzSubjectSources, err := provider.AuthzSubjectCredentialSources()
 	if err != nil {
-		return fmt.Errorf("failed to get credential sources: %w", err)
+		return fmt.Errorf("failed to get authz subject credential sources: %w", err)
+	}
+
+	authzActorSources, err := provider.AuthzActorCredentialSources()
+	if err != nil {
+		return fmt.Errorf("failed to get authz actor credential sources: %w", err)
+	}
+
+	exchangeActorSources, err := provider.ExchangeActorCredentialSources()
+	if err != nil {
+		return fmt.Errorf("failed to get exchange actor credential sources: %w", err)
 	}
 
 	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
@@ -121,14 +131,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 4. Create service handlers
 	var authzOpts []server.AuthzServerOption
-	if credentialSources != nil {
-		authzOpts = append(authzOpts, server.WithCredentialSources(credentialSources))
+	if authzSubjectSources != nil {
+		authzOpts = append(authzOpts, server.WithCredentialSources(authzSubjectSources))
+	}
+	if authzActorSources != nil {
+		authzOpts = append(authzOpts, server.WithActorCredentialSources(authzActorSources))
 	}
 	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, obs, authzOpts...)
 
 	var exchangeOpts []server.ExchangeServerOption
-	if credentialSources != nil {
-		exchangeOpts = append(exchangeOpts, server.WithCallerCredentialSources(credentialSources))
+	if exchangeActorSources != nil {
+		exchangeOpts = append(exchangeOpts, server.WithCallerCredentialSources(exchangeActorSources))
 	}
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, obs, exchangeOpts...)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{

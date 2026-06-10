@@ -20,8 +20,8 @@ import (
 //   - datasource(name) - function to fetch data from a named data source
 //   - now_ms() - current Unix time in milliseconds
 //   - fail(message) - reject the input with a structured error
-//   - subject - the subject identity information as a map (includes credential_source)
-//   - actor - the actor identity information as a map (includes credential_source)
+//   - subject - the subject identity information as a map
+//   - actor - the actor identity information as a map
 //   - request - the request attributes as a map
 //
 // The expression should evaluate to a map that will be used as the claims,
@@ -220,10 +220,6 @@ func trustResultToMap(result *trust.Result) map[string]any {
 
 	if result.Scope != "" {
 		m["scope"] = result.Scope
-	}
-
-	if result.CredentialSource != "" {
-		m["credential_source"] = result.CredentialSource
 	}
 
 	return m

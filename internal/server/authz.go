@@ -213,11 +213,9 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		},
 		HttpResponse: &authv3.CheckResponse_OkResponse{
 			OkResponse: &authv3.OkHttpResponse{
-				Headers: responseHeaders,
-				// Remove external credential headers - security boundary
-				HeadersToRemove: ext.Headers,
-				// Remove credential query parameters before forwarding upstream
-				QueryParametersToRemove: ext.QueryParamsToRemove,
+			Headers: responseHeaders,
+			// Remove external credential headers - security boundary
+			HeadersToRemove: ext.Headers,
 			},
 		},
 	}, nil
