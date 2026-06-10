@@ -34,7 +34,7 @@ type Config struct {
 	Fixtures []FixtureConfig `koanf:"fixtures"`
 
 	// CredentialSources configures where to extract credentials, in priority
-	// order. Shared by authz (subject extraction) and exchange (caller extraction).
+	// order. Shared by authz subject/actor extraction and exchange caller extraction.
 	CredentialSources []CredentialSourceConfig `koanf:"credential_sources"`
 
 	// Observability configuration (logging, metrics, tracing)

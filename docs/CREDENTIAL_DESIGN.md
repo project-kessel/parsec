@@ -44,28 +44,20 @@ Built-in implementations: `BearerCredentialSource`, `CookieCredentialSource`.
 
 ### Configuration
 
-Credential sources are configured at the top level as defaults, and can be overridden per extraction path:
+Credential sources are configured globally and shared by ext_authz subject extraction, ext_authz actor extraction, and exchange caller extraction:
 
 ```yaml
-# Global defaults (used when per-extraction config is absent)
 credential_sources:
   - name: authorization-bearer
     type: bearer
-
-# Per-extraction overrides
-authz_server:
-  # Cookie source only for subject extraction (web frontends)
-  subject_credential_sources:
-    - name: authorization-bearer
-      type: bearer
-    - name: cs-jwt-cookie
-      type: cookie
-      cookie_name: cs_jwt
-  # actor_credential_sources: omitted → uses global defaults (bearer only)
-
-exchange_server:
-  # actor_credential_sources: omitted → uses global defaults (bearer only)
+  - name: cs-jwt-cookie
+    type: cookie
+    cookie_name: cs_jwt
 ```
+
+Sources are tried in order; the first match wins. Cookie sources return nil when the cookie is absent, so including a cookie source globally is safe for actor extraction paths that typically only present bearer tokens.
+
+Per-extraction overrides (`subject_credential_sources`, `actor_credential_sources`) are supported for future customization but are not required.
 
 ## Design Principles
 
@@ -161,9 +153,9 @@ result, err := validateCredential(ctx, store, ext)
 // 4. Security: authorization header removed from forwarded request
 ```
 
-### Example 2: Cookie (subject extraction only)
+### Example 2: Cookie
 
-Cookie credentials are configured on `authz_server.subject_credential_sources`, not globally. The source extracts the JWT from a named cookie and sanitizes the `Cookie` header so other cookies remain intact:
+The cookie source extracts a JWT from a named cookie and sanitizes the `Cookie` header so other cookies remain intact:
 
 ```go
 cc, err := CredentialContextFromCheckRequest(req)
@@ -283,7 +275,7 @@ type DPoPCredential struct {
 | **Credential Context** | `CredentialContext` struct normalizes headers/path/TLS from any transport |
 | **Extraction Interface** | `CredentialSource.Extract(CredentialContext)` -- transport-neutral |
 | **Policy Basis** | Verified claims from `trust.Result`, not transport/presentation details |
-| **Configuration** | Global `credential_sources` with per-extraction overrides on server configs |
+| **Configuration** | Global `credential_sources` shared by all extraction paths; per-extraction overrides available for future use |
 | **Issuer Identification** | Each credential identifies its issuer for trust store lookup |
 | **Security Boundary** | ext_authz removes headers used for external credentials |
 | **Exchange Body Tokens** | Protocol-level concern, separate from `CredentialSource` |
