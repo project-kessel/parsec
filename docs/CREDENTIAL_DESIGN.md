@@ -51,22 +51,20 @@ Credential sources are configured at the top level as defaults, and can be overr
 credential_sources:
   - name: authorization-bearer
     type: bearer
-  - name: cs-jwt-cookie
-    type: cookie
-    cookie_name: cs_jwt
 
 # Per-extraction overrides
 authz_server:
+  # Cookie source only for subject extraction (web frontends)
   subject_credential_sources:
     - name: authorization-bearer
       type: bearer
     - name: cs-jwt-cookie
       type: cookie
       cookie_name: cs_jwt
-  # actor_credential_sources: omitted → uses global defaults
+  # actor_credential_sources: omitted → uses global defaults (bearer only)
 
 exchange_server:
-  # actor_credential_sources: omitted → uses global defaults
+  # actor_credential_sources: omitted → uses global defaults (bearer only)
 ```
 
 ## Design Principles
@@ -142,6 +140,104 @@ return &CheckResponse{
         HeadersToRemove: ext.Headers,
     },
 }
+```
+
+## Examples
+
+### Example 1: Bearer Token
+
+```go
+// 1. Normalize transport to CredentialContext
+cc, err := CredentialContextFromCheckRequest(req)
+
+// 2. Extract via configured source chain
+ext, err := extractCredentialFromSources(cc, subjectSources)
+// ext.Credential is *trust.BearerCredential{Token: "..."}
+// ext.Headers is []string{"authorization"}
+
+// 3. Validate
+result, err := validateCredential(ctx, store, ext)
+
+// 4. Security: authorization header removed from forwarded request
+```
+
+### Example 2: Cookie (subject extraction only)
+
+Cookie credentials are configured on `authz_server.subject_credential_sources`, not globally. The source extracts the JWT from a named cookie and sanitizes the `Cookie` header so other cookies remain intact:
+
+```go
+cc, err := CredentialContextFromCheckRequest(req)
+ext, err := extractCredentialFromSources(cc, subjectSources)
+// ext.Credential is *trust.BearerCredential{Token: "..."}
+// ext.HeaderSets["cookie"] is "session=abc" (cs_jwt removed)
+
+result, err := validateCredential(ctx, store, ext)
+```
+
+### Example 3: mTLS Actor
+
+mTLS actor extraction reads TLS peer info from `CredentialContext` before falling through to the bearer source chain. A future `MTLSCredentialSource` will replace the inline check in `extractActorCredential`:
+
+```go
+cc := CredentialContextFromGRPC(ctx)
+// cc.TLSPeer.Certificates populated from gRPC TLS state
+
+ext, err := extractActorCredential(ctx, actorSources)
+// ext.Credential is *trust.MTLSCredential when client cert is present
+
+result, err := validateCredential(ctx, store, ext)
+// No headers to remove (TLS layer)
+```
+
+## Type Assertions in Validators
+
+Validators can use type assertions to access type-specific fields:
+
+```go
+type JWTValidator struct {
+    jwksClient *jwks.Client
+}
+
+func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Result, error) {
+    jwtCred, ok := credential.(*JWTCredential)
+    if !ok {
+        return nil, fmt.Errorf("expected JWTCredential, got %T", credential)
+    }
+
+    key, err := v.jwksClient.GetKey(jwtCred.KeyID)
+    if err != nil {
+        return nil, err
+    }
+
+    return validateJWT(jwtCred.Token, key, jwtCred.Algorithm)
+}
+```
+
+Bearer tokens extracted by `BearerCredentialSource` or `CookieCredentialSource` arrive as `*BearerCredential`. The trust store selects a validator based on configuration; JWT validators parse the token internally.
+
+## Testing
+
+Type safety makes testing straightforward -- construct credentials directly without HTTP plumbing:
+
+```go
+func TestJWTValidation(t *testing.T) {
+    cred := &JWTCredential{
+        Token:     "eyJhbGc...",
+        Algorithm: "RS256",
+        KeyID:     "key-1",
+    }
+
+    result, err := validator.Validate(ctx, cred)
+    // ... assertions
+}
+```
+
+Credential sources can be tested with a plain `CredentialContext`:
+
+```go
+ext, err := (&BearerCredentialSource{SourceName: "bearer"}).Extract(CredentialContext{
+    Headers: map[string]string{"authorization": "Bearer test-token"},
+})
 ```
 
 ## Future Enhancements
