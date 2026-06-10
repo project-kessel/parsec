@@ -183,7 +183,7 @@ authz_server:
 | `prefix` | Path must start with the pattern |
 | `glob` | Go [`path.Match`](https://pkg.go.dev/path#Match) semantics (`*` matches any non-`/` characters, `?` matches one character) |
 
-> **Query strings:** Envoy populates the ext_authz path with the full URL including any query string (e.g. `/openapi.json?v=2`). Exact and glob matches compare against this full value, so `/openapi.json` will **not** match `/openapi.json?v=2`. Use `prefix` match if query parameters are expected on the path.
+> **Query strings:** Envoy populates the ext_authz path with the full URL including any query string (e.g. `/openapi.json?v=2`). Parsec strips the query string before matching, so an exact pattern `/openapi.json` will match both `/openapi.json` and `/openapi.json?v=2`.
 
 **gRPC backends:** When Envoy proxies gRPC traffic, it populates the ext_authz CheckRequest with the gRPC `:path` pseudo-header (e.g., `/package.Service/Method`). Configure patterns accordingly:
 

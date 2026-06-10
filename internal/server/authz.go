@@ -265,9 +265,8 @@ func (s *AuthzServer) buildRequestAttributes(req *authv3.CheckRequest) *request.
 }
 
 // canonicalizePathForMatch returns a cleaned path suitable for pattern matching.
-// It strips the query string, decodes percent-encoding, and resolves dot-segments.
-// Returns ("", false) if the path is non-canonical (contains percent-encoded
-// characters that resolve differently, encoded slashes, or dot-segments),
+// It strips the query string, rejects any percent-encoded characters, and
+// resolves dot-segments. Returns ("", false) if the path is non-canonical,
 // indicating a potential bypass attempt — callers should skip optional-auth.
 func canonicalizePathForMatch(raw string) (string, bool) {
 	p := raw
