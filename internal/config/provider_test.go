@@ -87,4 +87,3 @@ func TestProvider_CredentialSources(t *testing.T) {
 		})
 	}
 }
-
