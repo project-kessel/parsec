@@ -259,7 +259,7 @@ func (p *loggingAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestA
 }
 
 func (p *loggingAuthzCheckProbe) OptionalAuthPassThrough(attrs *request.RequestAttributes) {
-	event := p.logger.Info()
+	event := p.logger.Debug()
 	if attrs != nil {
 		event = event.
 			Str("method", attrs.Method).

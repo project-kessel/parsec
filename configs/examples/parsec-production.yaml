@@ -100,6 +100,8 @@ authz_server:
   # Paths that do not require authentication.
   # Requests without credentials pass through; with credentials, normal
   # validation and token issuance occurs.
+  # For the full 3scale production optional-auth list, see
+  # configs/examples/optional-auth-3scale-production.yaml
   optional_auth_paths:
     - path: /openapi.json
       match: exact

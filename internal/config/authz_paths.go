@@ -6,8 +6,6 @@ import (
 	"github.com/project-kessel/parsec/internal/request"
 )
 
-// NewOptionalAuthPathMatcher builds a PathMatcher from AuthzServerConfig.
-// Returns nil when no optional auth paths are configured.
 func NewOptionalAuthPathMatcher(cfg *AuthzServerConfig) (*request.PathMatcher, error) {
 	if cfg == nil || len(cfg.OptionalAuthPaths) == 0 {
 		return nil, nil

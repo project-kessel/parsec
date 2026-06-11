@@ -384,8 +384,6 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 	return tokenTypes, nil
 }
 
-// OptionalAuthPathMatcher returns the configured path matcher for optional
-// authentication on ext_authz paths. Returns nil when not configured.
 func (p *Provider) OptionalAuthPathMatcher() (*request.PathMatcher, error) {
 	return NewOptionalAuthPathMatcher(p.config.AuthzServer)
 }

@@ -173,6 +173,8 @@ authz_server:
       match: prefix
     - path: /api/*.json
       match: glob
+    - path: '^/api/[^/]+/v[0-9]+(\.[0-9]+)?/openapi.json$'
+      match: regex
 ```
 
 **Match types:**
@@ -180,8 +182,15 @@ authz_server:
 | Type | Behavior |
 |------|----------|
 | `exact` | Path must equal the pattern exactly (default) |
-| `prefix` | Path must start with the pattern |
+| `prefix` | Path must start with the pattern; non-slash-terminated prefixes require the next character to be `/`. Ambiguous suffixes (e.g. `public-`) can over-match — use anchored `regex` instead; patterns ending with `-` are rejected at startup |
 | `glob` | Go [`path.Match`](https://pkg.go.dev/path#Match) semantics (`*` matches any non-`/` characters, `?` matches one character) |
+| `regex` | Go [`regexp`](https://pkg.go.dev/regexp) match against the canonical path; pattern must start with `^/` and end with `$` (compiled at startup) |
+
+Use `exact` or `prefix` when the path structure is simple. Use `regex` for version segments, UUID-shaped suffixes, or other constraints that globs cannot express precisely. Do not approximate regex rules with loose globs — that widens anonymous pass-through.
+
+A production-ready regex mapping of the [3scale optional-auth list](examples/optional-auth-3scale-production.yaml) is available as an example config.
+
+**MatchContext:** Matching evaluates `Path` today. `MatchContext.Headers` is reserved for future CAPS/CEL matchers that may also consider host or other request attributes.
 
 > **Query strings:** Envoy populates the ext_authz path with the full URL including any query string (e.g. `/openapi.json?v=2`). Parsec strips the query string before matching, so an exact pattern `/openapi.json` will match both `/openapi.json` and `/openapi.json?v=2`.
 
@@ -207,7 +216,7 @@ authz_server:
 - Requires Envoy's HTTP ext_authz filter (`envoy.filters.http.ext_authz`) — the standard configuration for both HTTP and gRPC-over-HTTP/2
 - If no `optional_auth_paths` are configured, all paths require authentication (existing behavior)
 
-**Security note:** Only configure paths serving non-sensitive content (OpenAPI specs, health endpoints, metadata). Invalid tokens on optional paths are always denied. CEL validator filters that reject anonymous actors will not run on optional-auth pass-throughs because actor extraction is skipped for efficiency.
+**Security note:** Only configure paths serving non-sensitive content (OpenAPI specs, health endpoints, metadata). Invalid tokens on optional paths are always denied. Optional-auth pass-through runs when credential extraction returns no credential and the canonical path matches a configured pattern; actor extraction and `ForActor` CEL filtering run only when subject credentials are present (full issuance pipeline). `ForActor` errors cannot block configured optional-auth pass-through. Regex patterns must be fully anchored (`^/...$`) to prevent substring matches. Non-canonical paths (percent-encoding, dot-segments) skip optional-auth matching and require authentication.
 
 ### Exchange Server
 

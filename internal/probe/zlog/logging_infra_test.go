@@ -12,6 +12,7 @@ import (
 
 	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/keys"
+	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -350,6 +351,20 @@ func TestLoggingJWKSObserver(t *testing.T) {
 }
 
 // --- ServerLifecycle ---
+
+func TestLoggingAuthzCheckObserver_OptionalAuthPassThrough(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingObserver(testLogger(&buf))
+	_, p := obs.AuthzCheckStarted(context.Background())
+
+	p.OptionalAuthPassThrough(&request.RequestAttributes{
+		Method: "GET",
+		Path:   "/openapi.json",
+	})
+
+	assertLog(t, buf.String(), "debug", "Optional auth pass-through: unauthenticated request allowed",
+		`"method":"GET"`, `"path":"/openapi.json"`)
+}
 
 func TestLoggingServerLifecycleObserver_ServeFailed(t *testing.T) {
 	t.Run("GRPCServeFailed", func(t *testing.T) {

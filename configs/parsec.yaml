@@ -84,3 +84,6 @@ authz_server:
   #     match: exact
   #   - path: /api/docs/
   #     match: prefix
+  #   - path: '^/api/[^/]+/v[0-9]+(\.[0-9]+)?/openapi.json$'
+  #     match: regex
+  # See configs/examples/optional-auth-3scale-production.yaml for the full 3scale list.
