@@ -54,14 +54,6 @@ type ServerConfig struct {
 type AuthzServerConfig struct {
 	// TokenTypes specifies which token types to issue and how to deliver them
 	TokenTypes []TokenTypeConfig `koanf:"token_types"`
-
-	// SubjectCredentialSources overrides the global credential_sources for
-	// ext_authz subject extraction. If empty, global defaults are used.
-	SubjectCredentialSources []CredentialSourceConfig `koanf:"subject_credential_sources"`
-
-	// ActorCredentialSources overrides the global credential_sources for
-	// ext_authz actor extraction. If empty, global defaults are used.
-	ActorCredentialSources []CredentialSourceConfig `koanf:"actor_credential_sources"`
 }
 
 // CredentialSourceConfig configures a credential extraction source
@@ -94,10 +86,6 @@ type TokenTypeConfig struct {
 type ExchangeServerConfig struct {
 	// ClaimsFilter determines which request_context claims actors can provide
 	ClaimsFilter ClaimsFilterConfig `koanf:"claims_filter"`
-
-	// ActorCredentialSources overrides the global credential_sources for
-	// exchange caller/actor extraction. If empty, global defaults are used.
-	ActorCredentialSources []CredentialSourceConfig `koanf:"actor_credential_sources"`
 }
 
 // TrustStoreConfig configures the trust store and its validators

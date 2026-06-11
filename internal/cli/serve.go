@@ -104,19 +104,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get authz token types: %w", err)
 	}
 
-	authzSubjectSources, err := provider.AuthzSubjectCredentialSources()
+	credentialSources, err := provider.CredentialSources()
 	if err != nil {
-		return fmt.Errorf("failed to get authz subject credential sources: %w", err)
-	}
-
-	authzActorSources, err := provider.AuthzActorCredentialSources()
-	if err != nil {
-		return fmt.Errorf("failed to get authz actor credential sources: %w", err)
-	}
-
-	exchangeActorSources, err := provider.ExchangeActorCredentialSources()
-	if err != nil {
-		return fmt.Errorf("failed to get exchange actor credential sources: %w", err)
+		return fmt.Errorf("failed to get credential sources: %w", err)
 	}
 
 	claimsFilterRegistry, err := provider.ExchangeServerClaimsFilterRegistry()
@@ -131,17 +121,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 4. Create service handlers
 	var authzOpts []server.AuthzServerOption
-	if authzSubjectSources != nil {
-		authzOpts = append(authzOpts, server.WithCredentialSources(authzSubjectSources))
-	}
-	if authzActorSources != nil {
-		authzOpts = append(authzOpts, server.WithActorCredentialSources(authzActorSources))
+	if credentialSources != nil {
+		authzOpts = append(authzOpts, server.WithCredentialSources(credentialSources))
+		authzOpts = append(authzOpts, server.WithActorCredentialSources(credentialSources))
 	}
 	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, obs, authzOpts...)
 
 	var exchangeOpts []server.ExchangeServerOption
-	if exchangeActorSources != nil {
-		exchangeOpts = append(exchangeOpts, server.WithCallerCredentialSources(exchangeActorSources))
+	if credentialSources != nil {
+		exchangeOpts = append(exchangeOpts, server.WithCallerCredentialSources(credentialSources))
 	}
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, obs, exchangeOpts...)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{

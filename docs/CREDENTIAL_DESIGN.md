@@ -44,7 +44,7 @@ Built-in implementations: `BearerCredentialSource`, `CookieCredentialSource`.
 
 ### Configuration
 
-Credential sources are configured globally and shared by ext_authz subject extraction, ext_authz actor extraction, and exchange caller extraction:
+Credential sources are configured globally and shared by all extraction paths (ext_authz subject, ext_authz actor, exchange caller). The trust store determines which credentials are usable; credential sources only handle extraction.
 
 ```yaml
 credential_sources:
@@ -55,9 +55,7 @@ credential_sources:
     cookie_name: cs_jwt
 ```
 
-Sources are tried in order; the first match wins. Cookie sources return nil when the cookie is absent, so including a cookie source globally is safe for actor extraction paths that typically only present bearer tokens.
-
-Per-extraction overrides (`subject_credential_sources`, `actor_credential_sources`) are supported for future customization but are not required.
+Sources are tried in order; the first match wins. Cookie sources return nil when the cookie is absent, so including a cookie source globally is safe for actor/exchange paths that typically only present bearer tokens.
 
 ## Design Principles
 
@@ -94,7 +92,7 @@ type MTLSCredential struct {
 Most credentials contain issuer information that the validator store uses to select the appropriate validator. Bearer tokens are an exception -- the store determines their issuer based on configuration.
 
 **How issuers are determined:**
-- **JWT/OIDC**: Parsed from the `iss` claim in the token during extraction
+- **JWT/OIDC**: Parsed from the `iss` claim during validation (extracted as `BearerCredential`, JWT parsing is validator-level)
 - **Bearer (opaque)**: Uses default "bearer" issuer; store configured with appropriate validator
 - **mTLS**: From the certificate authority identifier
 
@@ -275,8 +273,8 @@ type DPoPCredential struct {
 | **Credential Context** | `CredentialContext` struct normalizes headers/path/TLS from any transport |
 | **Extraction Interface** | `CredentialSource.Extract(CredentialContext)` -- transport-neutral |
 | **Policy Basis** | Verified claims from `trust.Result`, not transport/presentation details |
-| **Configuration** | Global `credential_sources` shared by all extraction paths; per-extraction overrides available for future use |
-| **Issuer Identification** | Each credential identifies its issuer for trust store lookup |
+| **Configuration** | Global `credential_sources` shared by all extraction paths; trust store determines usability |
+| **Issuer Identification** | Some credential types carry issuer info for trust store routing; bearer tokens rely on store configuration |
 | **Security Boundary** | ext_authz removes headers used for external credentials |
 | **Exchange Body Tokens** | Protocol-level concern, separate from `CredentialSource` |
 | **Extensibility** | Easy to add new credential types or sources without changing contracts |

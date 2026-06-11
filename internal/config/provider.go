@@ -383,7 +383,8 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 	return tokenTypes, nil
 }
 
-// CredentialSources returns the global credential extraction sources.
+// CredentialSources returns the global credential extraction sources shared by
+// all extraction paths (ext_authz subject, ext_authz actor, exchange caller).
 // Returns nil when unset so servers apply bearer-only defaults.
 func (p *Provider) CredentialSources() ([]server.CredentialSource, error) {
 	if len(p.config.CredentialSources) == 0 {
@@ -391,34 +392,4 @@ func (p *Provider) CredentialSources() ([]server.CredentialSource, error) {
 	}
 
 	return newCredentialSources(p.config.CredentialSources)
-}
-
-// AuthzSubjectCredentialSources returns credential sources for ext_authz
-// subject extraction. Uses authz_server.subject_credential_sources if set,
-// otherwise falls back to the global credential_sources.
-func (p *Provider) AuthzSubjectCredentialSources() ([]server.CredentialSource, error) {
-	if p.config.AuthzServer != nil && len(p.config.AuthzServer.SubjectCredentialSources) > 0 {
-		return newCredentialSources(p.config.AuthzServer.SubjectCredentialSources)
-	}
-	return p.CredentialSources()
-}
-
-// AuthzActorCredentialSources returns credential sources for ext_authz
-// actor extraction. Uses authz_server.actor_credential_sources when set;
-// returns nil when unset so servers keep default bearer+mTLS actor extraction.
-func (p *Provider) AuthzActorCredentialSources() ([]server.CredentialSource, error) {
-	if p.config.AuthzServer != nil && len(p.config.AuthzServer.ActorCredentialSources) > 0 {
-		return newCredentialSources(p.config.AuthzServer.ActorCredentialSources)
-	}
-	return nil, nil
-}
-
-// ExchangeActorCredentialSources returns credential sources for exchange
-// caller/actor extraction. Uses exchange_server.actor_credential_sources when
-// set; returns nil when unset so servers keep default bearer+mTLS extraction.
-func (p *Provider) ExchangeActorCredentialSources() ([]server.CredentialSource, error) {
-	if p.config.ExchangeServer != nil && len(p.config.ExchangeServer.ActorCredentialSources) > 0 {
-		return newCredentialSources(p.config.ExchangeServer.ActorCredentialSources)
-	}
-	return nil, nil
 }
