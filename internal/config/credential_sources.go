@@ -7,7 +7,10 @@ import (
 	"github.com/project-kessel/parsec/internal/server"
 )
 
-var credentialSourceTypes = []string{"bearer", "cookie"}
+var credentialSourceTypes = []string{
+	server.CredentialSourceTypeBearer,
+	server.CredentialSourceTypeCookie,
+}
 
 func newCredentialSources(cfgs []CredentialSourceConfig) ([]server.CredentialSource, error) {
 	sources := make([]server.CredentialSource, 0, len(cfgs))
@@ -38,9 +41,9 @@ func newCredentialSource(cfg CredentialSourceConfig) (server.CredentialSource, e
 		return nil, fmt.Errorf("type is required")
 	}
 	switch cfg.Type {
-	case "bearer":
+	case server.CredentialSourceTypeBearer:
 		return &server.BearerCredentialSource{SourceName: cfg.Name}, nil
-	case "cookie":
+	case server.CredentialSourceTypeCookie:
 		if cfg.CookieName == "" {
 			return nil, fmt.Errorf("cookie_name is required for type %q", cfg.Type)
 		}

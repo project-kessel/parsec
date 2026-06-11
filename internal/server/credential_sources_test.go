@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/project-kessel/parsec/internal/trust"
@@ -140,6 +141,28 @@ func TestExtractCredentialFromSources(t *testing.T) {
 			t.Fatal("expected error when no credentials present")
 		}
 	})
+
+	t.Run("aggregates extraction errors from all sources", func(t *testing.T) {
+		t.Parallel()
+		err1 := errors.New("first source failed")
+		err2 := errors.New("second source failed")
+		sources := []CredentialSource{
+			&stubErrCredentialSource{err: err1},
+			&stubErrCredentialSource{err: err2},
+		}
+		_, err := extractCredentialFromSources(makeCC(nil, "/"), sources)
+		if !errors.Is(err, err1) || !errors.Is(err, err2) {
+			t.Fatalf("expected joined errors, got %v", err)
+		}
+	})
+}
+
+type stubErrCredentialSource struct {
+	err error
+}
+
+func (s *stubErrCredentialSource) Extract(CredentialContext) (*CredentialExtraction, error) {
+	return nil, s.err
 }
 
 func TestNewAuthzServer_defaultCredentialSources(t *testing.T) {

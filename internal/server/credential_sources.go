@@ -47,11 +47,11 @@ func extractCredentialFromSources(cc CredentialContext, sources []CredentialSour
 		sources = defaultCredentialSources()
 	}
 
-	var lastErr error
+	var errs []error
 	for _, src := range sources {
 		ext, err := src.Extract(cc)
 		if err != nil {
-			lastErr = err
+			errs = append(errs, err)
 			continue
 		}
 		if ext != nil {
@@ -59,8 +59,8 @@ func extractCredentialFromSources(cc CredentialContext, sources []CredentialSour
 		}
 	}
 
-	if lastErr != nil {
-		return nil, lastErr
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
 	}
 	return nil, ErrNoCredentials
 }

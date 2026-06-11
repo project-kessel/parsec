@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -285,7 +286,7 @@ func (p *FakeProbe) methodNames() []string {
 type ProbeMatcher func(probeCall) bool
 
 // ProbeCall creates a matcher that checks probe method name and optionally arguments.
-// Arguments can be either concrete values (checked with ==) or ArgumentMatcher instances.
+// Arguments can be either concrete values (checked with reflect.DeepEqual) or ArgumentMatcher instances.
 func ProbeCall(method string, args ...any) ProbeMatcher {
 	return func(call probeCall) bool {
 		if call.method() != method {
@@ -304,11 +305,8 @@ func ProbeCall(method string, args ...any) ProbeMatcher {
 				if !matcher.Matches(callArgs[i]) {
 					return false
 				}
-			} else {
-				// Direct equality comparison
-				if expected != callArgs[i] {
-					return false
-				}
+			} else if !reflect.DeepEqual(expected, callArgs[i]) {
+				return false
 			}
 		}
 		return true

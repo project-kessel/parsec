@@ -161,7 +161,7 @@ func TestProvider_PerExtractionCredentialSources(t *testing.T) {
 		}
 	})
 
-	t.Run("authz actor falls back to global", func(t *testing.T) {
+	t.Run("authz actor without explicit config returns nil", func(t *testing.T) {
 		t.Parallel()
 		p := NewProvider(&Config{
 			CredentialSources: globalSources,
@@ -170,11 +170,8 @@ func TestProvider_PerExtractionCredentialSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(got) != 1 {
-			t.Fatalf("expected 1 source from global, got %d", len(got))
-		}
-		if got[0].(*server.BearerCredentialSource).SourceName != "global-bearer" {
-			t.Fatalf("expected global-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		if got != nil {
+			t.Fatalf("expected nil actor sources, got %+v", got)
 		}
 	})
 
@@ -196,7 +193,7 @@ func TestProvider_PerExtractionCredentialSources(t *testing.T) {
 		}
 	})
 
-	t.Run("exchange actor falls back to global", func(t *testing.T) {
+	t.Run("exchange actor without explicit config returns nil", func(t *testing.T) {
 		t.Parallel()
 		p := NewProvider(&Config{
 			CredentialSources: globalSources,
@@ -206,11 +203,8 @@ func TestProvider_PerExtractionCredentialSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(got) != 1 {
-			t.Fatalf("expected 1 source from global, got %d", len(got))
-		}
-		if got[0].(*server.BearerCredentialSource).SourceName != "global-bearer" {
-			t.Fatalf("expected global-bearer, got %s", got[0].(*server.BearerCredentialSource).SourceName)
+		if got != nil {
+			t.Fatalf("expected nil actor sources, got %+v", got)
 		}
 	})
 

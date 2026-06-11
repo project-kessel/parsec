@@ -404,21 +404,21 @@ func (p *Provider) AuthzSubjectCredentialSources() ([]server.CredentialSource, e
 }
 
 // AuthzActorCredentialSources returns credential sources for ext_authz
-// actor extraction. Uses authz_server.actor_credential_sources if set,
-// otherwise falls back to the global credential_sources.
+// actor extraction. Uses authz_server.actor_credential_sources when set;
+// returns nil when unset so servers keep default bearer+mTLS actor extraction.
 func (p *Provider) AuthzActorCredentialSources() ([]server.CredentialSource, error) {
 	if p.config.AuthzServer != nil && len(p.config.AuthzServer.ActorCredentialSources) > 0 {
 		return newCredentialSources(p.config.AuthzServer.ActorCredentialSources)
 	}
-	return p.CredentialSources()
+	return nil, nil
 }
 
 // ExchangeActorCredentialSources returns credential sources for exchange
-// caller/actor extraction. Uses exchange_server.actor_credential_sources if
-// set, otherwise falls back to the global credential_sources.
+// caller/actor extraction. Uses exchange_server.actor_credential_sources when
+// set; returns nil when unset so servers keep default bearer+mTLS extraction.
 func (p *Provider) ExchangeActorCredentialSources() ([]server.CredentialSource, error) {
 	if p.config.ExchangeServer != nil && len(p.config.ExchangeServer.ActorCredentialSources) > 0 {
 		return newCredentialSources(p.config.ExchangeServer.ActorCredentialSources)
 	}
-	return p.CredentialSources()
+	return nil, nil
 }
