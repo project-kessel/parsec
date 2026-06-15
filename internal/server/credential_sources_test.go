@@ -35,8 +35,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if bearer.Token != "jwt-token" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
-		if len(ext.Headers) != 1 || ext.Headers[0] != "authorization" {
-			t.Fatalf("unexpected headers: %v", ext.Headers)
+		if len(ext.RemoveHeaders) != 1 || ext.RemoveHeaders[0] != "authorization" {
+			t.Fatalf("unexpected headers: %v", ext.RemoveHeaders)
 		}
 	})
 
@@ -70,11 +70,11 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if bearer.Token != "cookie-jwt" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
-		if len(ext.Headers) != 0 {
-			t.Fatalf("expected no header removals, got %v", ext.Headers)
+		if len(ext.RemoveHeaders) != 0 {
+			t.Fatalf("expected no header removals, got %v", ext.RemoveHeaders)
 		}
-		if ext.HeaderSets["cookie"] != "session=abc; other=1" {
-			t.Fatalf("expected sanitized cookie header, got %q", ext.HeaderSets["cookie"])
+		if ext.SetHeaders["cookie"] != "session=abc; other=1" {
+			t.Fatalf("expected sanitized cookie header, got %q", ext.SetHeaders["cookie"])
 		}
 	})
 
@@ -87,11 +87,11 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(ext.Headers) != 1 || ext.Headers[0] != "cookie" {
-			t.Fatalf("expected cookie header removal, got %v", ext.Headers)
+		if len(ext.RemoveHeaders) != 1 || ext.RemoveHeaders[0] != "cookie" {
+			t.Fatalf("expected cookie header removal, got %v", ext.RemoveHeaders)
 		}
-		if len(ext.HeaderSets) != 0 {
-			t.Fatalf("expected no header overrides, got %v", ext.HeaderSets)
+		if len(ext.SetHeaders) != 0 {
+			t.Fatalf("expected no header overrides, got %v", ext.SetHeaders)
 		}
 	})
 

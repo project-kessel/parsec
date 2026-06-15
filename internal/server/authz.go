@@ -120,7 +120,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 	var actor *trust.Result
 	if actorExt != nil {
-		p.ActorCredentialExtracted(actorExt.Credential, actorExt.Headers)
+		p.ActorCredentialExtracted(actorExt.Credential, actorExt.RemoveHeaders)
 		var validationErr error
 		actor, validationErr = validateCredential(ctx, s.trustStore, actorExt)
 		if validationErr != nil {
@@ -153,7 +153,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
-	p.SubjectCredentialExtracted(ext.Credential, ext.Headers)
+	p.SubjectCredentialExtracted(ext.Credential, ext.RemoveHeaders)
 
 	// 5. Validate subject credentials against filtered trust store
 	result, err := validateCredential(ctx, filteredStore, ext)
@@ -182,7 +182,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	// 7. Build response headers from issued tokens and credential sanitization
-	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.HeaderSets))
+	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.SetHeaders))
 	for _, spec := range s.TokenTypesToIssue {
 		if token, ok := issuedTokens[spec.Type]; ok {
 			responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
@@ -194,7 +194,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			})
 		}
 	}
-	for name, value := range ext.HeaderSets {
+	for name, value := range ext.SetHeaders {
 		responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
 				Key:   name,
@@ -215,7 +215,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			OkResponse: &authv3.OkHttpResponse{
 				Headers: responseHeaders,
 				// Remove external credential headers - security boundary
-				HeadersToRemove: ext.Headers,
+				HeadersToRemove: ext.RemoveHeaders,
 			},
 		},
 	}, nil

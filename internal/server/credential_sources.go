@@ -27,8 +27,8 @@ type CredentialSource interface {
 // CredentialExtraction is the result of extracting a credential from a request.
 type CredentialExtraction struct {
 	Credential trust.Credential
-	Headers    []string          // header names to remove entirely
-	HeaderSets map[string]string // header names to set/override on the upstream request
+	RemoveHeaders []string          // header names to remove entirely
+	SetHeaders    map[string]string // header names to set/override on the upstream request
 	SourceName string            // configured credential source name
 }
 

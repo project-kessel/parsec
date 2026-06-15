@@ -83,7 +83,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 
 	var actor *trust.Result
 	if actorExt != nil {
-		p.ActorCredentialExtracted(actorExt.Credential, actorExt.Headers)
+		p.ActorCredentialExtracted(actorExt.Credential, actorExt.RemoveHeaders)
 		var validationErr error
 		actor, validationErr = validateCredential(ctx, s.trustStore, actorExt)
 		if validationErr != nil {

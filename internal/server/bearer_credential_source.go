@@ -30,7 +30,7 @@ func (s *BearerCredentialSource) Extract(cc CredentialContext) (*CredentialExtra
 
 	return &CredentialExtraction{
 		Credential: &trust.BearerCredential{Token: token},
-		Headers:    []string{"authorization"},
+		RemoveHeaders: []string{"authorization"},
 		SourceName: s.sourceName(),
 	}, nil
 }

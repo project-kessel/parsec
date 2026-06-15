@@ -127,7 +127,7 @@ result, err := validateCredential(ctx, store, ext)
 // 4. Remove external credential headers -- security boundary
 return &CheckResponse{
     OkResponse: &OkHttpResponse{
-        HeadersToRemove: ext.Headers,
+        HeadersToRemove: ext.RemoveHeaders,
     },
 }
 ```
@@ -143,7 +143,7 @@ cc, err := CredentialContextFromCheckRequest(req)
 // 2. Extract via configured source chain
 ext, err := extractCredentialFromSources(cc, subjectSources)
 // ext.Credential is *trust.BearerCredential{Token: "..."}
-// ext.Headers is []string{"authorization"}
+// ext.RemoveHeaders is []string{"authorization"}
 
 // 3. Validate
 result, err := validateCredential(ctx, store, ext)
@@ -159,7 +159,7 @@ The cookie source extracts a JWT from a named cookie and sanitizes the `Cookie` 
 cc, err := CredentialContextFromCheckRequest(req)
 ext, err := extractCredentialFromSources(cc, subjectSources)
 // ext.Credential is *trust.BearerCredential{Token: "..."}
-// ext.HeaderSets["cookie"] is "session=abc" (cs_jwt removed)
+// ext.SetHeaders["cookie"] is "session=abc" (cs_jwt removed)
 
 result, err := validateCredential(ctx, store, ext)
 ```
