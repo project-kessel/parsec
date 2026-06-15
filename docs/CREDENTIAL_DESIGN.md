@@ -56,6 +56,22 @@ credential_sources:
 
 Sources are tried in order; the first match wins. Cookie sources return nil when the cookie is absent, so including a cookie source globally is safe for actor/exchange paths that typically only present bearer tokens.
 
+### Configuration Sharing
+
+All three extraction paths share the same `credential_sources` list:
+
+| Path | Transport | Typical Sources |
+|------|-----------|-----------------|
+| ext_authz **subject** | Envoy HTTP headers | bearer, cookie |
+| ext_authz **actor** | gRPC metadata | bearer (cookies absent) |
+| exchange **caller** | gRPC metadata | bearer (cookies absent) |
+
+This works because each `CredentialSource` silently returns `nil` (no match) when the expected header is missing. A `CookieCredentialSource` configured globally will never match on gRPC paths because gRPC metadata does not contain a `Cookie` header.
+
+When no `credential_sources` are configured, all server constructors (`NewAuthzServer`, `NewExchangeServer`) default to bearer-only.
+
+The credential source `name` that matched (e.g. `"authorization-bearer"`, `"cs-jwt-cookie"`) is available to CEL claim mappers as `subject.credential_source`, allowing scripts to branch on how the credential was presented.
+
 ## Design Principles
 
 ### 1. Strongly Typed Credentials

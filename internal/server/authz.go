@@ -90,6 +90,9 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 	if len(cfg.credentialSources) == 0 {
 		cfg.credentialSources = defaultCredentialSources()
 	}
+	if len(cfg.actorCredentialSources) == 0 {
+		cfg.actorCredentialSources = defaultCredentialSources()
+	}
 
 	return &AuthzServer{
 		trustStore:        trustStore,
@@ -153,10 +156,11 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	issuedTokens, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
-		Subject:           result,
-		Actor:             actor,
-		RequestAttributes: reqAttrs,
-		TokenTypes:        tokenTypes,
+		Subject:                 result,
+		Actor:                   actor,
+		RequestAttributes:       reqAttrs,
+		TokenTypes:              tokenTypes,
+		SubjectCredentialSource: ext.SourceName,
 		// TODO: Get scope from configuration or request
 		Scope: "",
 	})

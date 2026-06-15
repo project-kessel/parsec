@@ -30,6 +30,11 @@ type IssueContext struct {
 
 	// DataSourceRegistry provides access to data sources for lazy fetching
 	DataSourceRegistry *DataSourceRegistry
+
+	// SubjectCredentialSource is the name of the credential source that
+	// provided the subject credential. Available to claim mappers as
+	// subject.credential_source in CEL expressions.
+	SubjectCredentialSource string
 }
 
 // ToClaims applies a set of claim mappers to produce claims
@@ -44,11 +49,12 @@ func (ic *IssueContext) ToClaims(ctx context.Context, mappers []ClaimMapper) (cl
 
 	// Build mapper input
 	mapperInput := &MapperInput{
-		Subject:            ic.Subject,
-		Actor:              ic.Actor,
-		RequestAttributes:  ic.RequestAttributes,
-		DataSourceRegistry: ic.DataSourceRegistry,
-		DataSourceInput:    dataSourceInput,
+		Subject:                 ic.Subject,
+		Actor:                   ic.Actor,
+		RequestAttributes:       ic.RequestAttributes,
+		DataSourceRegistry:      ic.DataSourceRegistry,
+		DataSourceInput:         dataSourceInput,
+		SubjectCredentialSource: ic.SubjectCredentialSource,
 	}
 
 	// Apply mappers

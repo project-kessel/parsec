@@ -66,10 +66,6 @@ func extractActorCredential(ctx context.Context, sources []CredentialSource) (*C
 		return nil, nil
 	}
 
-	if len(sources) == 0 {
-		sources = defaultCredentialSources()
-	}
-
 	ext, err := extractCredentialFromSources(cc, sources)
 	if err != nil {
 		if errors.Is(err, ErrNoCredentials) {

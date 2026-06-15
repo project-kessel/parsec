@@ -177,9 +177,27 @@ func TestNewAuthzServer_defaultCredentialSources(t *testing.T) {
 
 	srv := NewAuthzServer(nil, nil, nil, nil)
 	if len(srv.credentialSources) != 1 {
-		t.Fatalf("expected one default source, got %d", len(srv.credentialSources))
+		t.Fatalf("expected one default subject source, got %d", len(srv.credentialSources))
 	}
 	if _, ok := srv.credentialSources[0].(*BearerCredentialSource); !ok {
-		t.Fatalf("expected default bearer source, got %T", srv.credentialSources[0])
+		t.Fatalf("expected default bearer subject source, got %T", srv.credentialSources[0])
+	}
+	if len(srv.actorCredentialSources) != 1 {
+		t.Fatalf("expected one default actor source, got %d", len(srv.actorCredentialSources))
+	}
+	if _, ok := srv.actorCredentialSources[0].(*BearerCredentialSource); !ok {
+		t.Fatalf("expected default bearer actor source, got %T", srv.actorCredentialSources[0])
+	}
+}
+
+func TestNewExchangeServer_defaultCredentialSources(t *testing.T) {
+	t.Parallel()
+
+	srv := NewExchangeServer(nil, nil, nil, nil)
+	if len(srv.callerCredentialSources) != 1 {
+		t.Fatalf("expected one default caller source, got %d", len(srv.callerCredentialSources))
+	}
+	if _, ok := srv.callerCredentialSources[0].(*BearerCredentialSource); !ok {
+		t.Fatalf("expected default bearer caller source, got %T", srv.callerCredentialSources[0])
 	}
 }

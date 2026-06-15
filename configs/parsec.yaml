@@ -63,7 +63,18 @@ issuers:
         name: redhat-identity-mapper
         script_file: ./configs/scripts/redhat_identity.cel
 
-# Credential sources (shared by ext_authz subject/actor and exchange)
+# Credential sources define how incoming credentials are extracted from
+# requests. Sources are tried in order; the first match wins.
+#
+# This list is shared by all three extraction paths:
+#   - ext_authz subject (Envoy HTTP headers)
+#   - ext_authz actor   (gRPC metadata)
+#   - exchange caller   (gRPC metadata)
+#
+# Cookie sources silently return no match on gRPC paths (no Cookie header),
+# so including them here is safe -- they only activate on the ext_authz
+# subject path. When no credential_sources are configured, parsec defaults
+# to bearer-only (Authorization: Bearer).
 credential_sources:
   - name: authorization-bearer
     type: bearer    # Authorization: Bearer header

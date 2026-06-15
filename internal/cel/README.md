@@ -19,6 +19,7 @@ This package provides CEL extensions specifically for claim mapping in Parsec:
   - `subject.claims` - Additional claims from the credential
   - `subject.audience` - Intended audience
   - `subject.scope` - OAuth2 scope
+  - `subject.credential_source` - Name of the credential source that presented this credential (e.g. `"authorization-bearer"`, `"cs-jwt-cookie"`). Only set on the ext_authz path; absent on the exchange path where the subject token comes from the request body
 
 - **`actor`** - Actor identity information (map, same structure as subject)
 

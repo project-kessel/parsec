@@ -53,6 +53,9 @@ func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenServic
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	if len(cfg.callerCredentialSources) == 0 {
+		cfg.callerCredentialSources = defaultCredentialSources()
+	}
 
 	return &ExchangeServer{
 		trustStore:           trustStore,
