@@ -27,9 +27,9 @@ type CredentialSource interface {
 // CredentialExtraction is the result of extracting a credential from a request.
 type CredentialExtraction struct {
 	Credential trust.Credential
-	RemoveHeaders []string          // header names to remove entirely
-	SetHeaders    map[string]string // header names to set/override on the upstream request
-	SourceName string            // configured credential source name
+	RemoveHeaders []string
+	SetHeaders    map[string]string
+	SourceName string
 }
 
 // validateCredential validates a credential from a CredentialExtraction against
@@ -44,7 +44,7 @@ func defaultCredentialSources() []CredentialSource {
 
 func extractCredentialFromSources(cc CredentialContext, sources []CredentialSource) (*CredentialExtraction, error) {
 	if len(sources) == 0 {
-		sources = defaultCredentialSources()
+		return nil, errors.New("credential sources must not be empty")
 	}
 
 	var errs []error

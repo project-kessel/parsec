@@ -134,6 +134,14 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		}
 	})
 
+	t.Run("empty sources returns error", func(t *testing.T) {
+		t.Parallel()
+		_, err := extractCredentialFromSources(makeCC(nil, "/"), nil)
+		if err == nil {
+			t.Fatal("expected error for empty sources")
+		}
+	})
+
 	t.Run("no credentials found", func(t *testing.T) {
 		t.Parallel()
 		_, err := extractCredentialFromSources(makeCC(nil, "/"), defaultCredentialSources())
