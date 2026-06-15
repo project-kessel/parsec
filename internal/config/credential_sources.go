@@ -42,12 +42,12 @@ func newCredentialSource(cfg CredentialSourceConfig) (server.CredentialSource, e
 	}
 	switch cfg.Type {
 	case server.CredentialSourceTypeBearer:
-		return &server.BearerCredentialSource{SourceName: cfg.Name}, nil
+		return server.NewBearerCredentialSource(cfg.Name), nil
 	case server.CredentialSourceTypeCookie:
 		if cfg.CookieName == "" {
 			return nil, fmt.Errorf("cookie_name is required for type %q", cfg.Type)
 		}
-		return &server.CookieCredentialSource{SourceName: cfg.Name, CookieName: cfg.CookieName}, nil
+		return server.NewCookieCredentialSource(cfg.Name, cfg.CookieName), nil
 	default:
 		return nil, fmt.Errorf("unknown type %q (allowed: %s)", cfg.Type, strings.Join(credentialSourceTypes, ", "))
 	}

@@ -12,6 +12,11 @@ type BearerCredentialSource struct {
 	SourceName string
 }
 
+// NewBearerCredentialSource returns a BearerCredentialSource with the given name.
+func NewBearerCredentialSource(name string) *BearerCredentialSource {
+	return &BearerCredentialSource{SourceName: name}
+}
+
 func (s *BearerCredentialSource) Extract(cc CredentialContext) (*CredentialExtraction, error) {
 	authHeader := cc.Headers["authorization"]
 	if authHeader == "" {

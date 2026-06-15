@@ -65,7 +65,7 @@ func mtlsExtractionFromPeer(peer *TLSPeerInfo) *CredentialExtraction {
 }
 
 func defaultActorCredentialSources() []CredentialSource {
-	return []CredentialSource{&BearerCredentialSource{SourceName: "bearer"}}
+	return []CredentialSource{NewBearerCredentialSource("bearer")}
 }
 
 func extractIssuerFromCert(cert *x509.Certificate) string {

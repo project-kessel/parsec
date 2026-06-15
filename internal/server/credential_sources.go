@@ -39,7 +39,7 @@ func validateCredential(ctx context.Context, store trust.Store, ext *CredentialE
 }
 
 func defaultCredentialSources() []CredentialSource {
-	return []CredentialSource{&BearerCredentialSource{SourceName: "bearer"}}
+	return []CredentialSource{NewBearerCredentialSource("bearer")}
 }
 
 func extractCredentialFromSources(cc CredentialContext, sources []CredentialSource) (*CredentialExtraction, error) {

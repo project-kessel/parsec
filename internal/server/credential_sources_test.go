@@ -56,7 +56,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}}
+		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"cookie": "session=abc; cs_jwt=cookie-jwt; other=1",
 		}, "/"), sources)
@@ -80,7 +80,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie only credential is removed entirely", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}}
+		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
 		}, "/"), sources)
@@ -98,8 +98,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("first matching source wins", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{
-			&BearerCredentialSource{SourceName: "authorization-bearer"},
-			&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"},
+			NewBearerCredentialSource("authorization-bearer"),
+			NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt"),
 		}
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"authorization": "Bearer header-jwt",
@@ -120,8 +120,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 	t.Run("falls through to second source", func(t *testing.T) {
 		t.Parallel()
 		sources := []CredentialSource{
-			&BearerCredentialSource{SourceName: "authorization-bearer"},
-			&CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"},
+			NewBearerCredentialSource("authorization-bearer"),
+			NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt"),
 		}
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",

@@ -12,6 +12,12 @@ type CookieCredentialSource struct {
 	CookieName string
 }
 
+// NewCookieCredentialSource returns a CookieCredentialSource with the given
+// source name and cookie name.
+func NewCookieCredentialSource(name, cookieName string) *CookieCredentialSource {
+	return &CookieCredentialSource{SourceName: name, CookieName: cookieName}
+}
+
 func (s *CookieCredentialSource) Extract(cc CredentialContext) (*CredentialExtraction, error) {
 	name := s.CookieName
 	if name == "" {

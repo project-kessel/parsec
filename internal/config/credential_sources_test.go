@@ -14,8 +14,8 @@ func Test_newCredentialSource(t *testing.T) {
 		cfg  CredentialSourceConfig
 		want server.CredentialSource
 	}{
-		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "bearer"}, want: &server.BearerCredentialSource{SourceName: "authorization-bearer"}},
-		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"}, want: &server.CookieCredentialSource{SourceName: "cs-jwt-cookie", CookieName: "cs_jwt"}},
+		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "bearer"}, want: server.NewBearerCredentialSource("authorization-bearer")},
+		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"}, want: server.NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")},
 	}
 
 	for _, tt := range tests {
