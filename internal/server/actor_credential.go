@@ -32,7 +32,7 @@ func extractActorCredential(ctx context.Context, sources []CredentialSource) (*C
 	}
 
 	if len(sources) == 0 {
-		sources = defaultActorCredentialSources()
+		sources = defaultCredentialSources()
 	}
 
 	ext, err := extractCredentialFromSources(cc, sources)
@@ -62,10 +62,6 @@ func mtlsExtractionFromPeer(peer *TLSPeerInfo) *CredentialExtraction {
 		},
 		SourceName: "mtls",
 	}
-}
-
-func defaultActorCredentialSources() []CredentialSource {
-	return []CredentialSource{NewBearerCredentialSource("bearer")}
 }
 
 func extractIssuerFromCert(cert *x509.Certificate) string {
