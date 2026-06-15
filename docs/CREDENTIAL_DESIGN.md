@@ -23,7 +23,6 @@ Exchange body tokens (`subject_token`, `actor_token`) are a **protocol-level con
 ```go
 type CredentialContext struct {
     Headers map[string]string  // normalized lowercase keys
-    Path    string             // request path; empty for gRPC-native calls
     TLSPeer *TLSPeerInfo      // mTLS client cert info; nil when absent
 }
 ```

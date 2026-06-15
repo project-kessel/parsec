@@ -10,10 +10,9 @@ import (
 func TestExtractCredentialFromSources(t *testing.T) {
 	t.Parallel()
 
-	makeCC := func(headers map[string]string, path string) CredentialContext {
+	makeCC := func(headers map[string]string) CredentialContext {
 		return CredentialContext{
 			Headers: headers,
-			Path:    path,
 		}
 	}
 
@@ -21,7 +20,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		t.Parallel()
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"authorization": "Bearer jwt-token",
-		}, "/"), defaultCredentialSources())
+		}), defaultCredentialSources())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -44,7 +43,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		t.Parallel()
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"authorization": "bearer jwt-token",
-		}, "/"), defaultCredentialSources())
+		}), defaultCredentialSources())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -59,7 +58,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"cookie": "session=abc; cs_jwt=cookie-jwt; other=1",
-		}, "/"), sources)
+		}), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -83,7 +82,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
-		}, "/"), sources)
+		}), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -104,7 +103,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"authorization": "Bearer header-jwt",
 			"cookie":        "cs_jwt=cookie-jwt",
-		}, "/"), sources)
+		}), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -125,7 +124,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		}
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
-		}, "/"), sources)
+		}), sources)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -136,7 +135,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("empty sources returns error", func(t *testing.T) {
 		t.Parallel()
-		_, err := extractCredentialFromSources(makeCC(nil, "/"), nil)
+		_, err := extractCredentialFromSources(makeCC(nil), nil)
 		if err == nil {
 			t.Fatal("expected error for empty sources")
 		}
@@ -144,7 +143,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("no credentials found", func(t *testing.T) {
 		t.Parallel()
-		_, err := extractCredentialFromSources(makeCC(nil, "/"), defaultCredentialSources())
+		_, err := extractCredentialFromSources(makeCC(nil), defaultCredentialSources())
 		if err == nil {
 			t.Fatal("expected error when no credentials present")
 		}
@@ -158,7 +157,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 			&stubErrCredentialSource{err: err1},
 			&stubErrCredentialSource{err: err2},
 		}
-		_, err := extractCredentialFromSources(makeCC(nil, "/"), sources)
+		_, err := extractCredentialFromSources(makeCC(nil), sources)
 		if !errors.Is(err, err1) || !errors.Is(err, err2) {
 			t.Fatalf("expected joined errors, got %v", err)
 		}

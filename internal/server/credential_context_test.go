@@ -21,7 +21,7 @@ import (
 func TestCredentialContextFromCheckRequest(t *testing.T) {
 	t.Parallel()
 
-	t.Run("extracts headers and path", func(t *testing.T) {
+	t.Run("extracts headers", func(t *testing.T) {
 		t.Parallel()
 		req := &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -47,9 +47,6 @@ func TestCredentialContextFromCheckRequest(t *testing.T) {
 		}
 		if tc.Headers["cookie"] != "a=b" {
 			t.Errorf("expected cookie header, got %q", tc.Headers["cookie"])
-		}
-		if tc.Path != "/api/v1/resource" {
-			t.Errorf("expected path /api/v1/resource, got %q", tc.Path)
 		}
 		if tc.TLSPeer != nil {
 			t.Error("expected nil TLSPeer for HTTP check request")
@@ -109,12 +106,9 @@ func TestCredentialContextFromCheckRequest(t *testing.T) {
 			},
 		}
 
-		tc, err := CredentialContextFromCheckRequest(req)
+		_, err := CredentialContextFromCheckRequest(req)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
-		}
-		if tc.Path != "/" {
-			t.Errorf("expected path /, got %q", tc.Path)
 		}
 	})
 }
@@ -137,9 +131,6 @@ func TestCredentialContextFromGRPC(t *testing.T) {
 		}
 		if tc.Headers["x-custom"] != "value" {
 			t.Errorf("expected x-custom header, got %q", tc.Headers["x-custom"])
-		}
-		if tc.Path != "" {
-			t.Errorf("expected empty path for gRPC, got %q", tc.Path)
 		}
 		if tc.TLSPeer != nil {
 			t.Error("expected nil TLSPeer without TLS context")
