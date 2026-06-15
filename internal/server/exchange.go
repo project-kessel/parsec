@@ -74,26 +74,10 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		return nil, fmt.Errorf("unsupported grant_type: %s", req.GrantType)
 	}
 
-	// 2. Extract actor credential from gRPC context
-	actorExt, err := extractActorCredential(ctx, s.callerCredentialSources)
+	// 2. Authenticate actor (caller) from gRPC context
+	actor, err := authenticateActor(ctx, s.callerCredentialSources, s.trustStore, p)
 	if err != nil {
-		p.ActorCredentialExtractionFailed(err)
-		return nil, fmt.Errorf("failed to extract actor credential: %w", err)
-	}
-
-	var actor *trust.Result
-	if actorExt != nil {
-		p.ActorCredentialExtracted(actorExt.Credential, actorExt.RemoveHeaders)
-		var validationErr error
-		actor, validationErr = validateCredential(ctx, s.trustStore, actorExt)
-		if validationErr != nil {
-			p.ActorValidationFailed(validationErr)
-			return nil, fmt.Errorf("actor validation failed: %w", validationErr)
-		}
-		p.ActorValidationSucceeded(actor)
-	} else {
-		actor = trust.AnonymousResult()
-		p.ActorValidationSucceeded(actor)
+		return nil, err
 	}
 
 	// 3. Parse and filter client-provided request_context claims

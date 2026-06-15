@@ -110,28 +110,11 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	reqAttrs := s.buildRequestAttributes(req)
 	p.RequestAttributesParsed(reqAttrs)
 
-	// 2. Extract actor credential from gRPC context
-	actorExt, err := extractActorCredential(ctx, s.actorCredentialSources)
+	// 2. Authenticate actor from gRPC context
+	actor, err := authenticateActor(ctx, s.actorCredentialSources, s.trustStore, p)
 	if err != nil {
-		p.ActorCredentialExtractionFailed(err)
-		return s.denyResponse(codes.Internal,
-			fmt.Sprintf("failed to extract actor credential: %v", err)), nil
-	}
-
-	var actor *trust.Result
-	if actorExt != nil {
-		p.ActorCredentialExtracted(actorExt.Credential, actorExt.RemoveHeaders)
-		var validationErr error
-		actor, validationErr = validateCredential(ctx, s.trustStore, actorExt)
-		if validationErr != nil {
-			p.ActorValidationFailed(validationErr)
-			return s.denyResponse(codes.Unauthenticated,
-				fmt.Sprintf("actor validation failed: %v", validationErr)), nil
-		}
-		p.ActorValidationSucceeded(actor)
-	} else {
-		actor = trust.AnonymousResult()
-		p.ActorValidationSucceeded(actor)
+		return s.denyResponse(codes.Unauthenticated,
+			fmt.Sprintf("%v", err)), nil
 	}
 
 	// 3. Filter trust store based on actor permissions

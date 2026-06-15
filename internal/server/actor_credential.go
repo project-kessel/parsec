@@ -10,6 +10,41 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
+// actorProbe is the subset of observability methods needed by the shared
+// actor authentication flow.
+type actorProbe interface {
+	ActorCredentialExtracted(cred trust.Credential, headersUsed []string)
+	ActorCredentialExtractionFailed(err error)
+	ActorValidationSucceeded(actor *trust.Result)
+	ActorValidationFailed(err error)
+}
+
+// authenticateActor extracts and validates an actor credential from the gRPC
+// context, emitting probe events along the way. Returns an anonymous result
+// when no actor credential is present.
+func authenticateActor(ctx context.Context, sources []CredentialSource, store trust.Store, p actorProbe) (*trust.Result, error) {
+	ext, err := extractActorCredential(ctx, sources)
+	if err != nil {
+		p.ActorCredentialExtractionFailed(err)
+		return nil, fmt.Errorf("failed to extract actor credential: %w", err)
+	}
+
+	if ext != nil {
+		p.ActorCredentialExtracted(ext.Credential, ext.RemoveHeaders)
+		actor, validationErr := validateCredential(ctx, store, ext)
+		if validationErr != nil {
+			p.ActorValidationFailed(validationErr)
+			return nil, fmt.Errorf("actor validation failed: %w", validationErr)
+		}
+		p.ActorValidationSucceeded(actor)
+		return actor, nil
+	}
+
+	actor := trust.AnonymousResult()
+	p.ActorValidationSucceeded(actor)
+	return actor, nil
+}
+
 // extractActorCredential extracts an actor credential from the gRPC context.
 //
 // It first checks for mTLS peer certificates (returned directly as an
