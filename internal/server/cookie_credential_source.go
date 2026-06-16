@@ -40,9 +40,9 @@ func (s *CookieCredentialSource) Extract(cc CredentialContext) (*CredentialExtra
 	}
 	sanitized := sanitizeCookieHeader(cookieHeader, name)
 	if sanitized == "" {
-		ext.RemoveHeaders = []string{"cookie"}
+		ext.HeadersToRemove = []string{"cookie"}
 	} else {
-		ext.SetHeaders = map[string]string{"cookie": sanitized}
+		ext.HeadersToSet = map[string]string{"cookie": sanitized}
 	}
 	return ext, nil
 }

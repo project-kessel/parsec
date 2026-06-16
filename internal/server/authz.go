@@ -139,7 +139,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
-	p.SubjectCredentialExtracted(ext.Credential, ext.RemoveHeaders)
+	p.SubjectCredentialExtracted(ext.Credential, ext.HeadersToRemove)
 
 	// 5. Validate subject credentials against filtered trust store
 	result, err := validateCredential(ctx, filteredStore, ext)
@@ -169,7 +169,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	}
 
 	// 7. Build response headers from issued tokens and credential sanitization
-	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.SetHeaders))
+	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.HeadersToSet))
 	for _, spec := range s.TokenTypesToIssue {
 		if token, ok := issuedTokens[spec.Type]; ok {
 			responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
@@ -181,7 +181,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			})
 		}
 	}
-	for name, value := range ext.SetHeaders {
+	for name, value := range ext.HeadersToSet {
 		responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
 				Key:   name,
@@ -202,7 +202,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			OkResponse: &authv3.OkHttpResponse{
 				Headers: responseHeaders,
 				// Remove external credential headers - security boundary
-				HeadersToRemove: ext.RemoveHeaders,
+				HeadersToRemove: ext.HeadersToRemove,
 			},
 		},
 	}, nil

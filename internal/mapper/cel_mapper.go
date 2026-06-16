@@ -171,11 +171,11 @@ func (m *CELMapper) createActivation(ctx context.Context, input *service.MapperI
 			if input.Subject == nil {
 				return nil
 			}
-			m := trustResultToMap(input.Subject)
+			subjectMap := trustResultToMap(input.Subject)
 			if input.SubjectCredentialSource != "" {
-				m["credential_source"] = input.SubjectCredentialSource
+				subjectMap["credential_source"] = input.SubjectCredentialSource
 			}
-			return m
+			return subjectMap
 		}(),
 
 		"actor": func() any {

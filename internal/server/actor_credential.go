@@ -30,7 +30,7 @@ func authenticateActor(ctx context.Context, sources []CredentialSource, store tr
 	}
 
 	if ext != nil {
-		p.ActorCredentialExtracted(ext.Credential, ext.RemoveHeaders)
+		p.ActorCredentialExtracted(ext.Credential, ext.HeadersToRemove)
 		actor, validationErr := validateCredential(ctx, store, ext)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)

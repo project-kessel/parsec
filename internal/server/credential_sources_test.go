@@ -34,8 +34,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if bearer.Token != "jwt-token" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
-		if len(ext.RemoveHeaders) != 1 || ext.RemoveHeaders[0] != "authorization" {
-			t.Fatalf("unexpected headers: %v", ext.RemoveHeaders)
+		if len(ext.HeadersToRemove) != 1 || ext.HeadersToRemove[0] != "authorization" {
+			t.Fatalf("unexpected headers: %v", ext.HeadersToRemove)
 		}
 	})
 
@@ -69,11 +69,11 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if bearer.Token != "cookie-jwt" {
 			t.Fatalf("unexpected token: %q", bearer.Token)
 		}
-		if len(ext.RemoveHeaders) != 0 {
-			t.Fatalf("expected no header removals, got %v", ext.RemoveHeaders)
+		if len(ext.HeadersToRemove) != 0 {
+			t.Fatalf("expected no header removals, got %v", ext.HeadersToRemove)
 		}
-		if ext.SetHeaders["cookie"] != "session=abc; other=1" {
-			t.Fatalf("expected sanitized cookie header, got %q", ext.SetHeaders["cookie"])
+		if ext.HeadersToSet["cookie"] != "session=abc; other=1" {
+			t.Fatalf("expected sanitized cookie header, got %q", ext.HeadersToSet["cookie"])
 		}
 	})
 
@@ -86,11 +86,11 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(ext.RemoveHeaders) != 1 || ext.RemoveHeaders[0] != "cookie" {
-			t.Fatalf("expected cookie header removal, got %v", ext.RemoveHeaders)
+		if len(ext.HeadersToRemove) != 1 || ext.HeadersToRemove[0] != "cookie" {
+			t.Fatalf("expected cookie header removal, got %v", ext.HeadersToRemove)
 		}
-		if len(ext.SetHeaders) != 0 {
-			t.Fatalf("expected no header overrides, got %v", ext.SetHeaders)
+		if len(ext.HeadersToSet) != 0 {
+			t.Fatalf("expected no header overrides, got %v", ext.HeadersToSet)
 		}
 	})
 
@@ -146,6 +146,38 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		_, err := extractCredentialFromSources(makeCC(nil), defaultCredentialSources())
 		if err == nil {
 			t.Fatal("expected error when no credentials present")
+		}
+	})
+
+	t.Run("cookie with quoted value", func(t *testing.T) {
+		t.Parallel()
+		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
+		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+			"cookie": `session=abc; cs_jwt="quoted-jwt-token"; other=1`,
+		}), sources)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		bearer := ext.Credential.(*trust.BearerCredential)
+		if bearer.Token != "quoted-jwt-token" {
+			t.Fatalf("expected quotes to be stripped, got %q", bearer.Token)
+		}
+	})
+
+	t.Run("bearer with extra whitespace returns token with leading space", func(t *testing.T) {
+		t.Parallel()
+		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+			"authorization": "Bearer  extra-space-token",
+		}), defaultCredentialSources())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		bearer := ext.Credential.(*trust.BearerCredential)
+		// strings.Cut splits on the first space only, so the leading space
+		// remains in the token. This is safe: the malformed token will be
+		// rejected during downstream JWT validation.
+		if bearer.Token != " extra-space-token" {
+			t.Fatalf("expected token with leading space, got %q", bearer.Token)
 		}
 	})
 
