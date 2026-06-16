@@ -24,7 +24,11 @@ func (s *BearerCredentialSource) Extract(cc CredentialContext) (*CredentialExtra
 	}
 
 	scheme, token, ok := strings.Cut(authHeader, " ")
-	if !ok || !strings.EqualFold(scheme, "bearer") || token == "" {
+	if !ok || !strings.EqualFold(scheme, "bearer") {
+		return nil, fmt.Errorf("unsupported authorization scheme")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
 		return nil, fmt.Errorf("unsupported authorization scheme")
 	}
 

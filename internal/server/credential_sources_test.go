@@ -164,7 +164,7 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		}
 	})
 
-	t.Run("bearer with extra whitespace returns token with leading space", func(t *testing.T) {
+	t.Run("bearer with extra whitespace trims token", func(t *testing.T) {
 		t.Parallel()
 		ext, err := extractCredentialFromSources(makeCC(map[string]string{
 			"authorization": "Bearer  extra-space-token",
@@ -173,11 +173,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		bearer := ext.Credential.(*trust.BearerCredential)
-		// strings.Cut splits on the first space only, so the leading space
-		// remains in the token. This is safe: the malformed token will be
-		// rejected during downstream JWT validation.
-		if bearer.Token != " extra-space-token" {
-			t.Fatalf("expected token with leading space, got %q", bearer.Token)
+		if bearer.Token != "extra-space-token" {
+			t.Fatalf("expected trimmed token, got %q", bearer.Token)
 		}
 	})
 
