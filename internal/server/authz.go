@@ -230,8 +230,8 @@ func (s *AuthzServer) extractCredential(req *authv3.CheckRequest) (trust.Credent
 }
 
 func (s *AuthzServer) tryOptionalAuthPassThrough(reqAttrs *request.RequestAttributes, p service.AuthzCheckProbe) (*authv3.CheckResponse, bool) {
-	canonPath, ok := request.ParseMatchPath(reqAttrs.Path)
-	if !ok || !s.optionalAuthMatcher.MatchesPath(canonPath) {
+	validPath, ok := request.ParseMatchPath(reqAttrs.Path)
+	if !ok || !s.optionalAuthMatcher.MatchesPath(validPath) {
 		return nil, false
 	}
 	p.OptionalAuthPassThrough(reqAttrs)

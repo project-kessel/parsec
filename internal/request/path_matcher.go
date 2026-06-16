@@ -49,7 +49,8 @@ func NewPathMatcher(patterns []PathPattern) (*PathMatcher, error) {
 }
 
 // MatchesPath returns true when requestPath matches any configured pattern.
-// requestPath must be canonical (see ParseMatchPath).
+// requestPath must be validated via ParseMatchPath (not normalized — trailing
+// slashes are preserved as-is).
 func (m *PathMatcher) MatchesPath(requestPath string) bool {
 	if m == nil {
 		return false

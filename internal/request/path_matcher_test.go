@@ -289,12 +289,17 @@ func TestParseMatchPath(t *testing.T) {
 	}{
 		{"/openapi.json?version=2", "/openapi.json", true},
 		{"/openapi.json", "/openapi.json", true},
+		{"/", "/", true},
 		{"/api/docs/../secret", "", false},
 		{"/openapi%2ejson", "", false},
-		{"/openapi.json/", "", false},
+		{"/openapi.json/", "/openapi.json/", true},
+		{"/api/v3/status/", "/api/v3/status/", true},
+		{"//", "", false},
 		{"/api//docs", "", false},
 		{"/api/docs/%2e%2e/secret", "", false},
 		{"/api/docs/../secret?foo=bar", "", false},
+		{"/api/docs/../secret/", "", false},
+		{"/api//docs/", "", false},
 	}
 
 	for _, tt := range tests {

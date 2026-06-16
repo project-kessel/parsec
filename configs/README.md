@@ -190,7 +190,7 @@ Use `exact` or `prefix` when the path structure is simple. Use `regex` for versi
 
 A production-ready regex mapping of the [3scale optional-auth list](examples/optional-auth-3scale-production.yaml) is available as an example config.
 
-**MatchContext:** Matching evaluates `Path` today. `MatchContext.Headers` is reserved for future CAPS/CEL matchers that may also consider host or other request attributes.
+**Future header matching:** Matching evaluates the request path today. Future CAPS/CEL matchers may also consider host or other request attributes.
 
 > **Query strings:** Envoy populates the ext_authz path with the full URL including any query string (e.g. `/openapi.json?v=2`). Parsec strips the query string before matching, so an exact pattern `/openapi.json` will match both `/openapi.json` and `/openapi.json?v=2`.
 

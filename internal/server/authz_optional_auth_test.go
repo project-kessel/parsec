@@ -333,7 +333,7 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 		}
 	})
 
-	t.Run("canonicalized path still matches when encoding is benign", func(t *testing.T) {
+	t.Run("validated path still matches when query string is stripped", func(t *testing.T) {
 		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
 
 		resp, err := srv.Check(ctx, makeReq("/openapi.json?version=2", ""))
@@ -413,6 +413,62 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 			if resp.Status.Code == 0 {
 				t.Errorf("path %q: expected denial for encoded bypass attempt, got OK", p)
 			}
+		}
+	})
+
+	t.Run("regex trailing-slash path without credentials allows through", func(t *testing.T) {
+		srv, _ := setup(t, request.PathPattern{
+			Path:  `^/api/pulp/api/v3/status/$`,
+			Match: request.MatchRegex,
+		})
+
+		resp, err := srv.Check(ctx, makeReq("/api/pulp/api/v3/status/", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK for trailing-slash regex path, got code %d: %s",
+				resp.Status.Code, resp.Status.Message)
+		}
+	})
+
+	t.Run("regex optional trailing-slash path allows both forms", func(t *testing.T) {
+		srv, _ := setup(t, request.PathPattern{
+			Path:  `^/api/cloudigrade/v2/azure-offer-template/?$`,
+			Match: request.MatchRegex,
+		})
+
+		resp, err := srv.Check(ctx, makeReq("/api/cloudigrade/v2/azure-offer-template", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK for path without trailing slash, got code %d: %s",
+				resp.Status.Code, resp.Status.Message)
+		}
+
+		resp, err = srv.Check(ctx, makeReq("/api/cloudigrade/v2/azure-offer-template/", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK for path with trailing slash, got code %d: %s",
+				resp.Status.Code, resp.Status.Message)
+		}
+	})
+
+	t.Run("trailing-slash path that does not match pattern is denied", func(t *testing.T) {
+		srv, _ := setup(t, request.PathPattern{
+			Path:  `^/api/pulp/api/v3/status/$`,
+			Match: request.MatchRegex,
+		})
+
+		resp, err := srv.Check(ctx, makeReq("/api/pulp/api/v3/status", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code == 0 {
+			t.Error("expected denial for path missing required trailing slash, got OK")
 		}
 	})
 }
