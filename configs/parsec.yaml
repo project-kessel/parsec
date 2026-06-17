@@ -77,9 +77,9 @@ issuers:
 # to bearer-only (Authorization: Bearer).
 credential_sources:
   - name: authorization-bearer
-    type: bearer    # Authorization: Bearer header
+    type: authorization_bearer_opaque
   - name: cs-jwt-cookie
-    type: cookie
+    type: cookie_bearer_opaque
     cookie_name: cs_jwt
 
 # Authorization server configuration (ext_authz)

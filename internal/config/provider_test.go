@@ -9,8 +9,8 @@ func TestProvider_CredentialSources(t *testing.T) {
 	t.Parallel()
 
 	valid := []CredentialSourceConfig{
-		{Name: "authorization-bearer", Type: "bearer"},
-		{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"},
+		{Name: "authorization-bearer", Type: "authorization_bearer_opaque"},
+		{Name: "cs-jwt-cookie", Type: "cookie_bearer_opaque", CookieName: "cs_jwt"},
 	}
 
 	tests := []struct {
@@ -28,14 +28,14 @@ func TestProvider_CredentialSources(t *testing.T) {
 		},
 		{
 			name:    "missing source name",
-			sources: []CredentialSourceConfig{{Type: "bearer"}},
+			sources: []CredentialSourceConfig{{Type: "authorization_bearer_opaque"}},
 			wantErr: "credential_sources[0]: name is required",
 		},
 		{
 			name: "duplicate source name",
 			sources: []CredentialSourceConfig{
-				{Name: "bearer-a", Type: "bearer"},
-				{Name: "bearer-a", Type: "bearer"},
+				{Name: "bearer-a", Type: "authorization_bearer_opaque"},
+				{Name: "bearer-a", Type: "authorization_bearer_opaque"},
 			},
 			wantErr: "duplicate credential source name: bearer-a",
 		},
@@ -51,8 +51,8 @@ func TestProvider_CredentialSources(t *testing.T) {
 		},
 		{
 			name:    "cookie without cookie_name",
-			sources: []CredentialSourceConfig{{Name: "cookie", Type: "cookie"}},
-			wantErr: `cookie_name is required for type "cookie"`,
+			sources: []CredentialSourceConfig{{Name: "cookie", Type: "cookie_bearer_opaque"}},
+			wantErr: `cookie_name is required for type "cookie_bearer_opaque"`,
 		},
 	}
 

@@ -14,8 +14,8 @@ func Test_newCredentialSource(t *testing.T) {
 		cfg  CredentialSourceConfig
 		want server.CredentialSource
 	}{
-		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "bearer"}, want: server.NewBearerCredentialSource("authorization-bearer")},
-		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie", CookieName: "cs_jwt"}, want: server.NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")},
+		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "authorization_bearer_opaque"}, want: server.NewBearerCredentialSource("authorization-bearer")},
+		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie_bearer_opaque", CookieName: "cs_jwt"}, want: server.NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")},
 	}
 
 	for _, tt := range tests {
@@ -42,7 +42,7 @@ func Test_newCredentialSource(t *testing.T) {
 
 	t.Run("missing name", func(t *testing.T) {
 		t.Parallel()
-		_, err := newCredentialSource(CredentialSourceConfig{Type: "bearer"})
+		_, err := newCredentialSource(CredentialSourceConfig{Type: "authorization_bearer_opaque"})
 		if err == nil {
 			t.Fatal("expected error for missing name")
 		}
@@ -58,7 +58,7 @@ func Test_newCredentialSource(t *testing.T) {
 
 	t.Run("cookie without cookie_name", func(t *testing.T) {
 		t.Parallel()
-		_, err := newCredentialSource(CredentialSourceConfig{Name: "cookie", Type: "cookie"})
+		_, err := newCredentialSource(CredentialSourceConfig{Name: "cookie", Type: "cookie_bearer_opaque"})
 		if err == nil {
 			t.Fatal("expected error for cookie without cookie_name")
 		}

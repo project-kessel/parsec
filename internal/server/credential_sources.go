@@ -13,8 +13,8 @@ var ErrNoCredentials = errors.New("no credentials found in configured sources")
 
 // Credential source type strings used in config.
 const (
-	CredentialSourceTypeBearer = "bearer"
-	CredentialSourceTypeCookie = "cookie"
+	CredentialSourceTypeBearer = "authorization_bearer_opaque"
+	CredentialSourceTypeCookie = "cookie_bearer_opaque"
 )
 
 // CredentialSource extracts a credential from a transport-neutral context.
@@ -39,7 +39,7 @@ func validateCredential(ctx context.Context, store trust.Store, ext *CredentialE
 }
 
 func defaultCredentialSources() []CredentialSource {
-	return []CredentialSource{NewBearerCredentialSource("bearer")}
+	return []CredentialSource{NewBearerCredentialSource(CredentialSourceTypeBearer)}
 }
 
 func extractCredentialFromSources(cc CredentialContext, sources []CredentialSource) (*CredentialExtraction, error) {

@@ -24,8 +24,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if ext.SourceName != "bearer" {
-			t.Fatalf("expected bearer, got %q", ext.SourceName)
+		if ext.SourceName != "authorization_bearer_opaque" {
+			t.Fatalf("expected authorization_bearer_opaque, got %q", ext.SourceName)
 		}
 		bearer, ok := ext.Credential.(*trust.BearerCredential)
 		if !ok {
