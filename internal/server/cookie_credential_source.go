@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 
 	"github.com/project-kessel/parsec/internal/trust"
@@ -18,7 +19,7 @@ func NewCookieCredentialSource(name, cookieName string) *CookieCredentialSource 
 	return &CookieCredentialSource{SourceName: name, CookieName: cookieName}
 }
 
-func (s *CookieCredentialSource) Extract(cc CredentialContext) (*CredentialExtraction, error) {
+func (s *CookieCredentialSource) Extract(_ context.Context, cc CredentialContext) (*CredentialExtraction, error) {
 	name := s.CookieName
 	if name == "" {
 		name = "cs_jwt"

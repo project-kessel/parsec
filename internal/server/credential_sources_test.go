@@ -1,15 +1,17 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-func TestExtractCredentialFromSources(t *testing.T) {
+func TestCredentialSources_Extract(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
 	makeCC := func(headers map[string]string) CredentialContext {
 		return CredentialContext{
 			Headers: headers,
@@ -18,9 +20,10 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("bearer from authorization header", func(t *testing.T) {
 		t.Parallel()
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		sources := DefaultCredentialSources()
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"authorization": "Bearer jwt-token",
-		}), defaultCredentialSources())
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -41,9 +44,10 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("bearer scheme is case-insensitive", func(t *testing.T) {
 		t.Parallel()
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		sources := DefaultCredentialSources()
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"authorization": "bearer jwt-token",
-		}), defaultCredentialSources())
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -55,10 +59,10 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		sources := NewCredentialSources(NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt"))
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"cookie": "session=abc; cs_jwt=cookie-jwt; other=1",
-		}), sources)
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -79,10 +83,10 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie only credential is removed entirely", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		sources := NewCredentialSources(NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt"))
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
-		}), sources)
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -96,14 +100,14 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("first matching source wins", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{
+		sources := NewCredentialSources(
 			NewBearerCredentialSource("authorization-bearer"),
 			NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt"),
-		}
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		)
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"authorization": "Bearer header-jwt",
 			"cookie":        "cs_jwt=cookie-jwt",
-		}), sources)
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -118,13 +122,13 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("falls through to second source", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{
+		sources := NewCredentialSources(
 			NewBearerCredentialSource("authorization-bearer"),
 			NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt"),
-		}
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		)
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"cookie": "cs_jwt=cookie-jwt",
-		}), sources)
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -135,7 +139,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("empty sources returns error", func(t *testing.T) {
 		t.Parallel()
-		_, err := extractCredentialFromSources(makeCC(nil), nil)
+		sources := NewCredentialSources()
+		_, err := sources.Extract(ctx, makeCC(nil))
 		if err == nil {
 			t.Fatal("expected error for empty sources")
 		}
@@ -143,7 +148,8 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("no credentials found", func(t *testing.T) {
 		t.Parallel()
-		_, err := extractCredentialFromSources(makeCC(nil), defaultCredentialSources())
+		sources := DefaultCredentialSources()
+		_, err := sources.Extract(ctx, makeCC(nil))
 		if err == nil {
 			t.Fatal("expected error when no credentials present")
 		}
@@ -151,10 +157,10 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("cookie with quoted value", func(t *testing.T) {
 		t.Parallel()
-		sources := []CredentialSource{NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")}
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		sources := NewCredentialSources(NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt"))
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"cookie": `session=abc; cs_jwt="quoted-jwt-token"; other=1`,
-		}), sources)
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -166,9 +172,10 @@ func TestExtractCredentialFromSources(t *testing.T) {
 
 	t.Run("bearer with extra whitespace trims token", func(t *testing.T) {
 		t.Parallel()
-		ext, err := extractCredentialFromSources(makeCC(map[string]string{
+		sources := DefaultCredentialSources()
+		ext, err := sources.Extract(ctx, makeCC(map[string]string{
 			"authorization": "Bearer  extra-space-token",
-		}), defaultCredentialSources())
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -182,11 +189,11 @@ func TestExtractCredentialFromSources(t *testing.T) {
 		t.Parallel()
 		err1 := errors.New("first source failed")
 		err2 := errors.New("second source failed")
-		sources := []CredentialSource{
+		sources := NewCredentialSources(
 			&stubErrCredentialSource{err: err1},
 			&stubErrCredentialSource{err: err2},
-		}
-		_, err := extractCredentialFromSources(makeCC(nil), sources)
+		)
+		_, err := sources.Extract(ctx, makeCC(nil))
 		if !errors.Is(err, err1) || !errors.Is(err, err2) {
 			t.Fatalf("expected joined errors, got %v", err)
 		}
@@ -197,36 +204,62 @@ type stubErrCredentialSource struct {
 	err error
 }
 
-func (s *stubErrCredentialSource) Extract(CredentialContext) (*CredentialExtraction, error) {
+func (s *stubErrCredentialSource) Extract(context.Context, CredentialContext) (*CredentialExtraction, error) {
 	return nil, s.err
 }
 
 func TestNewAuthzServer_defaultCredentialSources(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
 	srv := NewAuthzServer(nil, nil, nil, nil)
-	if len(srv.credentialSources) != 1 {
-		t.Fatalf("expected one default subject source, got %d", len(srv.credentialSources))
+
+	ext, err := srv.credentialSources.Extract(ctx, CredentialContext{
+		Headers: map[string]string{"authorization": "Bearer test-token"},
+	})
+	if err != nil {
+		t.Fatalf("default subject sources failed to extract: %v", err)
 	}
-	if _, ok := srv.credentialSources[0].(*BearerCredentialSource); !ok {
-		t.Fatalf("expected default bearer subject source, got %T", srv.credentialSources[0])
+	bearer, ok := ext.Credential.(*trust.BearerCredential)
+	if !ok {
+		t.Fatalf("expected BearerCredential from default subject source, got %T", ext.Credential)
 	}
-	if len(srv.actorCredentialSources) != 1 {
-		t.Fatalf("expected one default actor source, got %d", len(srv.actorCredentialSources))
+	if bearer.Token != "test-token" {
+		t.Fatalf("unexpected token: %q", bearer.Token)
 	}
-	if _, ok := srv.actorCredentialSources[0].(*BearerCredentialSource); !ok {
-		t.Fatalf("expected default bearer actor source, got %T", srv.actorCredentialSources[0])
+
+	ext, err = srv.actorCredentialSources.Extract(ctx, CredentialContext{
+		Headers: map[string]string{"authorization": "Bearer actor-token"},
+	})
+	if err != nil {
+		t.Fatalf("default actor sources failed to extract: %v", err)
+	}
+	bearer, ok = ext.Credential.(*trust.BearerCredential)
+	if !ok {
+		t.Fatalf("expected BearerCredential from default actor source, got %T", ext.Credential)
+	}
+	if bearer.Token != "actor-token" {
+		t.Fatalf("unexpected token: %q", bearer.Token)
 	}
 }
 
 func TestNewExchangeServer_defaultCredentialSources(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
 	srv := NewExchangeServer(nil, nil, nil, nil)
-	if len(srv.callerCredentialSources) != 1 {
-		t.Fatalf("expected one default caller source, got %d", len(srv.callerCredentialSources))
+
+	ext, err := srv.callerCredentialSources.Extract(ctx, CredentialContext{
+		Headers: map[string]string{"authorization": "Bearer caller-token"},
+	})
+	if err != nil {
+		t.Fatalf("default caller sources failed to extract: %v", err)
 	}
-	if _, ok := srv.callerCredentialSources[0].(*BearerCredentialSource); !ok {
-		t.Fatalf("expected default bearer caller source, got %T", srv.callerCredentialSources[0])
+	bearer, ok := ext.Credential.(*trust.BearerCredential)
+	if !ok {
+		t.Fatalf("expected BearerCredential from default caller source, got %T", ext.Credential)
+	}
+	if bearer.Token != "caller-token" {
+		t.Fatalf("unexpected token: %q", bearer.Token)
 	}
 }

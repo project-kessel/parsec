@@ -385,10 +385,10 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 
 // CredentialSources returns the global credential extraction sources shared by
 // all extraction paths (ext_authz subject, ext_authz actor, exchange caller).
-// Returns nil when unset so servers apply bearer-only defaults.
-func (p *Provider) CredentialSources() ([]server.CredentialSource, error) {
+// Returns DefaultCredentialSources when unset.
+func (p *Provider) CredentialSources() (server.CredentialSources, error) {
 	if len(p.config.CredentialSources) == 0 {
-		return nil, nil
+		return server.DefaultCredentialSources(), nil
 	}
 
 	return newCredentialSources(p.config.CredentialSources)

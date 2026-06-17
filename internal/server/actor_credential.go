@@ -22,7 +22,7 @@ type actorProbe interface {
 // authenticateActor extracts and validates an actor credential from the gRPC
 // context, emitting probe events along the way. Returns an anonymous result
 // when no actor credential is present.
-func authenticateActor(ctx context.Context, sources []CredentialSource, store trust.Store, p actorProbe) (*trust.Result, error) {
+func authenticateActor(ctx context.Context, sources CredentialSources, store trust.Store, p actorProbe) (*trust.Result, error) {
 	ext, err := extractActorCredential(ctx, sources)
 	if err != nil {
 		p.ActorCredentialExtractionFailed(err)
@@ -53,7 +53,7 @@ func authenticateActor(ctx context.Context, sources []CredentialSource, store tr
 // the configured CredentialSource chain.
 //
 // Returns (nil, nil) if no actor authentication is present.
-func extractActorCredential(ctx context.Context, sources []CredentialSource) (*CredentialExtraction, error) {
+func extractActorCredential(ctx context.Context, sources CredentialSources) (*CredentialExtraction, error) {
 	cc := CredentialContextFromGRPC(ctx)
 
 	// mTLS takes priority. A future MTLSCredentialSource can replace this
@@ -66,7 +66,7 @@ func extractActorCredential(ctx context.Context, sources []CredentialSource) (*C
 		return nil, nil
 	}
 
-	ext, err := extractCredentialFromSources(cc, sources)
+	ext, err := sources.Extract(ctx, cc)
 	if err != nil {
 		if errors.Is(err, ErrNoCredentials) {
 			return nil, nil

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -17,7 +18,7 @@ func NewBearerCredentialSource(name string) *BearerCredentialSource {
 	return &BearerCredentialSource{SourceName: name}
 }
 
-func (s *BearerCredentialSource) Extract(cc CredentialContext) (*CredentialExtraction, error) {
+func (s *BearerCredentialSource) Extract(_ context.Context, cc CredentialContext) (*CredentialExtraction, error) {
 	authHeader := cc.Headers["authorization"]
 	if authHeader == "" {
 		return nil, nil

@@ -16,8 +16,9 @@ import (
 // exchangeServerConfig holds ExchangeServer settings applied via options.
 type exchangeServerConfig struct {
 	// callerCredentialSources configures where caller (actor) credentials are
-	// extracted from. Defaults to bearer-only if unset.
-	callerCredentialSources []CredentialSource
+	// extracted from.
+	callerCredentialSources    CredentialSources
+	callerCredentialSourcesSet bool
 }
 
 // ExchangeServerOption configures an ExchangeServer.
@@ -25,9 +26,10 @@ type ExchangeServerOption func(*exchangeServerConfig)
 
 // WithCallerCredentialSources sets credential extraction sources for caller
 // (actor) validation on the exchange endpoint.
-func WithCallerCredentialSources(sources []CredentialSource) ExchangeServerOption {
+func WithCallerCredentialSources(sources CredentialSources) ExchangeServerOption {
 	return func(cfg *exchangeServerConfig) {
 		cfg.callerCredentialSources = sources
+		cfg.callerCredentialSourcesSet = true
 	}
 }
 
@@ -53,8 +55,8 @@ func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenServic
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	if len(cfg.callerCredentialSources) == 0 {
-		cfg.callerCredentialSources = defaultCredentialSources()
+	if !cfg.callerCredentialSourcesSet {
+		cfg.callerCredentialSources = DefaultCredentialSources()
 	}
 
 	return &ExchangeServer{

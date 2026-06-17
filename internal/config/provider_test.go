@@ -1,8 +1,12 @@
 package config
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/project-kessel/parsec/internal/server"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func TestProvider_CredentialSources(t *testing.T) {
@@ -19,7 +23,7 @@ func TestProvider_CredentialSources(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "nil credential sources",
+			name:    "nil defaults to bearer",
 			sources: nil,
 		},
 		{
@@ -75,14 +79,20 @@ func TestProvider_CredentialSources(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tt.name == "nil credential sources" {
-				if got != nil {
-					t.Fatalf("expected nil sources, got %+v", got)
-				}
-				return
+
+			// Every valid case should extract from Authorization header
+			ext, err := got.Extract(context.Background(), server.CredentialContext{
+				Headers: map[string]string{"authorization": "Bearer test"},
+			})
+			if err != nil {
+				t.Fatalf("extract failed: %v", err)
 			}
-			if len(got) != len(tt.sources) {
-				t.Fatalf("got %d sources, want %d", len(got), len(tt.sources))
+			bearer, ok := ext.Credential.(*trust.BearerCredential)
+			if !ok {
+				t.Fatalf("expected BearerCredential, got %T", ext.Credential)
+			}
+			if bearer.Token != "test" {
+				t.Fatalf("unexpected token: %q", bearer.Token)
 			}
 		})
 	}
