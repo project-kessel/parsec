@@ -60,12 +60,6 @@ type IssueRequest struct {
 
 	// Scope for the tokens
 	Scope string
-
-	// SubjectCredentialSource is the name of the credential source that
-	// provided the subject credential (e.g. "authorization-bearer",
-	// "cs-jwt-cookie"). Empty when the subject token comes from a
-	// protocol-level field (e.g. exchange body).
-	SubjectCredentialSource string
 }
 
 // IssueTokens orchestrates the complete token issuance process
@@ -84,7 +78,6 @@ func (ts *TokenService) IssueTokens(ctx context.Context, req *IssueRequest) (map
 		Audience:                ts.trustDomain,
 		Scope:                   req.Scope,
 		DataSourceRegistry:      ts.dataSources,
-		SubjectCredentialSource: req.SubjectCredentialSource,
 	}
 
 	// Issue tokens for each requested type

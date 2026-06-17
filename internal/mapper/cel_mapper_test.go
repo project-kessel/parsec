@@ -220,68 +220,6 @@ func TestCELMapper_Map(t *testing.T) {
 		}
 	})
 
-	t.Run("access subject credential_source", func(t *testing.T) {
-		mapper, err := NewCELMapper(`{
-			"user": subject.subject,
-			"source": subject.credential_source
-		}`)
-		if err != nil {
-			t.Fatalf("failed to create mapper: %v", err)
-		}
-
-		input := &service.MapperInput{
-			Subject: &trust.Result{
-				Subject:     "user@example.com",
-				Issuer:      "https://idp.example.com",
-				TrustDomain: "example-domain",
-				ExpiresAt:   time.Now().Add(time.Hour),
-				IssuedAt:    time.Now(),
-			},
-			SubjectCredentialSource: "cs-jwt-cookie",
-		}
-
-		result, err := mapper.Map(ctx, input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if result["user"] != "user@example.com" {
-			t.Errorf("expected user=user@example.com, got %v", result["user"])
-		}
-
-		if result["source"] != "cs-jwt-cookie" {
-			t.Errorf("expected source=cs-jwt-cookie, got %v", result["source"])
-		}
-	})
-
-	t.Run("subject credential_source absent when empty", func(t *testing.T) {
-		mapper, err := NewCELMapper(`{
-			"has_source": has(subject.credential_source)
-		}`)
-		if err != nil {
-			t.Fatalf("failed to create mapper: %v", err)
-		}
-
-		input := &service.MapperInput{
-			Subject: &trust.Result{
-				Subject:     "user@example.com",
-				Issuer:      "https://idp.example.com",
-				TrustDomain: "example-domain",
-				ExpiresAt:   time.Now().Add(time.Hour),
-				IssuedAt:    time.Now(),
-			},
-		}
-
-		result, err := mapper.Map(ctx, input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if result["has_source"] != false {
-			t.Errorf("expected has_source=false when credential source is empty, got %v", result["has_source"])
-		}
-	})
-
 	t.Run("access actor", func(t *testing.T) {
 		mapper, err := NewCELMapper(`{
 			"actor_id": actor.subject,

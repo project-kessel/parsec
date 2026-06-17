@@ -53,9 +53,4 @@ type MapperInput struct {
 
 	// DataSourceInput is the input to use when fetching from data sources
 	DataSourceInput *DataSourceInput
-
-	// SubjectCredentialSource is the name of the credential source that
-	// provided the subject credential. Exposed to CEL as
-	// subject.credential_source.
-	SubjectCredentialSource string
 }

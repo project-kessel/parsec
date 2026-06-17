@@ -27,11 +27,13 @@ type TokenTypeSpec struct {
 // authzServerConfig holds AuthzServer settings applied via options.
 type authzServerConfig struct {
 	// credentialSources configures where subject credentials are extracted from.
-	credentialSources []CredentialSource
+	credentialSources CredentialSources
 
 	// actorCredentialSources configures where actor credentials are extracted from.
-	// Defaults to bearer-only if unset.
-	actorCredentialSources []CredentialSource
+	actorCredentialSources CredentialSources
+
+	credentialSourcesSet      bool
+	actorCredentialSourcesSet bool
 }
 
 // AuthzServer implements Envoy's ext_authz Authorization service
@@ -52,17 +54,19 @@ type AuthzServer struct {
 type AuthzServerOption func(*authzServerConfig)
 
 // WithCredentialSources sets credential extraction sources for subject validation.
-func WithCredentialSources(sources []CredentialSource) AuthzServerOption {
+func WithCredentialSources(sources CredentialSources) AuthzServerOption {
 	return func(cfg *authzServerConfig) {
 		cfg.credentialSources = sources
+		cfg.credentialSourcesSet = true
 	}
 }
 
 // WithActorCredentialSources sets credential extraction sources for actor
-// (caller) validation. Defaults to bearer-only if unset.
-func WithActorCredentialSources(sources []CredentialSource) AuthzServerOption {
+// (caller) validation.
+func WithActorCredentialSources(sources CredentialSources) AuthzServerOption {
 	return func(cfg *authzServerConfig) {
 		cfg.actorCredentialSources = sources
+		cfg.actorCredentialSourcesSet = true
 	}
 }
 
@@ -87,11 +91,11 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	if len(cfg.credentialSources) == 0 {
-		cfg.credentialSources = defaultCredentialSources()
+	if !cfg.credentialSourcesSet {
+		cfg.credentialSources = DefaultCredentialSources()
 	}
-	if len(cfg.actorCredentialSources) == 0 {
-		cfg.actorCredentialSources = defaultCredentialSources()
+	if !cfg.actorCredentialSourcesSet {
+		cfg.actorCredentialSources = DefaultCredentialSources()
 	}
 
 	return &AuthzServer{
@@ -134,7 +138,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
-	ext, err := extractCredentialFromSources(cc, s.credentialSources)
+	ext, err := s.credentialSources.Extract(ctx, cc)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
@@ -160,7 +164,6 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		Actor:                   actor,
 		RequestAttributes:       reqAttrs,
 		TokenTypes:              tokenTypes,
-		SubjectCredentialSource: ext.SourceName,
 		// TODO: Get scope from configuration or request
 		Scope: "",
 	})
