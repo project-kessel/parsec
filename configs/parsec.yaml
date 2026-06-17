@@ -71,10 +71,9 @@ issuers:
 #   - ext_authz actor   (gRPC metadata)
 #   - exchange caller   (gRPC metadata)
 #
-# Cookie sources silently return no match on gRPC paths (no Cookie header),
-# so including them here is safe -- they only activate on the ext_authz
-# subject path. When no credential_sources are configured, parsec defaults
-# to bearer-only (Authorization: Bearer).
+# Sources return no match when the expected header is absent, so including
+# all source types here is safe. When no credential_sources are configured,
+# parsec defaults to bearer-only (Authorization: Bearer).
 credential_sources:
   - name: authorization-bearer
     type: authorization_bearer_opaque

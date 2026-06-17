@@ -48,13 +48,13 @@ Credential sources are configured globally and shared by all extraction paths (e
 ```yaml
 credential_sources:
   - name: authorization-bearer
-    type: bearer
+    type: authorization_bearer_opaque
   - name: cs-jwt-cookie
-    type: cookie
+    type: cookie_bearer_opaque
     cookie_name: cs_jwt
 ```
 
-Sources are tried in order; the first match wins. Cookie sources return nil when the cookie is absent, so including a cookie source globally is safe for actor/exchange paths that typically only present bearer tokens.
+Sources are tried in order; the first match wins. A source returns `nil` (no match) when the expected header or credential is absent.
 
 ### Configuration Sharing
 
@@ -63,14 +63,10 @@ All three extraction paths share the same `credential_sources` list:
 | Path | Transport | Typical Sources |
 |------|-----------|-----------------|
 | ext_authz **subject** | Envoy HTTP headers | bearer, cookie |
-| ext_authz **actor** | gRPC metadata | bearer (cookies absent) |
-| exchange **caller** | gRPC metadata | bearer (cookies absent) |
+| ext_authz **actor** | gRPC metadata | bearer |
+| exchange **caller** | gRPC metadata | bearer |
 
-This works because each `CredentialSource` silently returns `nil` (no match) when the expected header is missing. A `CookieCredentialSource` configured globally will never match on gRPC paths because gRPC metadata does not contain a `Cookie` header.
-
-When no `credential_sources` are configured, all server constructors (`NewAuthzServer`, `NewExchangeServer`) default to bearer-only.
-
-The credential source `name` that matched (e.g. `"authorization-bearer"`, `"cs-jwt-cookie"`) is available to CEL claim mappers as `subject.credential_source`, allowing scripts to branch on how the credential was presented.
+This works because each `CredentialSource` returns `nil` when the expected header is missing. When no `credential_sources` are configured, `DefaultCredentialSources()` is used (bearer-only).
 
 ## Design Principles
 
@@ -133,8 +129,8 @@ The extraction layer tracks which headers were used, and ext_authz removes them 
 // 1. Build CredentialContext from transport
 cc, err := CredentialContextFromCheckRequest(req)
 
-// 2. Extract credential via CredentialSource chain
-ext, err := extractCredentialFromSources(cc, sources)
+// 2. Extract credential via CredentialSources chain
+ext, err := sources.Extract(ctx, cc)
 
 // 3. Validate
 result, err := validateCredential(ctx, store, ext)
@@ -156,7 +152,7 @@ return &CheckResponse{
 cc, err := CredentialContextFromCheckRequest(req)
 
 // 2. Extract via configured source chain
-ext, err := extractCredentialFromSources(cc, subjectSources)
+ext, err := subjectSources.Extract(ctx, cc)
 // ext.Credential is *trust.BearerCredential{Token: "..."}
 // ext.RemoveHeaders is []string{"authorization"}
 
@@ -172,7 +168,7 @@ The cookie source extracts a JWT from a named cookie and sanitizes the `Cookie` 
 
 ```go
 cc, err := CredentialContextFromCheckRequest(req)
-ext, err := extractCredentialFromSources(cc, subjectSources)
+ext, err := subjectSources.Extract(ctx, cc)
 // ext.Credential is *trust.BearerCredential{Token: "..."}
 // ext.SetHeaders["cookie"] is "session=abc" (cs_jwt removed)
 
