@@ -44,11 +44,11 @@ func (ic *IssueContext) ToClaims(ctx context.Context, mappers []ClaimMapper) (cl
 
 	// Build mapper input
 	mapperInput := &MapperInput{
-		Subject:                 ic.Subject,
-		Actor:                   ic.Actor,
-		RequestAttributes:       ic.RequestAttributes,
-		DataSourceRegistry:      ic.DataSourceRegistry,
-		DataSourceInput:         dataSourceInput,
+		Subject:            ic.Subject,
+		Actor:              ic.Actor,
+		RequestAttributes:  ic.RequestAttributes,
+		DataSourceRegistry: ic.DataSourceRegistry,
+		DataSourceInput:    dataSourceInput,
 	}
 
 	// Apply mappers
