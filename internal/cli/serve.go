@@ -125,9 +125,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		server.WithActorCredentialSources(credentialSources),
 	)
 
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, obs,
-		server.WithCallerCredentialSources(credentialSources),
-	)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
 		Observer:       obs,

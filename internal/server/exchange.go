@@ -13,58 +13,30 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// exchangeServerConfig holds ExchangeServer settings applied via options.
-type exchangeServerConfig struct {
-	// callerCredentialSources configures where caller (actor) credentials are
-	// extracted from.
-	callerCredentialSources    CredentialSources
-	callerCredentialSourcesSet bool
-}
-
-// ExchangeServerOption configures an ExchangeServer.
-type ExchangeServerOption func(*exchangeServerConfig)
-
-// WithCallerCredentialSources sets credential extraction sources for caller
-// (actor) validation on the exchange endpoint.
-func WithCallerCredentialSources(sources CredentialSources) ExchangeServerOption {
-	return func(cfg *exchangeServerConfig) {
-		cfg.callerCredentialSources = sources
-		cfg.callerCredentialSourcesSet = true
-	}
-}
-
 // ExchangeServer implements the TokenExchange gRPC service
 type ExchangeServer struct {
 	parsecv1.UnimplementedTokenExchangeServiceServer
 
-	trustStore           trust.Store
-	tokenService         *service.TokenService
-	claimsFilterRegistry ClaimsFilterRegistry
-	observer             service.TokenExchangeObserver
-
-	exchangeServerConfig
+	trustStore               trust.Store
+	tokenService             *service.TokenService
+	claimsFilterRegistry     ClaimsFilterRegistry
+	observer                 service.TokenExchangeObserver
+	callerCredentialSources  CredentialSources
 }
 
-// NewExchangeServer creates a new token exchange server
-func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, observer service.TokenExchangeObserver, opts ...ExchangeServerOption) *ExchangeServer {
+// NewExchangeServer creates a new token exchange server.
+// callerCredentialSources defines where caller (actor) credentials are extracted from.
+func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, callerCredentialSources CredentialSources, observer service.TokenExchangeObserver) *ExchangeServer {
 	if observer == nil {
 		observer = service.NoOpTokenExchangeObserver{}
 	}
 
-	cfg := exchangeServerConfig{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	if !cfg.callerCredentialSourcesSet {
-		cfg.callerCredentialSources = DefaultCredentialSources()
-	}
-
 	return &ExchangeServer{
-		trustStore:           trustStore,
-		tokenService:         tokenService,
-		claimsFilterRegistry: claimsFilterRegistry,
-		observer:             observer,
-		exchangeServerConfig: cfg,
+		trustStore:              trustStore,
+		tokenService:            tokenService,
+		claimsFilterRegistry:    claimsFilterRegistry,
+		observer:                observer,
+		callerCredentialSources: callerCredentialSources,
 	}
 }
 

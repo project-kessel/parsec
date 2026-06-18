@@ -35,7 +35,7 @@ Normalization constructors:
 
 ```go
 type CredentialSource interface {
-    Extract(cc CredentialContext) (*CredentialExtraction, error)
+    Extract(ctx context.Context, cc CredentialContext) (*CredentialExtraction, error)
 }
 ```
 

@@ -132,7 +132,7 @@ func stubServerConfig() Config {
 	claimsFilterRegistry := NewStubClaimsFilterRegistry()
 	return Config{
 		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, nil),
-		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil),
+		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil),
 		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Observer: NoOpServerObserver{}}),
 		Observer:       NoOpServerObserver{},
 	}

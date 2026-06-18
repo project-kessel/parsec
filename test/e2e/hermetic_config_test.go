@@ -201,7 +201,7 @@ end`,
 	// 3. Create the Exchange Server (External API)
 	// ============================================================
 	// This is the only component we'll interact with - the external gRPC API
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, nil)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, server.DefaultCredentialSources(), nil)
 
 	// ============================================================
 	// 4. TEST: Token Exchange API Contract

@@ -243,21 +243,21 @@ func TestNewAuthzServer_defaultCredentialSources(t *testing.T) {
 	}
 }
 
-func TestNewExchangeServer_defaultCredentialSources(t *testing.T) {
+func TestNewExchangeServer_callerCredentialSources(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	srv := NewExchangeServer(nil, nil, nil, nil)
+	srv := NewExchangeServer(nil, nil, nil, DefaultCredentialSources(), nil)
 
 	ext, err := srv.callerCredentialSources.Extract(ctx, CredentialContext{
 		Headers: map[string]string{"authorization": "Bearer caller-token"},
 	})
 	if err != nil {
-		t.Fatalf("default caller sources failed to extract: %v", err)
+		t.Fatalf("caller sources failed to extract: %v", err)
 	}
 	bearer, ok := ext.Credential.(*trust.BearerCredential)
 	if !ok {
-		t.Fatalf("expected BearerCredential from default caller source, got %T", ext.Credential)
+		t.Fatalf("expected BearerCredential from caller source, got %T", ext.Credential)
 	}
 	if bearer.Token != "caller-token" {
 		t.Fatalf("unexpected token: %q", bearer.Token)

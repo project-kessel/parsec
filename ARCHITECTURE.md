@@ -593,7 +593,7 @@ claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
 
 // 8. Inject into servers
 authzServer := server.NewAuthzServer(trustStore, tokenService)
-exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry)
+exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 
 // 9. Create and start server
 srv := server.New(server.Config{
