@@ -139,6 +139,11 @@ func (p *loggingJWTValidateProbe) ClaimsExtractionFailed(err error) {
 		Msg("claims extraction failed")
 }
 
+func (p *loggingJWTValidateProbe) ServiceAccountAudienceExempt() {
+	p.logger.Debug().
+		Msg("service account token exempt from audience validation")
+}
+
 func (p *loggingJWTValidateProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).

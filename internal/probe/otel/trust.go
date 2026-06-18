@@ -120,6 +120,7 @@ func (p *jwtValidateProbe) ClaimsExtractionFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = jwtResultClaimsExtractionFailed
 }
+func (p *jwtValidateProbe) ServiceAccountAudienceExempt() {}
 func (p *jwtValidateProbe) End() {
 	attrs := metric.WithAttributeSet(attribute.NewSet(p.issuer, p.result, p.status))
 	p.obs.jwtValidateDuration.Record(p.ctx, time.Since(p.startTime).Seconds(), attrs)

@@ -45,6 +45,7 @@ type JWTValidateProbe interface {
 	TokenExpired()
 	TokenInvalid(err error)
 	ClaimsExtractionFailed(err error)
+	ServiceAccountAudienceExempt()
 	End()
 }
 
@@ -77,11 +78,12 @@ func (NoOpForActorProbe) End()                                 {}
 
 type NoOpJWTValidateProbe struct{}
 
-func (NoOpJWTValidateProbe) JWKSLookupFailed(error)       {}
-func (NoOpJWTValidateProbe) TokenExpired()                {}
-func (NoOpJWTValidateProbe) TokenInvalid(error)           {}
-func (NoOpJWTValidateProbe) ClaimsExtractionFailed(error) {}
-func (NoOpJWTValidateProbe) End()                         {}
+func (NoOpJWTValidateProbe) JWKSLookupFailed(error)        {}
+func (NoOpJWTValidateProbe) TokenExpired()                 {}
+func (NoOpJWTValidateProbe) TokenInvalid(error)            {}
+func (NoOpJWTValidateProbe) ClaimsExtractionFailed(error)  {}
+func (NoOpJWTValidateProbe) ServiceAccountAudienceExempt() {}
+func (NoOpJWTValidateProbe) End()                          {}
 
 type NoOpStoreObserver struct {
 	NoOpFilteredStoreObserver

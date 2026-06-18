@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/lestrrat-go/httprc/v3"
@@ -189,7 +190,9 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	maps.Copy(claimsMap, allClaims)
 
 	audiences, _ := token.Audience()
-	if err := v.validateAudience(audiences); err != nil {
+	if isServiceAccount(allClaims) {
+		p.ServiceAccountAudienceExempt()
+	} else if err := v.validateAudience(audiences); err != nil {
 		p.TokenInvalid(err)
 		return nil, err
 	}
@@ -212,6 +215,15 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 		Audience:    audiences,
 		Scope:       scope,
 	}, nil
+}
+
+const serviceAccountPrefix = "service-account-"
+
+// isServiceAccount reports whether the claims represent a service account token.
+// Red Hat SSO service accounts have preferred_username starting with "service-account-".
+func isServiceAccount(claims map[string]any) bool {
+	username, ok := claims["preferred_username"].(string)
+	return ok && strings.HasPrefix(username, serviceAccountPrefix)
 }
 
 func (v *JWTValidator) validateAudience(tokenAudiences []string) error {

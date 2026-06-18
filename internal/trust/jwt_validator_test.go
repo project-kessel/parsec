@@ -430,6 +430,72 @@ func TestJWTValidator_audienceAllowlist(t *testing.T) {
 			t.Fatalf("expected validation success without allowlist, got: %v", err)
 		}
 	})
+
+	t.Run("exempts service account token without aud", func(t *testing.T) {
+		tokenString, err := fixture.CreateAndSignToken(map[string]interface{}{
+			"sub":                "service-account-my-client",
+			"preferred_username": "service-account-my-client",
+		})
+		if err != nil {
+			t.Fatalf("failed to create token: %v", err)
+		}
+
+		cred := &JWTCredential{BearerCredential: BearerCredential{Token: tokenString}}
+		result, err := validator.Validate(ctx, cred)
+		if err != nil {
+			t.Fatalf("expected service account to pass without aud, got: %v", err)
+		}
+		if result.Subject != "service-account-my-client" {
+			t.Errorf("expected subject 'service-account-my-client', got %q", result.Subject)
+		}
+	})
+
+	t.Run("exempts service account token with disallowed aud", func(t *testing.T) {
+		tokenString, err := fixture.CreateAndSignToken(map[string]interface{}{
+			"sub":                "service-account-my-client",
+			"preferred_username": "service-account-my-client",
+			"aud":                "some-other-audience",
+		})
+		if err != nil {
+			t.Fatalf("failed to create token: %v", err)
+		}
+
+		cred := &JWTCredential{BearerCredential: BearerCredential{Token: tokenString}}
+		if _, err := validator.Validate(ctx, cred); err != nil {
+			t.Fatalf("expected service account to pass with disallowed aud, got: %v", err)
+		}
+	})
+
+	t.Run("still rejects regular user token without aud", func(t *testing.T) {
+		tokenString, err := fixture.CreateAndSignToken(map[string]interface{}{
+			"sub":                "user@example.com",
+			"preferred_username": "regular-user",
+		})
+		if err != nil {
+			t.Fatalf("failed to create token: %v", err)
+		}
+
+		cred := &JWTCredential{BearerCredential: BearerCredential{Token: tokenString}}
+		_, err = validator.Validate(ctx, cred)
+		if !errors.Is(err, ErrInvalidToken) {
+			t.Fatalf("expected ErrInvalidToken for regular user without aud, got: %v", err)
+		}
+	})
+
+	t.Run("still rejects token without preferred_username and without aud", func(t *testing.T) {
+		tokenString, err := fixture.CreateAndSignToken(map[string]interface{}{
+			"sub": "user@example.com",
+		})
+		if err != nil {
+			t.Fatalf("failed to create token: %v", err)
+		}
+
+		cred := &JWTCredential{BearerCredential: BearerCredential{Token: tokenString}}
+		_, err = validator.Validate(ctx, cred)
+		if !errors.Is(err, ErrInvalidToken) {
+			t.Fatalf("expected ErrInvalidToken for missing aud and no preferred_username, got: %v", err)
+		}
+	})
 }
 
 func TestJWTValidatorConfig(t *testing.T) {

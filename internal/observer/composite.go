@@ -453,6 +453,11 @@ func (m *compositeJWTValidateProbe) ClaimsExtractionFailed(err error) {
 		p.ClaimsExtractionFailed(err)
 	}
 }
+func (m *compositeJWTValidateProbe) ServiceAccountAudienceExempt() {
+	for _, p := range m.probes {
+		p.ServiceAccountAudienceExempt()
+	}
+}
 func (m *compositeJWTValidateProbe) End() {
 	for _, p := range m.probes {
 		p.End()
