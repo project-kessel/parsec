@@ -592,7 +592,7 @@ tokenService := service.NewTokenService(
 claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
 
 // 8. Inject into servers
-authzServer := server.NewAuthzServer(trustStore, tokenService)
+authzServer := server.NewAuthzServer(trustStore, tokenService, nil, credentialSources, credentialSources, obs)
 exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 
 // 9. Create and start server
@@ -654,7 +654,7 @@ tokenService := service.NewTokenService(
 )
 
 // Test full flow
-authzServer := server.NewAuthzServer(trustStore, tokenService)
+authzServer := server.NewAuthzServer(trustStore, tokenService, nil, credentialSources, credentialSources, obs)
 response, err := authzServer.Check(ctx, envoyRequest)
 assert.Equal(t, CheckResponse_OK, response.Status.Code)
 ```

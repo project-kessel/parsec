@@ -24,54 +24,24 @@ type TokenTypeSpec struct {
 	HeaderName string
 }
 
-// authzServerConfig holds AuthzServer settings applied via options.
-type authzServerConfig struct {
-	// credentialSources configures where subject credentials are extracted from.
-	credentialSources CredentialSources
-
-	// actorCredentialSources configures where actor credentials are extracted from.
-	actorCredentialSources CredentialSources
-
-	credentialSourcesSet      bool
-	actorCredentialSourcesSet bool
-}
-
 // AuthzServer implements Envoy's ext_authz Authorization service
 type AuthzServer struct {
 	authv3.UnimplementedAuthorizationServer
 
-	trustStore   trust.Store
-	tokenService *service.TokenService
-	observer     service.AuthzCheckObserver
+	trustStore               trust.Store
+	tokenService             *service.TokenService
+	observer                 service.AuthzCheckObserver
+	subjectCredentialSources CredentialSources
+	actorCredentialSources   CredentialSources
 
 	// TokenTypesToIssue specifies which token types to issue and their headers
 	TokenTypesToIssue []TokenTypeSpec
-
-	authzServerConfig
 }
 
-// AuthzServerOption configures an AuthzServer.
-type AuthzServerOption func(*authzServerConfig)
-
-// WithCredentialSources sets credential extraction sources for subject validation.
-func WithCredentialSources(sources CredentialSources) AuthzServerOption {
-	return func(cfg *authzServerConfig) {
-		cfg.credentialSources = sources
-		cfg.credentialSourcesSet = true
-	}
-}
-
-// WithActorCredentialSources sets credential extraction sources for actor
-// (caller) validation.
-func WithActorCredentialSources(sources CredentialSources) AuthzServerOption {
-	return func(cfg *authzServerConfig) {
-		cfg.actorCredentialSources = sources
-		cfg.actorCredentialSourcesSet = true
-	}
-}
-
-// NewAuthzServer creates a new ext_authz server
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, observer service.AuthzCheckObserver, opts ...AuthzServerOption) *AuthzServer {
+// NewAuthzServer creates a new ext_authz server.
+// subjectCredentialSources and actorCredentialSources define where subject and
+// actor credentials are extracted from, respectively.
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, subjectCredentialSources CredentialSources, actorCredentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
 	// Default to transaction tokens if none specified
 	if len(tokenTypes) == 0 {
 		tokenTypes = []TokenTypeSpec{
@@ -82,28 +52,17 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		}
 	}
 
-	// Use null object pattern - default to no-op observer if none provided
 	if observer == nil {
 		observer = service.NoOpAuthzCheckObserver{}
 	}
 
-	cfg := authzServerConfig{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	if !cfg.credentialSourcesSet {
-		cfg.credentialSources = DefaultCredentialSources()
-	}
-	if !cfg.actorCredentialSourcesSet {
-		cfg.actorCredentialSources = DefaultCredentialSources()
-	}
-
 	return &AuthzServer{
-		trustStore:        trustStore,
-		tokenService:      tokenService,
-		TokenTypesToIssue: tokenTypes,
-		observer:          observer,
-		authzServerConfig: cfg,
+		trustStore:               trustStore,
+		tokenService:             tokenService,
+		TokenTypesToIssue:        tokenTypes,
+		observer:                 observer,
+		subjectCredentialSources: subjectCredentialSources,
+		actorCredentialSources:   actorCredentialSources,
 	}
 }
 
@@ -138,7 +97,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
-	ext, err := s.credentialSources.Extract(ctx, cc)
+	ext, err := s.subjectCredentialSources.Extract(ctx, cc)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
