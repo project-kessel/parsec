@@ -17,11 +17,11 @@ import (
 type ExchangeServer struct {
 	parsecv1.UnimplementedTokenExchangeServiceServer
 
-	trustStore               trust.Store
-	tokenService             *service.TokenService
-	claimsFilterRegistry     ClaimsFilterRegistry
-	observer                 service.TokenExchangeObserver
-	callerCredentialSources  CredentialSources
+	trustStore              trust.Store
+	tokenService            *service.TokenService
+	claimsFilterRegistry    ClaimsFilterRegistry
+	observer                service.TokenExchangeObserver
+	callerCredentialSources CredentialSources
 }
 
 // NewExchangeServer creates a new token exchange server.
