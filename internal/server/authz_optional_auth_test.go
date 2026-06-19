@@ -2,28 +2,20 @@ package server
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 
 	"github.com/project-kessel/parsec/internal/issuer"
-	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-type erroringValidatorFilter struct{}
-
-func (erroringValidatorFilter) IsAllowed(context.Context, *trust.Result, string, *request.RequestAttributes) (bool, error) {
-	return false, errors.New("filter evaluation failed")
-}
-
-func TestAuthzServer_OptionalAuth(t *testing.T) {
+func TestAuthzServer_AnonymousSubjectPolicy(t *testing.T) {
 	ctx := context.Background()
 
-	setup := func(t *testing.T, patterns ...request.PathPattern) (*AuthzServer, *trust.StubValidator) {
+	setup := func(t *testing.T, celScript string) (*AuthzServer, *trust.StubValidator) {
 		t.Helper()
 
 		trustStore := trust.NewStubStore()
@@ -43,17 +35,20 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 		issuerRegistry.Register(service.TokenTypeTransactionToken, txnTokenIssuer)
 		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
 
-		matcher, err := request.NewPathMatcher(patterns)
-		if err != nil {
-			t.Fatalf("failed to create path matcher: %v", err)
+		var opts []AuthzOption
+		if celScript != "" {
+			policy, err := NewCelAnonymousSubjectPolicy(celScript)
+			if err != nil {
+				t.Fatalf("failed to create CEL policy: %v", err)
+			}
+			opts = append(opts, WithAnonymousSubjectPolicy(policy))
 		}
 
-		srv := NewAuthzServer(trustStore, tokenService, nil, nil,
-			WithOptionalAuthPathMatcher(matcher))
+		srv := NewAuthzServer(trustStore, tokenService, nil, nil, opts...)
 		return srv, stubValidator
 	}
 
-	makeReq := func(path, authHeader string) *authv3.CheckRequest {
+	makeReq := func(method, path, authHeader string) *authv3.CheckRequest {
 		headers := map[string]string{}
 		if authHeader != "" {
 			headers["authorization"] = authHeader
@@ -62,7 +57,7 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 			Attributes: &authv3.AttributeContext{
 				Request: &authv3.AttributeContext_Request{
 					Http: &authv3.AttributeContext_HttpRequest{
-						Method:  "GET",
+						Method:  method,
 						Path:    path,
 						Headers: headers,
 					},
@@ -71,15 +66,48 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 		}
 	}
 
-	t.Run("optional path without credentials allows through", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+	makeReqWithExtensions := func(method, path string, extensions map[string]string) *authv3.CheckRequest {
+		return &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method:  method,
+						Path:    path,
+						Headers: map[string]string{},
+					},
+				},
+				ContextExtensions: extensions,
+			},
+		}
+	}
 
-		resp, err := srv.Check(ctx, makeReq("/openapi.json", ""))
+	t.Run("default policy denies when no credentials", func(t *testing.T) {
+		trustStore := trust.NewStubStore()
+		trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		srv := NewAuthzServer(trustStore, tokenService, nil, nil)
+
+		resp, err := srv.Check(ctx, makeReq("GET", "/anything", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code == 0 {
+			t.Error("expected denial when no policy configured and no credentials, got OK")
+		}
+	})
+
+	t.Run("CEL path policy allows matching path", func(t *testing.T) {
+		srv, _ := setup(t, `request.path.startsWith("/public/")`)
+
+		resp, err := srv.Check(ctx, makeReq("GET", "/public/docs", ""))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code != 0 {
-			t.Errorf("expected OK, got code %d: %s", resp.Status.Code, resp.Status.Message)
+			t.Errorf("expected OK for matching path, got code %d: %s", resp.Status.Code, resp.Status.Message)
 		}
 
 		okResp := resp.GetOkResponse()
@@ -87,17 +115,26 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 			t.Fatal("expected OK response")
 		}
 		if len(okResp.Headers) != 0 {
-			t.Errorf("expected no headers on unauthenticated pass-through, got %d", len(okResp.Headers))
-		}
-		if len(okResp.HeadersToRemove) != 0 {
-			t.Errorf("expected no headers to remove, got %v", okResp.HeadersToRemove)
+			t.Errorf("expected no token headers on anonymous pass-through, got %d", len(okResp.Headers))
 		}
 	})
 
-	t.Run("optional path with valid credentials issues tokens", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+	t.Run("CEL path policy denies non-matching path", func(t *testing.T) {
+		srv, _ := setup(t, `request.path.startsWith("/public/")`)
 
-		resp, err := srv.Check(ctx, makeReq("/openapi.json", "Bearer valid-token"))
+		resp, err := srv.Check(ctx, makeReq("GET", "/api/protected", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code == 0 {
+			t.Error("expected denial for non-matching path, got OK")
+		}
+	})
+
+	t.Run("credentials present on policy-allowed path issues tokens", func(t *testing.T) {
+		srv, _ := setup(t, `request.path.startsWith("/public/")`)
+
+		resp, err := srv.Check(ctx, makeReq("GET", "/public/docs", "Bearer valid-token"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -117,164 +154,99 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 			}
 		}
 		if !foundToken {
-			t.Error("expected Transaction-Token header when credentials provided on optional path")
-		}
-
-		foundAuthRemoval := false
-		for _, h := range okResp.HeadersToRemove {
-			if h == "authorization" {
-				foundAuthRemoval = true
-			}
-		}
-		if !foundAuthRemoval {
-			t.Error("expected authorization in headers to remove")
+			t.Error("expected Transaction-Token header when credentials provided")
 		}
 	})
 
-	t.Run("optional path with invalid credentials denies", func(t *testing.T) {
-		srv, stubValidator := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+	t.Run("invalid credentials on policy-allowed path still denies", func(t *testing.T) {
+		srv, stubValidator := setup(t, `request.path.startsWith("/public/")`)
 		stubValidator.WithError(trust.ErrInvalidToken)
 		defer stubValidator.WithError(nil)
 
-		resp, err := srv.Check(ctx, makeReq("/openapi.json", "Bearer bad-token"))
+		resp, err := srv.Check(ctx, makeReq("GET", "/public/docs", "Bearer bad-token"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code == 0 {
-			t.Error("expected denial for invalid credentials on optional path, got OK")
+			t.Error("expected denial for invalid credentials, got OK")
 		}
 	})
 
-	t.Run("protected path without credentials denies", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+	t.Run("CEL method+path policy", func(t *testing.T) {
+		srv, _ := setup(t, `request.method == "GET" && request.path == "/health"`)
 
-		resp, err := srv.Check(ctx, makeReq("/api/resource", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code == 0 {
-			t.Error("expected denial for missing credentials on protected path, got OK")
-		}
-	})
-
-	t.Run("glob pattern matches", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/api/*.json", Match: "glob"})
-
-		resp, err := srv.Check(ctx, makeReq("/api/foo.json", ""))
+		resp, err := srv.Check(ctx, makeReq("GET", "/health", ""))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for glob match, got code %d: %s", resp.Status.Code, resp.Status.Message)
+			t.Errorf("expected OK for GET /health, got code %d", resp.Status.Code)
 		}
 
-		resp, err = srv.Check(ctx, makeReq("/api/resource", ""))
+		resp, err = srv.Check(ctx, makeReq("POST", "/health", ""))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code == 0 {
-			t.Error("expected denial for non-matching glob path, got OK")
+			t.Error("expected denial for POST /health, got OK")
 		}
 	})
 
-	t.Run("prefix match", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/api/docs/", Match: "prefix"})
+	t.Run("CEL regex pattern", func(t *testing.T) {
+		srv, _ := setup(t, `request.path.matches("^/api/[^/]+/v[0-9]+/openapi\\.json$")`)
 
-		resp, err := srv.Check(ctx, makeReq("/api/docs/openapi.json", ""))
+		resp, err := srv.Check(ctx, makeReq("GET", "/api/insights/v1/openapi.json", ""))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for prefix match, got code %d", resp.Status.Code)
+			t.Errorf("expected OK for regex-matching path, got code %d", resp.Status.Code)
 		}
 
-		resp, err = srv.Check(ctx, makeReq("/api/docs-extra", ""))
+		resp, err = srv.Check(ctx, makeReq("GET", "/api/protected/resource", ""))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code == 0 {
-			t.Error("expected denial for path not matching prefix /api/docs/, got OK")
+			t.Error("expected denial for non-regex-matching path, got OK")
 		}
 	})
 
-	t.Run("gRPC exact path without credentials allows through", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/test.v1.FooService/Bar", Match: "exact"})
+	t.Run("CEL with context_extensions", func(t *testing.T) {
+		srv, _ := setup(t, `has(request.additional.context_extensions) && request.additional.context_extensions.optional_auth == "true"`)
 
-		resp, err := srv.Check(ctx, makeReq("/test.v1.FooService/Bar", ""))
+		resp, err := srv.Check(ctx, makeReqWithExtensions("GET", "/any/path", map[string]string{
+			"optional_auth": "true",
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for gRPC optional path, got code %d", resp.Status.Code)
+			t.Errorf("expected OK when context_extensions allows, got code %d", resp.Status.Code)
 		}
-	})
 
-	t.Run("gRPC prefix path without credentials allows through", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/grpc.health.v1.Health/", Match: "prefix"})
-
-		resp, err := srv.Check(ctx, makeReq("/grpc.health.v1.Health/Check", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for gRPC health prefix, got code %d", resp.Status.Code)
-		}
-	})
-
-	t.Run("protected gRPC path without credentials denies", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/test.v1.FooService/Bar", Match: "exact"})
-
-		resp, err := srv.Check(ctx, makeReq("/test.v1.SecureService/Baz", ""))
+		resp, err = srv.Check(ctx, makeReqWithExtensions("GET", "/any/path", map[string]string{
+			"optional_auth": "false",
+		}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code == 0 {
-			t.Error("expected denial for protected gRPC path, got OK")
+			t.Error("expected denial when context_extensions does not allow, got OK")
 		}
 	})
 
-	t.Run("unsupported auth scheme on optional path denies", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
-
-		resp, err := srv.Check(ctx, makeReq("/openapi.json", "Basic dXNlcjpwYXNz"))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code == 0 {
-			t.Error("expected denial for unsupported auth scheme on optional path, got OK")
-		}
-	})
-
-	t.Run("no optional auth configured preserves existing behavior", func(t *testing.T) {
-		trustStore := trust.NewStubStore()
-		trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
-		dataSourceRegistry := service.NewDataSourceRegistry()
-		issuerRegistry := service.NewSimpleRegistry()
-		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
-
-		srv := NewAuthzServer(trustStore, tokenService, nil, nil)
-
-		resp, err := srv.Check(ctx, makeReq("/openapi.json", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code == 0 {
-			t.Error("expected denial when no optional auth configured, got OK")
-		}
-	})
-
-	t.Run("percent-encoded path traversal does not bypass optional auth", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/api/docs/", Match: "prefix"})
+	t.Run("path traversal does not bypass CEL policy", func(t *testing.T) {
+		srv, _ := setup(t, `request.path.startsWith("/public/")`)
 
 		bypassPaths := []string{
-			"/api/docs/../secret",
-			"/api/docs/%2e%2e/secret",
-			"/api%2fdocs/secret",
-			"/api/docs%2fsecret",
-			"/api/docs/%2Fsecret",
+			"/public/../secret",
+			"/public/%2e%2e/secret",
+			"/public%2fdocs",
+			"/public//docs",
 		}
 		for _, p := range bypassPaths {
-			resp, err := srv.Check(ctx, makeReq(p, ""))
+			resp, err := srv.Check(ctx, makeReq("GET", p, ""))
 			if err != nil {
 				t.Fatalf("path %q: unexpected error: %v", p, err)
 			}
@@ -284,199 +256,35 @@ func TestAuthzServer_OptionalAuth(t *testing.T) {
 		}
 	})
 
-	t.Run("optional path with cookie but no authorization allows through until credential sources expand", func(t *testing.T) {
-		// Until PR #125 credential_sources (e.g. cs_jwt cookie) are wired into
-		// extractCredential, cookie-only requests report ErrNoCredential and
-		// optional-auth pass-through applies the same as a bare request.
-		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+	t.Run("query string stripped before CEL evaluation", func(t *testing.T) {
+		srv, _ := setup(t, `request.path == "/openapi.json"`)
 
-		req := &authv3.CheckRequest{
-			Attributes: &authv3.AttributeContext{
-				Request: &authv3.AttributeContext_Request{
-					Http: &authv3.AttributeContext_HttpRequest{
-						Method: "GET",
-						Path:   "/openapi.json",
-						Headers: map[string]string{
-							"cookie": "cs_jwt=eyJhbGciOiJIUzI1NiJ9.test",
-						},
-					},
-				},
-			},
-		}
-
-		resp, err := srv.Check(ctx, req)
+		resp, err := srv.Check(ctx, makeReq("GET", "/openapi.json?version=2", ""))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for optional path without bearer credential, got code %d: %s",
-				resp.Status.Code, resp.Status.Message)
+			t.Errorf("expected OK with query string stripped, got code %d", resp.Status.Code)
 		}
 	})
 
-	t.Run("percent-encoded exact path does not bypass optional auth", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
+	t.Run("unsupported auth scheme denies even on policy-allowed path", func(t *testing.T) {
+		srv, _ := setup(t, `request.path == "/openapi.json"`)
 
-		bypassPaths := []string{
-			"/openapi%2ejson",
-			"/%6fpenapi.json",
-			"/openapi.json%00extra",
-		}
-		for _, p := range bypassPaths {
-			resp, err := srv.Check(ctx, makeReq(p, ""))
-			if err != nil {
-				t.Fatalf("path %q: unexpected error: %v", p, err)
-			}
-			if resp.Status.Code == 0 {
-				t.Errorf("path %q: expected denial for encoded bypass attempt, got OK", p)
-			}
-		}
-	})
-
-	t.Run("validated path still matches when query string is stripped", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{Path: "/openapi.json", Match: "exact"})
-
-		resp, err := srv.Check(ctx, makeReq("/openapi.json?version=2", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for path with query string, got code %d", resp.Status.Code)
-		}
-	})
-
-	t.Run("regex optional path without credentials allows through", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{
-			Path:  `^/api/[^/]+/v[0-9]+(\.[0-9]+)?/openapi.json$`,
-			Match: request.MatchRegex,
-		})
-
-		resp, err := srv.Check(ctx, makeReq("/api/insights/v1/openapi.json", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for regex optional path, got code %d: %s", resp.Status.Code, resp.Status.Message)
-		}
-	})
-
-	t.Run("optional path pass-through is not blocked by ForActor filter errors", func(t *testing.T) {
-		filteredStore, err := trust.NewFilteredStore(
-			trust.WithValidatorFilter(erroringValidatorFilter{}),
-			trust.WithObserver(trust.NoOpTrustObserver{}),
-		)
-		if err != nil {
-			t.Fatalf("failed to create filtered store: %v", err)
-		}
-		filteredStore.AddValidator("bearer-validator", trust.NewStubValidator(trust.CredentialTypeBearer))
-
-		dataSourceRegistry := service.NewDataSourceRegistry()
-		issuerRegistry := service.NewSimpleRegistry()
-		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
-
-		matcher, err := request.NewPathMatcher([]request.PathPattern{
-			{Path: "/openapi.json", Match: "exact"},
-		})
-		if err != nil {
-			t.Fatalf("failed to create path matcher: %v", err)
-		}
-
-		srv := NewAuthzServer(filteredStore, tokenService, nil, nil,
-			WithOptionalAuthPathMatcher(matcher))
-
-		resp, err := srv.Check(ctx, makeReq("/openapi.json", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for optional path pass-through despite ForActor error, got code %d: %s",
-				resp.Status.Code, resp.Status.Message)
-		}
-	})
-
-	t.Run("percent-encoded path does not bypass regex optional auth", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{
-			Path:  `^/api/[^/]+/v[0-9]+(\.[0-9]+)?/openapi.json$`,
-			Match: request.MatchRegex,
-		})
-
-		bypassPaths := []string{
-			"/api/insights%2fv1/openapi.json",
-			"/api%2finsights/v1/openapi.json",
-			"/api/insights/v1/openapi%2ejson",
-		}
-		for _, p := range bypassPaths {
-			resp, err := srv.Check(ctx, makeReq(p, ""))
-			if err != nil {
-				t.Fatalf("path %q: unexpected error: %v", p, err)
-			}
-			if resp.Status.Code == 0 {
-				t.Errorf("path %q: expected denial for encoded bypass attempt, got OK", p)
-			}
-		}
-	})
-
-	t.Run("regex trailing-slash path without credentials allows through", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{
-			Path:  `^/api/pulp/api/v3/status/$`,
-			Match: request.MatchRegex,
-		})
-
-		resp, err := srv.Check(ctx, makeReq("/api/pulp/api/v3/status/", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for trailing-slash regex path, got code %d: %s",
-				resp.Status.Code, resp.Status.Message)
-		}
-	})
-
-	t.Run("regex optional trailing-slash path allows both forms", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{
-			Path:  `^/api/cloudigrade/v2/azure-offer-template/?$`,
-			Match: request.MatchRegex,
-		})
-
-		resp, err := srv.Check(ctx, makeReq("/api/cloudigrade/v2/azure-offer-template", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for path without trailing slash, got code %d: %s",
-				resp.Status.Code, resp.Status.Message)
-		}
-
-		resp, err = srv.Check(ctx, makeReq("/api/cloudigrade/v2/azure-offer-template/", ""))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.Status.Code != 0 {
-			t.Errorf("expected OK for path with trailing slash, got code %d: %s",
-				resp.Status.Code, resp.Status.Message)
-		}
-	})
-
-	t.Run("trailing-slash path that does not match pattern is denied", func(t *testing.T) {
-		srv, _ := setup(t, request.PathPattern{
-			Path:  `^/api/pulp/api/v3/status/$`,
-			Match: request.MatchRegex,
-		})
-
-		resp, err := srv.Check(ctx, makeReq("/api/pulp/api/v3/status", ""))
+		resp, err := srv.Check(ctx, makeReq("GET", "/openapi.json", "Basic dXNlcjpwYXNz"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if resp.Status.Code == 0 {
-			t.Error("expected denial for path missing required trailing slash, got OK")
+			t.Error("expected denial for unsupported auth scheme, got OK")
 		}
 	})
 }
 
-func TestAuthzServer_OptionalAuth_Observability(t *testing.T) {
+func TestAuthzServer_AnonymousSubjectPolicy_Observability(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("optional auth pass-through calls probe correctly", func(t *testing.T) {
+	t.Run("anonymous subject allowed fires correct probe sequence", func(t *testing.T) {
 		fakeObs := service.NewFakeObserver(t)
 
 		trustStore := trust.NewStubStore()
@@ -484,11 +292,9 @@ func TestAuthzServer_OptionalAuth_Observability(t *testing.T) {
 		issuerRegistry := service.NewSimpleRegistry()
 		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
 
-		matcher, _ := request.NewPathMatcher([]request.PathPattern{
-			{Path: "/openapi.json", Match: "exact"},
-		})
+		policy, _ := NewCelAnonymousSubjectPolicy(`request.path == "/openapi.json"`)
 		srv := NewAuthzServer(trustStore, tokenService, nil, fakeObs,
-			WithOptionalAuthPathMatcher(matcher))
+			WithAnonymousSubjectPolicy(policy))
 
 		req := &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -510,8 +316,46 @@ func TestAuthzServer_OptionalAuth_Observability(t *testing.T) {
 		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
 		p.AssertProbeSequence(
 			"RequestAttributesParsed",
-			"SubjectCredentialExtractionFailed",
-			"OptionalAuthPassThrough",
+			"ActorValidationSucceeded",
+			"AnonymousSubjectDetected",
+			"AnonymousSubjectPolicyAllowed",
+			"End",
+		)
+	})
+
+	t.Run("anonymous subject denied fires correct probe sequence", func(t *testing.T) {
+		fakeObs := service.NewFakeObserver(t)
+
+		trustStore := trust.NewStubStore()
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		srv := NewAuthzServer(trustStore, tokenService, nil, fakeObs)
+
+		req := &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method:  "GET",
+						Path:    "/anything",
+						Headers: map[string]string{},
+					},
+				},
+			},
+		}
+
+		_, err := srv.Check(ctx, req)
+		if err != nil {
+			t.Fatalf("Check failed: %v", err)
+		}
+
+		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
+		p.AssertProbeSequence(
+			"RequestAttributesParsed",
+			"ActorValidationSucceeded",
+			"AnonymousSubjectDetected",
+			"AnonymousSubjectPolicyDenied",
 			"End",
 		)
 	})

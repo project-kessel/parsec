@@ -97,16 +97,14 @@ authz_server:
     - type: "urn:ietf:params:oauth:token-type:txn_token"
       header_name: "Transaction-Token"
 
-  # Paths that do not require authentication.
-  # Requests without credentials pass through; with credentials, normal
-  # validation and token issuance occurs.
-  # For the full 3scale production optional-auth list, see
-  # configs/examples/optional-auth-3scale-production.yaml
-  optional_auth_paths:
-    - path: /openapi.json
-      match: exact
-    - path: /api/docs/
-      match: prefix
+  # Anonymous subject policy — CEL expression evaluated when no subject
+  # credentials are present. Replaces the legacy optional_auth_paths config.
+  # See configs/examples/anonymous-subject-policy-cel.yaml for a full example.
+  anonymous_subject_policy:
+    type: cel
+    script: |
+      request.path == "/openapi.json" ||
+      request.path.startsWith("/api/docs/")
 
 # Token issuers
 issuers:

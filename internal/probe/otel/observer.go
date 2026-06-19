@@ -28,7 +28,11 @@ var (
 	resultSubjectTokenValidationFailed      = attribute.String("result", "subject_token_validation_failed")
 	resultSubjectCredentialExtractionFailed = attribute.String("result", "subject_credential_extraction_failed")
 	resultSubjectValidationFailed           = attribute.String("result", "subject_validation_failed")
-	resultOptionalAuthPassThrough           = attribute.String("result", "optional_auth_pass_through")
+	resultAnonymousSubjectAllowed           = attribute.String("result", "anonymous_subject_allowed")
+	resultAnonymousSubjectDenied            = attribute.String("result", "anonymous_subject_denied")
+	resultIssuancePolicyIssue               = attribute.String("result", "issuance_policy_issue")
+	resultIssuancePolicyPassthrough         = attribute.String("result", "issuance_policy_passthrough")
+	resultIssuancePolicyDenied              = attribute.String("result", "issuance_policy_denied")
 )
 
 // serviceObserver implements [service.ServiceObserver] using OTel histograms.
@@ -177,8 +181,12 @@ type authzCheckProbe struct {
 	result    attribute.KeyValue
 }
 
-func (p *authzCheckProbe) OptionalAuthPassThrough(_ *request.RequestAttributes) {
-	p.result = resultOptionalAuthPassThrough
+func (p *authzCheckProbe) AnonymousSubjectPolicyAllowed(_ *request.RequestAttributes) {
+	p.result = resultAnonymousSubjectAllowed
+}
+func (p *authzCheckProbe) AnonymousSubjectPolicyDenied(_ *request.RequestAttributes) {
+	p.status = errorStatusAttr
+	p.result = resultAnonymousSubjectDenied
 }
 func (p *authzCheckProbe) ActorValidationFailed(_ error) {
 	p.status = errorStatusAttr
@@ -191,6 +199,16 @@ func (p *authzCheckProbe) SubjectCredentialExtractionFailed(_ error) {
 func (p *authzCheckProbe) SubjectValidationFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = resultSubjectValidationFailed
+}
+func (p *authzCheckProbe) IssuancePolicyIssue(_ []service.TokenType, _ string) {
+	p.result = resultIssuancePolicyIssue
+}
+func (p *authzCheckProbe) IssuancePolicyPassthrough() {
+	p.result = resultIssuancePolicyPassthrough
+}
+func (p *authzCheckProbe) IssuancePolicyDenied(_ error) {
+	p.status = errorStatusAttr
+	p.result = resultIssuancePolicyDenied
 }
 func (p *authzCheckProbe) End() {
 	attrs := metric.WithAttributeSet(attribute.NewSet(p.result, p.status))

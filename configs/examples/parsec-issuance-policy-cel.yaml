@@ -1,0 +1,50 @@
+# parsec Configuration - CEL Issuance Policy Example
+#
+# Demonstrates the issuance policy (pipeline step 6) with CEL.
+# Uses a CEL expression that:
+# - Denies issuance for /admin/ paths (returns false)
+# - Allows issuance for all other paths (returns true)
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+trust_domain: "parsec.example.com"
+
+observability:
+  type: logging
+  log_level: debug
+  log_format: json
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+trust_store:
+  type: stub_store
+  validators:
+    - type: stub_validator
+
+data_sources: []
+
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.example.com"
+    ttl: 5m
+    transaction_context:
+      - type: passthrough
+    request_context:
+      - type: request_attributes
+
+authz_server:
+  token_types:
+    - type: "urn:ietf:params:oauth:token-type:txn_token"
+      header_name: "Transaction-Token"
+
+  # CEL-based issuance policy:
+  # Deny token issuance for /admin/ paths even with valid credentials.
+  issuance_policy:
+    type: cel
+    script: |
+      !request.path.startsWith("/admin/")

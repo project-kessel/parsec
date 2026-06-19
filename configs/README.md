@@ -155,68 +155,62 @@ authz_server:
 
 If not specified, defaults to issuing a transaction token in the `Transaction-Token` header.
 
-### Optional Authentication Paths
+### Anonymous Subject Policy
 
-Configure URL path patterns that allow unauthenticated access via ext_authz. For these paths:
+Configure a CEL-based policy for requests without subject credentials. When no `Authorization` header is present, the CEL expression is evaluated to decide whether the request is allowed through without identity. This replaces the legacy `optional_auth_paths` configuration.
+
+For requests matching the policy:
 
 - Requests **without** credentials pass through with no identity headers
 - Requests **with** valid credentials are validated normally and identity headers are issued
 - Requests **with** invalid or expired credentials are **denied** (fail-closed)
-- All other paths continue to require authentication
+- When no policy is configured, all paths require authentication (default)
 
 ```yaml
 authz_server:
-  optional_auth_paths:
-    - path: /openapi.json
-      match: exact          # default if omitted
-    - path: /api/docs/
-      match: prefix
-    - path: /api/*.json
-      match: glob
-    - path: '^/api/[^/]+/v[0-9]+(\.[0-9]+)?/openapi.json$'
-      match: regex
+  anonymous_subject_policy:
+    type: cel
+    script: |
+      request.path.matches("^/api/[^/]+/v[0-9]+/openapi\\.json$") ||
+      request.path.startsWith("/api/docs/") ||
+      (request.method == "GET" && request.path == "/health")
 ```
 
-**Match types:**
-
-| Type | Behavior |
-|------|----------|
-| `exact` | Path must equal the pattern exactly (default) |
-| `prefix` | Path must start with the pattern; non-slash-terminated prefixes require the next character to be `/`. Ambiguous suffixes (e.g. `public-`) can over-match — use anchored `regex` instead; patterns ending with `-` are rejected at startup |
-| `glob` | Go [`path.Match`](https://pkg.go.dev/path#Match) semantics (`*` matches any non-`/` characters, `?` matches one character) |
-| `regex` | Go [`regexp`](https://pkg.go.dev/regexp) match against the canonical path; pattern must start with `^/` and end with `$` (compiled at startup) |
-
-Use `exact` or `prefix` when the path structure is simple. Use `regex` for version segments, UUID-shaped suffixes, or other constraints that globs cannot express precisely. Do not approximate regex rules with loose globs — that widens anonymous pass-through.
-
-A production-ready regex mapping of the [3scale optional-auth list](examples/optional-auth-3scale-production.yaml) is available as an example config.
-
-**Future header matching:** Matching evaluates the request path today. Future CAPS/CEL matchers may also consider host or other request attributes.
-
-> **Query strings:** Envoy populates the ext_authz path with the full URL including any query string (e.g. `/openapi.json?v=2`). Parsec strips the query string before matching, so an exact pattern `/openapi.json` will match both `/openapi.json` and `/openapi.json?v=2`.
-
-**gRPC backends:** When Envoy proxies gRPC traffic, it populates the ext_authz CheckRequest with the gRPC `:path` pseudo-header (e.g., `/package.Service/Method`). Configure patterns accordingly:
+Or load the CEL expression from a file:
 
 ```yaml
 authz_server:
-  optional_auth_paths:
-    # Allow unauthenticated gRPC health checks
-    - path: /grpc.health.v1.Health/
-      match: prefix
-    # A specific unauthenticated RPC
-    - path: /my.api.v1.MetadataService/GetSchema
-      match: exact
-    # All methods on a metadata service
-    - path: /my.api.v1.MetadataService/*
-      match: glob
+  anonymous_subject_policy:
+    type: cel
+    script_file: ./configs/scripts/anonymous_subject_policy.cel
 ```
 
-**Requirements:**
+**CEL variables available:**
 
-- Patterns must start with `/`; invalid patterns are rejected at startup
-- Requires Envoy's HTTP ext_authz filter (`envoy.filters.http.ext_authz`) — the standard configuration for both HTTP and gRPC-over-HTTP/2
-- If no `optional_auth_paths` are configured, all paths require authentication (existing behavior)
+| Variable | Type | Description |
+|----------|------|-------------|
+| `actor` | map | The validated actor result (subject, issuer, trust_domain, claims). Empty map for anonymous actors. |
+| `request` | map | Request attributes (method, path, headers, additional). The path has query strings stripped and is validated against traversal/encoding attacks. |
 
-**Security note:** Only configure paths serving non-sensitive content (OpenAPI specs, health endpoints, metadata). Invalid tokens on optional paths are always denied. Optional-auth pass-through runs when credential extraction returns no credential and the canonical path matches a configured pattern; actor extraction and `ForActor` CEL filtering run only when subject credentials are present (full issuance pipeline). `ForActor` errors cannot block configured optional-auth pass-through. Regex patterns must be fully anchored (`^/...$`) to prevent substring matches. Non-canonical paths (percent-encoding, dot-segments) skip optional-auth matching and require authentication.
+**CEL expression examples:**
+
+```cel
+# Allow specific paths
+request.path == "/health" || request.path.startsWith("/public/")
+
+# Method + path combination
+request.method == "GET" && request.path.matches("^/api/[^/]+/v[0-9]+/openapi\\.json$")
+
+# Actor-aware policy (e.g., allow internal mesh actors to access internal paths)
+has(actor.trust_domain) && actor.trust_domain == "mesh.internal" && request.path.startsWith("/internal/")
+
+# Envoy context_extensions driven
+has(request.additional.context_extensions) && request.additional.context_extensions.optional_auth == "true"
+```
+
+> **Query strings:** Envoy populates the ext_authz path with the full URL including any query string (e.g. `/openapi.json?v=2`). Parsec strips the query string before CEL evaluation, so `request.path == "/openapi.json"` matches both `/openapi.json` and `/openapi.json?v=2`.
+
+**Security note:** Only configure policies for non-sensitive content (OpenAPI specs, health endpoints, metadata). Invalid tokens are always denied regardless of policy. Non-canonical paths (percent-encoding, dot-segments, double slashes) are rejected before CEL evaluation, closing bypass vectors like `/api/docs/%2e%2e/secret`. Actor extraction runs before policy evaluation so CEL has access to the actor context.
 
 ### Exchange Server
 

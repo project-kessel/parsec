@@ -55,6 +55,7 @@ Implements Envoy's external authorization protocol:
 - Validates credentials against trust store
 - Issues transaction token
 - Returns authorization decision with token in custom header
+- Supports **anonymous subject policy**: a CEL-based policy (`authz_server.anonymous_subject_policy`) evaluated when no subject credentials are present. The CEL expression has access to `actor` and `request` context and decides whether anonymous access is allowed (e.g., for OpenAPI specs, health endpoints). When credentials are present, the full validation and token issuance pipeline runs normally. See the [configuration reference](configs/README.md).
 
 ### 2. Token Exchange Service
 

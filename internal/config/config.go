@@ -51,12 +51,56 @@ type AuthzServerConfig struct {
 	// TokenTypes specifies which token types to issue and how to deliver them
 	TokenTypes []TokenTypeConfig `koanf:"token_types"`
 
-	OptionalAuthPaths []OptionalAuthPathConfig `koanf:"optional_auth_paths"`
+	// AnonymousSubjectPolicy configures the CEL-based policy for requests
+	// without subject credentials. When absent, all unauthenticated requests
+	// are denied (default behavior).
+	AnonymousSubjectPolicy *AnonymousSubjectPolicyConfig `koanf:"anonymous_subject_policy"`
+
+	// IssuancePolicy configures the policy evaluated after subject validation
+	// but before token issuance. It can deny, passthrough, or proceed with
+	// issuance (optionally overriding token types and scope).
+	// When absent, all validated requests proceed to issuance (default behavior).
+	IssuancePolicy *IssuancePolicyConfig `koanf:"issuance_policy"`
 }
 
-type OptionalAuthPathConfig struct {
-	Path  string `koanf:"path"`
-	Match string `koanf:"match"` // exact (default), prefix, glob, or regex
+// AnonymousSubjectPolicyConfig configures the CEL expression evaluated when no
+// subject credentials are present. The expression has access to `actor` and
+// `request` variables and must return a boolean.
+type AnonymousSubjectPolicyConfig struct {
+	// Type selects the policy implementation. Currently only "cel" is supported.
+	Type string `koanf:"type"`
+
+	// Script is an inline CEL expression.
+	Script string `koanf:"script"`
+
+	// ScriptFile is a path to a file containing the CEL expression (alternative to Script).
+	ScriptFile string `koanf:"script_file"`
+}
+
+// IssuancePolicyConfig configures the issuance policy evaluated between
+// subject validation and token issuance.
+type IssuancePolicyConfig struct {
+	// Type selects the policy implementation.
+	// Options: "cel", "path_passthrough"
+	Type string `koanf:"type"`
+
+	// Script is an inline CEL expression (for type "cel").
+	Script string `koanf:"script"`
+
+	// ScriptFile is a path to a file containing the CEL expression (for type "cel").
+	ScriptFile string `koanf:"script_file"`
+
+	// Patterns defines path regex patterns with fixed outcomes (for type "path_passthrough").
+	Patterns []PathPatternConfig `koanf:"patterns"`
+}
+
+// PathPatternConfig defines a regex path pattern and its outcome.
+type PathPatternConfig struct {
+	// Path is a regex pattern to match against the request path.
+	Path string `koanf:"path"`
+
+	// Outcome is the action when the pattern matches: "passthrough" or "deny".
+	Outcome string `koanf:"outcome"`
 }
 
 // TokenTypeConfig specifies a token type to issue via ext_authz

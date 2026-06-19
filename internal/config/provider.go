@@ -9,7 +9,6 @@ import (
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/probe/otel"
-	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
@@ -384,6 +383,29 @@ func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
 	return tokenTypes, nil
 }
 
-func (p *Provider) OptionalAuthPathMatcher() (*request.PathMatcher, error) {
-	return NewOptionalAuthPathMatcher(p.config.AuthzServer)
+// AnonymousSubjectPolicy returns the configured anonymous subject policy,
+// or nil when none is configured (caller should use the default DenyAllPolicy).
+func (p *Provider) AnonymousSubjectPolicy() (server.AnonymousSubjectPolicy, error) {
+	return NewAnonymousSubjectPolicy(p.config.AuthzServer)
+}
+
+// IssuancePolicy returns the configured issuance policy, or nil when none is
+// configured (caller should use the default AlwaysIssuePolicy).
+func (p *Provider) IssuancePolicy() (server.IssuancePolicy, error) {
+	tokenTypes, err := p.AuthzServerTokenTypes()
+	if err != nil {
+		return nil, err
+	}
+
+	defaultTypes := make([]service.TokenType, len(tokenTypes))
+	for i, spec := range tokenTypes {
+		defaultTypes[i] = spec.Type
+	}
+
+	// If no token types configured, use the same default as NewAuthzServer
+	if len(defaultTypes) == 0 {
+		defaultTypes = []service.TokenType{service.TokenTypeTransactionToken}
+	}
+
+	return NewIssuancePolicy(p.config.AuthzServer, defaultTypes)
 }

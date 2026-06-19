@@ -216,8 +216,16 @@ func (p *FakeProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
 	p.recordCall("RequestAttributesParsed", attrs)
 }
 
-func (p *FakeProbe) OptionalAuthPassThrough(attrs *request.RequestAttributes) {
-	p.recordCall("OptionalAuthPassThrough", attrs)
+func (p *FakeProbe) AnonymousSubjectDetected() {
+	p.recordCall("AnonymousSubjectDetected")
+}
+
+func (p *FakeProbe) AnonymousSubjectPolicyAllowed(attrs *request.RequestAttributes) {
+	p.recordCall("AnonymousSubjectPolicyAllowed", attrs)
+}
+
+func (p *FakeProbe) AnonymousSubjectPolicyDenied(attrs *request.RequestAttributes) {
+	p.recordCall("AnonymousSubjectPolicyDenied", attrs)
 }
 
 func (p *FakeProbe) SubjectCredentialExtracted(cred trust.Credential, headersUsed []string) {
@@ -234,6 +242,18 @@ func (p *FakeProbe) SubjectValidationSucceeded(subject *trust.Result) {
 
 func (p *FakeProbe) SubjectValidationFailed(err error) {
 	p.recordCall("SubjectValidationFailed", err)
+}
+
+func (p *FakeProbe) IssuancePolicyIssue(tokenTypes []TokenType, scope string) {
+	p.recordCall("IssuancePolicyIssue", tokenTypes, scope)
+}
+
+func (p *FakeProbe) IssuancePolicyPassthrough() {
+	p.recordCall("IssuancePolicyPassthrough")
+}
+
+func (p *FakeProbe) IssuancePolicyDenied(err error) {
+	p.recordCall("IssuancePolicyDenied", err)
 }
 
 // End is common to all probes

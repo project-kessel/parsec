@@ -352,18 +352,32 @@ func TestLoggingJWKSObserver(t *testing.T) {
 
 // --- ServerLifecycle ---
 
-func TestLoggingAuthzCheckObserver_OptionalAuthPassThrough(t *testing.T) {
+func TestLoggingAuthzCheckObserver_AnonymousSubjectPolicyAllowed(t *testing.T) {
 	var buf bytes.Buffer
 	obs := NewLoggingObserver(testLogger(&buf))
 	_, p := obs.AuthzCheckStarted(context.Background())
 
-	p.OptionalAuthPassThrough(&request.RequestAttributes{
+	p.AnonymousSubjectPolicyAllowed(&request.RequestAttributes{
 		Method: "GET",
 		Path:   "/openapi.json",
 	})
 
-	assertLog(t, buf.String(), "debug", "Optional auth pass-through: unauthenticated request allowed",
+	assertLog(t, buf.String(), "debug", "Anonymous subject policy allowed: unauthenticated request permitted",
 		`"method":"GET"`, `"path":"/openapi.json"`)
+}
+
+func TestLoggingAuthzCheckObserver_AnonymousSubjectPolicyDenied(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingObserver(testLogger(&buf))
+	_, p := obs.AuthzCheckStarted(context.Background())
+
+	p.AnonymousSubjectPolicyDenied(&request.RequestAttributes{
+		Method: "GET",
+		Path:   "/api/protected",
+	})
+
+	assertLog(t, buf.String(), "debug", "Anonymous subject policy denied: unauthenticated request rejected",
+		`"method":"GET"`, `"path":"/api/protected"`)
 }
 
 func TestLoggingServerLifecycleObserver_ServeFailed(t *testing.T) {

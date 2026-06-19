@@ -89,9 +89,17 @@ type AuthzCheckProbe interface {
 	// RequestAttributesParsed is called when request attributes are built from the incoming request.
 	RequestAttributesParsed(attrs *request.RequestAttributes)
 
-	// OptionalAuthPassThrough is called when an unauthenticated request is allowed
-	// because its path matches an optional-auth pattern.
-	OptionalAuthPassThrough(attrs *request.RequestAttributes)
+	// AnonymousSubjectDetected is called when no subject credential is found in
+	// the request (before policy evaluation).
+	AnonymousSubjectDetected()
+
+	// AnonymousSubjectPolicyAllowed is called when the anonymous subject policy
+	// allows the request through without identity.
+	AnonymousSubjectPolicyAllowed(attrs *request.RequestAttributes)
+
+	// AnonymousSubjectPolicyDenied is called when the anonymous subject policy
+	// denies the unauthenticated request.
+	AnonymousSubjectPolicyDenied(attrs *request.RequestAttributes)
 
 	// ActorValidationSucceeded is called when actor credential validation succeeds.
 	ActorValidationSucceeded(actor *trust.Result)
@@ -110,6 +118,17 @@ type AuthzCheckProbe interface {
 
 	// SubjectValidationFailed is called when subject credential validation fails.
 	SubjectValidationFailed(err error)
+
+	// IssuancePolicyIssue is called when the issuance policy decides to proceed
+	// with token issuance, possibly with modified token types or scope.
+	IssuancePolicyIssue(tokenTypes []TokenType, scope string)
+
+	// IssuancePolicyPassthrough is called when the issuance policy decides to
+	// allow the request through without issuing tokens.
+	IssuancePolicyPassthrough()
+
+	// IssuancePolicyDenied is called when the issuance policy denies the request.
+	IssuancePolicyDenied(err error)
 
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
@@ -152,15 +171,20 @@ func (NoOpTokenExchangeProbe) End()                                            {
 // Embed this in concrete probe types for forward compatibility.
 type NoOpAuthzCheckProbe struct{}
 
-func (NoOpAuthzCheckProbe) RequestAttributesParsed(*request.RequestAttributes)    {}
-func (NoOpAuthzCheckProbe) OptionalAuthPassThrough(*request.RequestAttributes)    {}
-func (NoOpAuthzCheckProbe) ActorValidationSucceeded(*trust.Result)                {}
-func (NoOpAuthzCheckProbe) ActorValidationFailed(error)                           {}
-func (NoOpAuthzCheckProbe) SubjectCredentialExtracted(trust.Credential, []string) {}
-func (NoOpAuthzCheckProbe) SubjectCredentialExtractionFailed(error)               {}
-func (NoOpAuthzCheckProbe) SubjectValidationSucceeded(*trust.Result)              {}
-func (NoOpAuthzCheckProbe) SubjectValidationFailed(error)                         {}
-func (NoOpAuthzCheckProbe) End()                                                  {}
+func (NoOpAuthzCheckProbe) RequestAttributesParsed(*request.RequestAttributes)       {}
+func (NoOpAuthzCheckProbe) AnonymousSubjectDetected()                                {}
+func (NoOpAuthzCheckProbe) AnonymousSubjectPolicyAllowed(*request.RequestAttributes) {}
+func (NoOpAuthzCheckProbe) AnonymousSubjectPolicyDenied(*request.RequestAttributes)  {}
+func (NoOpAuthzCheckProbe) ActorValidationSucceeded(*trust.Result)                   {}
+func (NoOpAuthzCheckProbe) ActorValidationFailed(error)                              {}
+func (NoOpAuthzCheckProbe) SubjectCredentialExtracted(trust.Credential, []string)    {}
+func (NoOpAuthzCheckProbe) SubjectCredentialExtractionFailed(error)                  {}
+func (NoOpAuthzCheckProbe) SubjectValidationSucceeded(*trust.Result)                 {}
+func (NoOpAuthzCheckProbe) SubjectValidationFailed(error)                            {}
+func (NoOpAuthzCheckProbe) IssuancePolicyIssue([]TokenType, string)                  {}
+func (NoOpAuthzCheckProbe) IssuancePolicyPassthrough()                               {}
+func (NoOpAuthzCheckProbe) IssuancePolicyDenied(error)                               {}
+func (NoOpAuthzCheckProbe) End()                                                     {}
 
 // --- NoOp observer implementations ---
 

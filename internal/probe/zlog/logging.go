@@ -258,14 +258,28 @@ func (p *loggingAuthzCheckProbe) RequestAttributesParsed(attrs *request.RequestA
 	event.Msg("Request attributes parsed")
 }
 
-func (p *loggingAuthzCheckProbe) OptionalAuthPassThrough(attrs *request.RequestAttributes) {
+func (p *loggingAuthzCheckProbe) AnonymousSubjectDetected() {
+	p.logger.Debug().Msg("No subject credential found")
+}
+
+func (p *loggingAuthzCheckProbe) AnonymousSubjectPolicyAllowed(attrs *request.RequestAttributes) {
 	event := p.logger.Debug()
 	if attrs != nil {
 		event = event.
 			Str("method", attrs.Method).
 			Str("path", attrs.Path)
 	}
-	event.Msg("Optional auth pass-through: unauthenticated request allowed")
+	event.Msg("Anonymous subject policy allowed: unauthenticated request permitted")
+}
+
+func (p *loggingAuthzCheckProbe) AnonymousSubjectPolicyDenied(attrs *request.RequestAttributes) {
+	event := p.logger.Debug()
+	if attrs != nil {
+		event = event.
+			Str("method", attrs.Method).
+			Str("path", attrs.Path)
+	}
+	event.Msg("Anonymous subject policy denied: unauthenticated request rejected")
 }
 
 func (p *loggingAuthzCheckProbe) ActorValidationSucceeded(actor *trust.Result) {
@@ -310,6 +324,24 @@ func (p *loggingAuthzCheckProbe) SubjectValidationFailed(err error) {
 	p.logger.Error().
 		Err(err).
 		Msg("Subject validation failed")
+}
+
+func (p *loggingAuthzCheckProbe) IssuancePolicyIssue(tokenTypes []service.TokenType, scope string) {
+	p.logger.Debug().
+		Interface("token_types", tokenTypes).
+		Str("scope", scope).
+		Msg("Issuance policy: proceeding with token issuance")
+}
+
+func (p *loggingAuthzCheckProbe) IssuancePolicyPassthrough() {
+	p.logger.Debug().
+		Msg("Issuance policy: passthrough without token issuance")
+}
+
+func (p *loggingAuthzCheckProbe) IssuancePolicyDenied(err error) {
+	p.logger.Warn().
+		Err(err).
+		Msg("Issuance policy: request denied")
 }
 
 func (p *loggingAuthzCheckProbe) End() {

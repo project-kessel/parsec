@@ -1,0 +1,50 @@
+# Anonymous Subject Policy — CEL Example
+#
+# This configuration demonstrates the anonymous_subject_policy feature.
+# When a request arrives at the ext_authz endpoint without an Authorization
+# header, the CEL expression is evaluated to decide whether the request
+# should be allowed through without identity headers.
+#
+# The CEL expression has access to:
+#   - actor:   the validated actor result as a map (subject, issuer, trust_domain, claims)
+#   - request: request attributes as a map (method, path, headers, additional)
+#
+# Path security: before CEL evaluation, the path is validated (query strings
+# stripped, percent-encoding / traversal / double-slashes rejected).
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+trust_domain: "parsec.example.com"
+
+observability:
+  type: logging
+  log_level: debug
+
+trust_store:
+  type: stub_store
+  validators:
+    - name: default
+      type: stub_validator
+      credential_types: ["bearer"]
+
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.example.com"
+    ttl: 5m
+
+authz_server:
+  token_types:
+    - type: "urn:ietf:params:oauth:token-type:txn_token"
+      header_name: "Transaction-Token"
+
+  anonymous_subject_policy:
+    type: cel
+    script: |
+      request.path.matches("^/api/[^/]+/v[0-9]+(\\.([0-9]+))?/openapi\\.json$") ||
+      request.path.startsWith("/api/docs/") ||
+      (request.method == "GET" && request.path == "/health") ||
+      (has(request.additional.context_extensions) &&
+       request.additional.context_extensions.optional_auth == "true")

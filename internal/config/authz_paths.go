@@ -2,26 +2,41 @@ package config
 
 import (
 	"fmt"
+	"os"
 
-	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/server"
 )
 
-func NewOptionalAuthPathMatcher(cfg *AuthzServerConfig) (*request.PathMatcher, error) {
-	if cfg == nil || len(cfg.OptionalAuthPaths) == 0 {
+// NewAnonymousSubjectPolicy builds an AnonymousSubjectPolicy from configuration.
+// Returns (nil, nil) when no policy is configured -- the caller should leave the
+// default DenyAllPolicy in place.
+func NewAnonymousSubjectPolicy(cfg *AuthzServerConfig) (server.AnonymousSubjectPolicy, error) {
+	if cfg == nil || cfg.AnonymousSubjectPolicy == nil {
 		return nil, nil
 	}
 
-	patterns := make([]request.PathPattern, len(cfg.OptionalAuthPaths))
-	for i, p := range cfg.OptionalAuthPaths {
-		patterns[i] = request.PathPattern{
-			Path:  p.Path,
-			Match: p.Match,
-		}
+	polCfg := cfg.AnonymousSubjectPolicy
+
+	if polCfg.Type != "" && polCfg.Type != "cel" {
+		return nil, fmt.Errorf("anonymous_subject_policy: unsupported type %q (only \"cel\" is supported)", polCfg.Type)
 	}
 
-	m, err := request.NewPathMatcher(patterns)
-	if err != nil {
-		return nil, fmt.Errorf("optional_auth_paths: %w", err)
+	if polCfg.Script != "" && polCfg.ScriptFile != "" {
+		return nil, fmt.Errorf("anonymous_subject_policy: cannot specify both script and script_file")
 	}
-	return m, nil
+
+	script := polCfg.Script
+	if polCfg.ScriptFile != "" {
+		content, err := os.ReadFile(polCfg.ScriptFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading anonymous subject policy script file: %w", err)
+		}
+		script = string(content)
+	}
+
+	if script == "" {
+		return nil, fmt.Errorf("anonymous_subject_policy: either script or script_file must be provided")
+	}
+
+	return server.NewCelAnonymousSubjectPolicy(script)
 }

@@ -114,15 +114,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create issuer registry: %w", err)
 	}
 
-	optionalAuthMatcher, err := provider.OptionalAuthPathMatcher()
+	anonymousSubjectPolicy, err := provider.AnonymousSubjectPolicy()
 	if err != nil {
-		return fmt.Errorf("failed to create optional auth path matcher: %w", err)
+		return fmt.Errorf("failed to create anonymous subject policy: %w", err)
+	}
+
+	issuancePolicy, err := provider.IssuancePolicy()
+	if err != nil {
+		return fmt.Errorf("failed to create issuance policy: %w", err)
 	}
 
 	// 4. Create service handlers
 	var authzOpts []server.AuthzOption
-	if optionalAuthMatcher != nil {
-		authzOpts = append(authzOpts, server.WithOptionalAuthPathMatcher(optionalAuthMatcher))
+	if anonymousSubjectPolicy != nil {
+		authzOpts = append(authzOpts, server.WithAnonymousSubjectPolicy(anonymousSubjectPolicy))
+	}
+	if issuancePolicy != nil {
+		authzOpts = append(authzOpts, server.WithIssuancePolicy(issuancePolicy))
 	}
 	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, obs, authzOpts...)
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, obs)

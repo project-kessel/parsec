@@ -806,12 +806,14 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		}
 
 		// Verify observer saw probe with correct method sequence
+		// Actor extraction is hoisted before credential extraction
 		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
 		p.AssertProbeSequence(
 			"RequestAttributesParsed",
-			"SubjectCredentialExtracted",
 			"ActorValidationSucceeded",
+			"SubjectCredentialExtracted",
 			"SubjectValidationSucceeded",
+			"IssuancePolicyIssue",
 			"End",
 		)
 	})
@@ -855,9 +857,10 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
 		p.AssertProbeSequence(
 			"RequestAttributesParsed",
-			"SubjectCredentialExtracted",
 			"ActorValidationSucceeded",
-			"SubjectValidationSucceeded", // Still succeeds even for invalid token with StubValidator
+			"SubjectCredentialExtracted",
+			"SubjectValidationSucceeded",
+			"IssuancePolicyIssue",
 			"End",
 		)
 	})
@@ -892,11 +895,372 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			t.Fatalf("Check failed: %v", err)
 		}
 
-		// Verify observer saw probe with credential extraction failure
+		// No credentials -> anonymous subject path (default DenyAllPolicy)
 		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
 		p.AssertProbeSequence(
 			"RequestAttributesParsed",
+			"ActorValidationSucceeded",
+			"AnonymousSubjectDetected",
+			"AnonymousSubjectPolicyDenied",
+			"End",
+		)
+	})
+
+	t.Run("unsupported credential scheme calls SubjectCredentialExtractionFailed", func(t *testing.T) {
+		fakeObs := service.NewFakeObserver(t)
+
+		trustStore := trust.NewStubStore()
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, fakeObs)
+
+		req := &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method:  "GET",
+						Path:    "/api/resource",
+						Headers: map[string]string{"authorization": "Basic dXNlcjpwYXNz"},
+					},
+				},
+			},
+		}
+
+		_, err := authzServer.Check(ctx, req)
+		if err != nil {
+			t.Fatalf("Check failed: %v", err)
+		}
+
+		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
+		p.AssertProbeSequence(
+			"RequestAttributesParsed",
+			"ActorValidationSucceeded",
 			"SubjectCredentialExtractionFailed",
+			"End",
+		)
+	})
+}
+
+func TestAuthzServer_IssuancePolicy(t *testing.T) {
+	ctx := context.Background()
+
+	setup := func(t *testing.T, policy IssuancePolicy) (*AuthzServer, *service.FakeObserver) {
+		t.Helper()
+
+		fakeObs := service.NewFakeObserver(t)
+		trustStore := trust.NewStubStore()
+		trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
+
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		txnMappers := []service.ClaimMapper{service.NewPassthroughSubjectMapper()}
+		reqMappers := []service.ClaimMapper{service.NewRequestAttributesMapper()}
+		txnTokenIssuer := issuer.NewStubIssuer(issuer.StubIssuerConfig{
+			IssuerURL:                 "https://parsec.test",
+			TTL:                       5 * time.Minute,
+			TransactionContextMappers: txnMappers,
+			RequestContextMappers:     reqMappers,
+		})
+		issuerRegistry.Register(service.TokenTypeTransactionToken, txnTokenIssuer)
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		var opts []AuthzOption
+		if policy != nil {
+			opts = append(opts, WithIssuancePolicy(policy))
+		}
+
+		srv := NewAuthzServer(trustStore, tokenService, nil, fakeObs, opts...)
+		return srv, fakeObs
+	}
+
+	makeReq := func(method, path, authHeader string) *authv3.CheckRequest {
+		headers := map[string]string{}
+		if authHeader != "" {
+			headers["authorization"] = authHeader
+		}
+		return &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method:  method,
+						Path:    path,
+						Headers: headers,
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("no policy configured uses default AlwaysIssue", func(t *testing.T) {
+		srv, _ := setup(t, nil)
+		resp, err := srv.Check(ctx, makeReq("GET", "/api/data", "Bearer valid-token"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK, got code %d: %s", resp.Status.Code, resp.Status.Message)
+		}
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OK response")
+		}
+		foundToken := false
+		for _, header := range okResp.Headers {
+			if header.Header.Key == "Transaction-Token" {
+				foundToken = true
+			}
+		}
+		if !foundToken {
+			t.Error("expected Transaction-Token header with default policy")
+		}
+	})
+
+	t.Run("passthrough policy allows without tokens", func(t *testing.T) {
+		policy, err := NewPathPassthroughPolicy([]PathPatternRule{
+			{Path: `^/health`, Outcome: "passthrough"},
+		}, []service.TokenType{service.TokenTypeTransactionToken}, "")
+		if err != nil {
+			t.Fatalf("failed to create policy: %v", err)
+		}
+
+		srv, _ := setup(t, policy)
+		resp, err := srv.Check(ctx, makeReq("GET", "/health", "Bearer valid-token"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK for passthrough, got code %d: %s", resp.Status.Code, resp.Status.Message)
+		}
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OK response")
+		}
+		if len(okResp.Headers) != 0 {
+			t.Errorf("expected no token headers on passthrough, got %d", len(okResp.Headers))
+		}
+		if len(okResp.HeadersToRemove) != 1 || okResp.HeadersToRemove[0] != "authorization" {
+			t.Errorf("expected authorization header to be removed, got: %v", okResp.HeadersToRemove)
+		}
+	})
+
+	t.Run("deny policy rejects authenticated request", func(t *testing.T) {
+		policy, err := NewCelIssuancePolicy("false",
+			[]service.TokenType{service.TokenTypeTransactionToken}, "")
+		if err != nil {
+			t.Fatalf("failed to create policy: %v", err)
+		}
+
+		srv, _ := setup(t, policy)
+		resp, err := srv.Check(ctx, makeReq("GET", "/api/data", "Bearer valid-token"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code == 0 {
+			t.Error("expected denial from issuance policy, got OK")
+		}
+		if !strings.Contains(resp.Status.Message, "issuance policy denied") {
+			t.Errorf("expected deny message, got: %s", resp.Status.Message)
+		}
+	})
+
+	t.Run("policy can set scope", func(t *testing.T) {
+		policy, err := NewCelIssuancePolicy(`{"scope": "read write"}`,
+			[]service.TokenType{service.TokenTypeTransactionToken}, "")
+		if err != nil {
+			t.Fatalf("failed to create policy: %v", err)
+		}
+
+		srv, _ := setup(t, policy)
+		resp, err := srv.Check(ctx, makeReq("GET", "/api/data", "Bearer valid-token"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK, got code %d: %s", resp.Status.Code, resp.Status.Message)
+		}
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OK response")
+		}
+		if len(okResp.Headers) == 0 {
+			t.Error("expected token headers when policy sets scope")
+		}
+	})
+
+	t.Run("path passthrough policy with authenticated request", func(t *testing.T) {
+		policy, err := NewPathPassthroughPolicy([]PathPatternRule{
+			{Path: `^/health$`, Outcome: "passthrough"},
+		}, []service.TokenType{service.TokenTypeTransactionToken}, "")
+		if err != nil {
+			t.Fatalf("failed to create policy: %v", err)
+		}
+
+		srv, _ := setup(t, policy)
+
+		resp, err := srv.Check(ctx, makeReq("GET", "/health", "Bearer valid-token"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK for passthrough, got code %d", resp.Status.Code)
+		}
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OK response")
+		}
+		if len(okResp.Headers) != 0 {
+			t.Errorf("expected no token headers on passthrough, got %d", len(okResp.Headers))
+		}
+
+		resp, err = srv.Check(ctx, makeReq("GET", "/api/data", "Bearer valid-token"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("expected OK for non-matching path, got code %d", resp.Status.Code)
+		}
+		okResp = resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OK response")
+		}
+		if len(okResp.Headers) == 0 {
+			t.Error("expected token headers for non-matching path")
+		}
+	})
+
+	t.Run("issuance policy does not affect anonymous subject path", func(t *testing.T) {
+		policy, err := NewCelIssuancePolicy("false",
+			[]service.TokenType{service.TokenTypeTransactionToken}, "")
+		if err != nil {
+			t.Fatalf("failed to create policy: %v", err)
+		}
+
+		anonPolicy, err := NewCelAnonymousSubjectPolicy(`request.path == "/public"`)
+		if err != nil {
+			t.Fatalf("failed to create anon policy: %v", err)
+		}
+
+		srv, _ := setup(t, policy)
+		srv.anonymousSubjectPolicy = anonPolicy
+
+		resp, err := srv.Check(ctx, makeReq("GET", "/public", ""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status.Code != 0 {
+			t.Errorf("anonymous path should still allow, got code %d: %s",
+				resp.Status.Code, resp.Status.Message)
+		}
+	})
+}
+
+func TestAuthzServer_IssuancePolicy_Observability(t *testing.T) {
+	ctx := context.Background()
+
+	setup := func(t *testing.T, policy IssuancePolicy) (*AuthzServer, *service.FakeObserver) {
+		t.Helper()
+
+		fakeObs := service.NewFakeObserver(t)
+		trustStore := trust.NewStubStore()
+		trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
+
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		txnMappers := []service.ClaimMapper{service.NewPassthroughSubjectMapper()}
+		reqMappers := []service.ClaimMapper{service.NewRequestAttributesMapper()}
+		txnTokenIssuer := issuer.NewStubIssuer(issuer.StubIssuerConfig{
+			IssuerURL:                 "https://parsec.test",
+			TTL:                       5 * time.Minute,
+			TransactionContextMappers: txnMappers,
+			RequestContextMappers:     reqMappers,
+		})
+		issuerRegistry.Register(service.TokenTypeTransactionToken, txnTokenIssuer)
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		var opts []AuthzOption
+		if policy != nil {
+			opts = append(opts, WithIssuancePolicy(policy))
+		}
+
+		srv := NewAuthzServer(trustStore, tokenService, nil, fakeObs, opts...)
+		return srv, fakeObs
+	}
+
+	makeReq := func(path string) *authv3.CheckRequest {
+		return &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method:  "GET",
+						Path:    path,
+						Headers: map[string]string{"authorization": "Bearer valid-token"},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("issuance policy passthrough fires correct probe sequence", func(t *testing.T) {
+		policy, _ := NewCelIssuancePolicy(`{"passthrough": true}`,
+			[]service.TokenType{service.TokenTypeTransactionToken}, "")
+		srv, fakeObs := setup(t, policy)
+
+		_, err := srv.Check(ctx, makeReq("/health"))
+		if err != nil {
+			t.Fatalf("Check failed: %v", err)
+		}
+
+		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
+		p.AssertProbeSequence(
+			"RequestAttributesParsed",
+			"ActorValidationSucceeded",
+			"SubjectCredentialExtracted",
+			"SubjectValidationSucceeded",
+			"IssuancePolicyPassthrough",
+			"End",
+		)
+	})
+
+	t.Run("issuance policy deny fires correct probe sequence", func(t *testing.T) {
+		policy, _ := NewCelIssuancePolicy("false",
+			[]service.TokenType{service.TokenTypeTransactionToken}, "")
+		srv, fakeObs := setup(t, policy)
+
+		_, err := srv.Check(ctx, makeReq("/api/data"))
+		if err != nil {
+			t.Fatalf("Check failed: %v", err)
+		}
+
+		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
+		p.AssertProbeSequence(
+			"RequestAttributesParsed",
+			"ActorValidationSucceeded",
+			"SubjectCredentialExtracted",
+			"SubjectValidationSucceeded",
+			"IssuancePolicyDenied",
+			"End",
+		)
+	})
+
+	t.Run("issuance policy issue fires correct probe sequence", func(t *testing.T) {
+		policy, _ := NewCelIssuancePolicy("true",
+			[]service.TokenType{service.TokenTypeTransactionToken}, "")
+		srv, fakeObs := setup(t, policy)
+
+		_, err := srv.Check(ctx, makeReq("/api/data"))
+		if err != nil {
+			t.Fatalf("Check failed: %v", err)
+		}
+
+		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
+		p.AssertProbeSequence(
+			"RequestAttributesParsed",
+			"ActorValidationSucceeded",
+			"SubjectCredentialExtracted",
+			"SubjectValidationSucceeded",
+			"IssuancePolicyIssue",
 			"End",
 		)
 	})

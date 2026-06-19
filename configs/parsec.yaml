@@ -76,14 +76,14 @@ authz_server:
     - type: "urn:redhat:params:oauth:token-type:rh-identity"
       header_name: "x-rh-identity"
 
-  # Optional authentication paths — requests to these paths are allowed
-  # without credentials. When credentials are present, they are validated
-  # normally and identity headers are issued.
-  # optional_auth_paths:
-  #   - path: /openapi.json
-  #     match: exact
-  #   - path: /api/docs/
-  #     match: prefix
-  #   - path: '^/api/[^/]+/v[0-9]+(\.[0-9]+)?/openapi.json$'
-  #     match: regex
-  # See configs/examples/optional-auth-3scale-production.yaml for the full 3scale list.
+  # Anonymous subject policy — CEL expression evaluated when no subject
+  # credentials are present. Has access to: actor (map), request (map with
+  # method, path, headers, additional). Returns true to allow without
+  # identity, false to deny. Default: deny all.
+  # anonymous_subject_policy:
+  #   type: cel
+  #   script: |
+  #     request.path.matches("^/api/[^/]+/v[0-9]+/openapi\\.json$") ||
+  #     request.path.startsWith("/api/docs/")
+  #   # Or load from file:
+  #   # script_file: ./configs/scripts/anonymous_subject_policy.cel

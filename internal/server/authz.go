@@ -16,10 +16,7 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-var (
-	ErrNoCredential                = errors.New("no credential")
-	ErrUnsupportedCredentialScheme = errors.New("unsupported credential scheme")
-)
+var ErrUnsupportedCredentialScheme = errors.New("unsupported credential scheme")
 
 // TokenTypeSpec specifies a token type to issue and how to deliver it
 type TokenTypeSpec struct {
@@ -34,9 +31,15 @@ type TokenTypeSpec struct {
 // AuthzOption configures optional AuthzServer behavior.
 type AuthzOption func(*AuthzServer)
 
-func WithOptionalAuthPathMatcher(m *request.PathMatcher) AuthzOption {
+func WithAnonymousSubjectPolicy(p AnonymousSubjectPolicy) AuthzOption {
 	return func(s *AuthzServer) {
-		s.optionalAuthMatcher = m
+		s.anonymousSubjectPolicy = p
+	}
+}
+
+func WithIssuancePolicy(p IssuancePolicy) AuthzOption {
+	return func(s *AuthzServer) {
+		s.issuancePolicy = p
 	}
 }
 
@@ -52,12 +55,12 @@ type AuthzServer struct {
 	// This could come from configuration in the future
 	TokenTypesToIssue []TokenTypeSpec
 
-	optionalAuthMatcher *request.PathMatcher
+	anonymousSubjectPolicy AnonymousSubjectPolicy
+	issuancePolicy         IssuancePolicy
 }
 
 // NewAuthzServer creates a new ext_authz server.
 func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, observer service.AuthzCheckObserver, opts ...AuthzOption) *AuthzServer {
-	// Default to transaction tokens if none specified
 	if len(tokenTypes) == 0 {
 		tokenTypes = []TokenTypeSpec{
 			{
@@ -67,16 +70,22 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		}
 	}
 
-	// Use null object pattern - default to no-op observer if none provided
 	if observer == nil {
 		observer = service.NoOpAuthzCheckObserver{}
 	}
 
+	defaultTypes := make([]service.TokenType, len(tokenTypes))
+	for i, spec := range tokenTypes {
+		defaultTypes[i] = spec.Type
+	}
+
 	s := &AuthzServer{
-		trustStore:        trustStore,
-		tokenService:      tokenService,
-		TokenTypesToIssue: tokenTypes,
-		observer:          observer,
+		trustStore:             trustStore,
+		tokenService:           tokenService,
+		TokenTypesToIssue:      tokenTypes,
+		observer:               observer,
+		anonymousSubjectPolicy: DenyAllPolicy{},
+		issuancePolicy:         NewAlwaysIssuePolicy(defaultTypes),
 	}
 
 	for _, opt := range opts {
@@ -94,33 +103,32 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	reqAttrs := s.buildRequestAttributes(req)
 	p.RequestAttributesParsed(reqAttrs)
 
+	actor, actorDenyResp := s.extractAndValidateActor(ctx, p)
+	if actorDenyResp != nil {
+		return actorDenyResp, nil
+	}
+
 	cred, headersUsed, err := s.extractCredential(req)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
-		if errors.Is(err, ErrNoCredential) {
-			if resp, ok := s.tryOptionalAuthPassThrough(reqAttrs, p); ok {
-				return resp, nil
-			}
-		}
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
-	return s.checkWithCredential(ctx, reqAttrs, cred, headersUsed, p)
+	if cred == nil {
+		return s.handleAnonymousSubject(ctx, actor, reqAttrs, p)
+	}
+
+	return s.checkWithCredential(ctx, reqAttrs, cred, headersUsed, actor, p)
 }
 
-func (s *AuthzServer) checkWithCredential(
-	ctx context.Context,
-	reqAttrs *request.RequestAttributes,
-	cred trust.Credential,
-	headersUsed []string,
-	p service.AuthzCheckProbe,
-) (*authv3.CheckResponse, error) {
-	p.SubjectCredentialExtracted(cred, headersUsed)
-
+// extractAndValidateActor extracts and validates the actor credential from the
+// gRPC context (mTLS peer cert or metadata bearer token). Returns the validated
+// actor result, or a deny response if validation fails.
+func (s *AuthzServer) extractAndValidateActor(ctx context.Context, p service.AuthzCheckProbe) (*trust.Result, *authv3.CheckResponse) {
 	actorCred, err := extractActorCredential(ctx)
 	if err != nil {
-		return s.denyResponse(codes.Internal,
-			fmt.Sprintf("failed to extract actor credential: %v", err)), nil
+		return nil, s.denyResponse(codes.Internal,
+			fmt.Sprintf("failed to extract actor credential: %v", err))
 	}
 
 	var actor *trust.Result
@@ -129,14 +137,52 @@ func (s *AuthzServer) checkWithCredential(
 		actor, validationErr = s.trustStore.Validate(ctx, actorCred)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)
-			return s.denyResponse(codes.Unauthenticated,
-				fmt.Sprintf("actor validation failed: %v", validationErr)), nil
+			return nil, s.denyResponse(codes.Unauthenticated,
+				fmt.Sprintf("actor validation failed: %v", validationErr))
 		}
 		p.ActorValidationSucceeded(actor)
 	} else {
 		actor = trust.AnonymousResult()
 		p.ActorValidationSucceeded(actor)
 	}
+
+	return actor, nil
+}
+
+// handleAnonymousSubject evaluates the anonymous subject policy when no
+// credentials are present. Fires the appropriate observer hooks.
+func (s *AuthzServer) handleAnonymousSubject(
+	ctx context.Context,
+	actor *trust.Result,
+	reqAttrs *request.RequestAttributes,
+	p service.AuthzCheckProbe,
+) (*authv3.CheckResponse, error) {
+	p.AnonymousSubjectDetected()
+
+	allowed, err := s.anonymousSubjectPolicy.IsAllowed(ctx, actor, reqAttrs)
+	if err != nil {
+		return s.denyResponse(codes.Internal,
+			fmt.Sprintf("anonymous subject policy evaluation failed: %v", err)), nil
+	}
+
+	if allowed {
+		p.AnonymousSubjectPolicyAllowed(reqAttrs)
+		return s.allowResponse(), nil
+	}
+
+	p.AnonymousSubjectPolicyDenied(reqAttrs)
+	return s.denyResponse(codes.Unauthenticated, "no credentials provided"), nil
+}
+
+func (s *AuthzServer) checkWithCredential(
+	ctx context.Context,
+	reqAttrs *request.RequestAttributes,
+	cred trust.Credential,
+	headersUsed []string,
+	actor *trust.Result,
+	p service.AuthzCheckProbe,
+) (*authv3.CheckResponse, error) {
+	p.SubjectCredentialExtracted(cred, headersUsed)
 
 	filteredStore, err := s.trustStore.ForActor(ctx, actor, reqAttrs)
 	if err != nil {
@@ -151,18 +197,24 @@ func (s *AuthzServer) checkWithCredential(
 	}
 	p.SubjectValidationSucceeded(result)
 
-	tokenTypes := make([]service.TokenType, len(s.TokenTypesToIssue))
-	for i, spec := range s.TokenTypesToIssue {
-		tokenTypes[i] = spec.Type
+	decision, err := s.issuancePolicy.Evaluate(ctx, result, actor, reqAttrs)
+	if err != nil {
+		p.IssuancePolicyDenied(err)
+		return s.denyResponse(codes.PermissionDenied,
+			fmt.Sprintf("issuance policy denied: %v", err)), nil
 	}
+	if decision == nil {
+		p.IssuancePolicyPassthrough()
+		return s.allowResponseWithRemovedHeaders(headersUsed), nil
+	}
+	p.IssuancePolicyIssue(decision.TokenTypes, decision.Scope)
 
 	issuedTokens, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
 		Subject:           result,
 		Actor:             actor,
 		RequestAttributes: reqAttrs,
-		TokenTypes:        tokenTypes,
-		// TODO: Get scope from configuration or request
-		Scope: "",
+		TokenTypes:        decision.TokenTypes,
+		Scope:             decision.Scope,
 	})
 	if err != nil {
 		return s.denyResponse(codes.Internal, fmt.Sprintf("failed to issue tokens: %v", err)), nil
@@ -193,8 +245,9 @@ func (s *AuthzServer) checkWithCredential(
 	}, nil
 }
 
-// extractCredential extracts credentials from the Envoy request
-// Returns the credential and the list of headers that were used to extract it
+// extractCredential extracts credentials from the Envoy request.
+// Returns (nil, nil, nil) when no Authorization header is present -- absence
+// of credentials is not an error, it triggers the anonymous subject path.
 func (s *AuthzServer) extractCredential(req *authv3.CheckRequest) (trust.Credential, []string, error) {
 	httpReq := req.GetAttributes().GetRequest().GetHttp()
 	// TODO: mtls e.g. cert := req.GetAttributes().GetSource().GetCertificate()
@@ -203,20 +256,15 @@ func (s *AuthzServer) extractCredential(req *authv3.CheckRequest) (trust.Credent
 		return nil, nil, fmt.Errorf("no HTTP request attributes")
 	}
 
-	// Look for Authorization header
 	authHeader := httpReq.GetHeaders()["authorization"]
 	if authHeader == "" {
-		return nil, nil, ErrNoCredential
+		return nil, nil, nil
 	}
 
-	// Extract bearer token
 	if token, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
-		// For bearer tokens, the trust store determines which validator to use
-		// based on its configuration (e.g., default validator, token introspection)
 		cred := &trust.BearerCredential{
 			Token: token,
 		}
-		// Return the credential and the headers that were used
 		headersUsed := []string{"authorization"}
 		return cred, headersUsed, nil
 	}
@@ -227,15 +275,6 @@ func (s *AuthzServer) extractCredential(req *authv3.CheckRequest) (trust.Credent
 	// - Cookie-based auth: would track cookie names
 
 	return nil, nil, ErrUnsupportedCredentialScheme
-}
-
-func (s *AuthzServer) tryOptionalAuthPassThrough(reqAttrs *request.RequestAttributes, p service.AuthzCheckProbe) (*authv3.CheckResponse, bool) {
-	validPath, ok := request.ParseMatchPath(reqAttrs.Path)
-	if !ok || !s.optionalAuthMatcher.MatchesPath(validPath) {
-		return nil, false
-	}
-	p.OptionalAuthPassThrough(reqAttrs)
-	return s.allowResponse(), true
 }
 
 // buildRequestAttributes extracts request attributes from the Envoy request
@@ -249,9 +288,6 @@ func (s *AuthzServer) buildRequestAttributes(req *authv3.CheckRequest) *request.
 		"host": httpReq.GetHost(),
 	}
 
-	// Add Envoy context extensions
-	// These are custom key-value pairs set by Envoy configuration
-	// and provide additional context about the request
 	if contextExtensions := req.GetAttributes().GetContextExtensions(); len(contextExtensions) > 0 {
 		additional["context_extensions"] = contextExtensions
 	}
@@ -263,6 +299,19 @@ func (s *AuthzServer) buildRequestAttributes(req *authv3.CheckRequest) *request.
 		UserAgent:  httpReq.GetHeaders()["user-agent"],
 		Headers:    httpReq.GetHeaders(),
 		Additional: additional,
+	}
+}
+
+func (s *AuthzServer) allowResponseWithRemovedHeaders(headersToRemove []string) *authv3.CheckResponse {
+	return &authv3.CheckResponse{
+		Status: &status.Status{
+			Code: int32(codes.OK),
+		},
+		HttpResponse: &authv3.CheckResponse_OkResponse{
+			OkResponse: &authv3.OkHttpResponse{
+				HeadersToRemove: headersToRemove,
+			},
+		},
 	}
 }
 

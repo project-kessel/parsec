@@ -588,9 +588,21 @@ func (m *compositeAuthzCheckProbe) RequestAttributesParsed(attrs *request.Reques
 	}
 }
 
-func (m *compositeAuthzCheckProbe) OptionalAuthPassThrough(attrs *request.RequestAttributes) {
+func (m *compositeAuthzCheckProbe) AnonymousSubjectDetected() {
 	for _, p := range m.probes {
-		p.OptionalAuthPassThrough(attrs)
+		p.AnonymousSubjectDetected()
+	}
+}
+
+func (m *compositeAuthzCheckProbe) AnonymousSubjectPolicyAllowed(attrs *request.RequestAttributes) {
+	for _, p := range m.probes {
+		p.AnonymousSubjectPolicyAllowed(attrs)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) AnonymousSubjectPolicyDenied(attrs *request.RequestAttributes) {
+	for _, p := range m.probes {
+		p.AnonymousSubjectPolicyDenied(attrs)
 	}
 }
 
@@ -627,6 +639,24 @@ func (m *compositeAuthzCheckProbe) SubjectValidationSucceeded(subject *trust.Res
 func (m *compositeAuthzCheckProbe) SubjectValidationFailed(err error) {
 	for _, p := range m.probes {
 		p.SubjectValidationFailed(err)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) IssuancePolicyIssue(tokenTypes []service.TokenType, scope string) {
+	for _, p := range m.probes {
+		p.IssuancePolicyIssue(tokenTypes, scope)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) IssuancePolicyPassthrough() {
+	for _, p := range m.probes {
+		p.IssuancePolicyPassthrough()
+	}
+}
+
+func (m *compositeAuthzCheckProbe) IssuancePolicyDenied(err error) {
+	for _, p := range m.probes {
+		p.IssuancePolicyDenied(err)
 	}
 }
 
