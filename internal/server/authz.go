@@ -28,20 +28,19 @@ type TokenTypeSpec struct {
 type AuthzServer struct {
 	authv3.UnimplementedAuthorizationServer
 
-	trustStore               trust.Store
-	tokenService             *service.TokenService
-	observer                 service.AuthzCheckObserver
-	subjectCredentialSources CredentialSources
-	actorCredentialSources   CredentialSources
+	trustStore        trust.Store
+	tokenService      *service.TokenService
+	observer          service.AuthzCheckObserver
+	credentialSources CredentialSources
 
 	// TokenTypesToIssue specifies which token types to issue and their headers
 	TokenTypesToIssue []TokenTypeSpec
 }
 
 // NewAuthzServer creates a new ext_authz server.
-// subjectCredentialSources and actorCredentialSources define where subject and
-// actor credentials are extracted from, respectively.
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, subjectCredentialSources CredentialSources, actorCredentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
+// credentialSources defines where credentials are extracted from for both
+// subject and actor authentication.
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, credentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
 	// Default to transaction tokens if none specified
 	if len(tokenTypes) == 0 {
 		tokenTypes = []TokenTypeSpec{
@@ -57,12 +56,11 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 	}
 
 	return &AuthzServer{
-		trustStore:               trustStore,
-		tokenService:             tokenService,
-		TokenTypesToIssue:        tokenTypes,
-		observer:                 observer,
-		subjectCredentialSources: subjectCredentialSources,
-		actorCredentialSources:   actorCredentialSources,
+		trustStore:        trustStore,
+		tokenService:      tokenService,
+		TokenTypesToIssue: tokenTypes,
+		observer:          observer,
+		credentialSources: credentialSources,
 	}
 }
 
@@ -77,7 +75,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	p.RequestAttributesParsed(reqAttrs)
 
 	// 2. Authenticate actor from gRPC context
-	actor, err := authenticateActor(ctx, s.actorCredentialSources, s.trustStore, p)
+	actor, err := authenticateActor(ctx, s.credentialSources, s.trustStore, p)
 	if err != nil {
 		return s.denyResponse(codes.Unauthenticated,
 			fmt.Sprintf("%v", err)), nil
@@ -97,7 +95,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
-	ext, err := s.subjectCredentialSources.Extract(ctx, cc)
+	ext, err := s.credentialSources.Extract(ctx, cc)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil

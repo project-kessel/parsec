@@ -212,33 +212,19 @@ func TestNewAuthzServer_credentialSources(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), DefaultCredentialSources(), nil)
+	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil)
 
-	ext, err := srv.subjectCredentialSources.Extract(ctx, CredentialContext{
+	ext, err := srv.credentialSources.Extract(ctx, CredentialContext{
 		Headers: map[string]string{"authorization": "Bearer test-token"},
 	})
 	if err != nil {
-		t.Fatalf("subject sources failed to extract: %v", err)
+		t.Fatalf("credential sources failed to extract: %v", err)
 	}
 	bearer, ok := ext.Credential.(*trust.BearerCredential)
 	if !ok {
-		t.Fatalf("expected BearerCredential from subject source, got %T", ext.Credential)
+		t.Fatalf("expected BearerCredential, got %T", ext.Credential)
 	}
 	if bearer.Token != "test-token" {
-		t.Fatalf("unexpected token: %q", bearer.Token)
-	}
-
-	ext, err = srv.actorCredentialSources.Extract(ctx, CredentialContext{
-		Headers: map[string]string{"authorization": "Bearer actor-token"},
-	})
-	if err != nil {
-		t.Fatalf("actor sources failed to extract: %v", err)
-	}
-	bearer, ok = ext.Credential.(*trust.BearerCredential)
-	if !ok {
-		t.Fatalf("expected BearerCredential from actor source, got %T", ext.Credential)
-	}
-	if bearer.Token != "actor-token" {
 		t.Fatalf("unexpected token: %q", bearer.Token)
 	}
 }
