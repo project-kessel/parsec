@@ -77,9 +77,9 @@ func (NoOpForActorProbe) End()                                 {}
 
 type NoOpJWTValidateProbe struct{}
 
-func (NoOpJWTValidateProbe) JWKSLookupFailed(error)        {}
-func (NoOpJWTValidateProbe) TokenExpired()                 {}
-func (NoOpJWTValidateProbe) TokenInvalid(error)            {}
+func (NoOpJWTValidateProbe) JWKSLookupFailed(error)       {}
+func (NoOpJWTValidateProbe) TokenExpired()                {}
+func (NoOpJWTValidateProbe) TokenInvalid(error)           {}
 func (NoOpJWTValidateProbe) ClaimsExtractionFailed(error) {}
 func (NoOpJWTValidateProbe) End()                         {}
 
