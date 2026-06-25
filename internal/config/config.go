@@ -124,6 +124,9 @@ type ValidatorConfig struct {
 	// Audiences is an optional allowlist for JWT aud claims (jwt_validator only).
 	// Empty disables enforcement (backward compatible).
 	Audiences []string `koanf:"audiences"`
+	// AllowMissingAudience permits tokens without an aud claim even when
+	// Audiences is configured. Tokens that carry an aud must still match.
+	AllowMissingAudience bool `koanf:"allow_missing_audience"`
 
 	// JSON Validator fields
 	// (TrustDomain is shared)

@@ -20,13 +20,14 @@ import (
 
 // JWTValidator validates JWT tokens using JWKS
 type JWTValidator struct {
-	issuer           string
-	jwksURL          string
-	cache            *jwkfetch.Cache
-	trustDomain      string
-	clock            clock.Clock
-	observer         JWTValidatorObserver
-	allowedAudiences []string
+	issuer               string
+	jwksURL              string
+	cache                *jwkfetch.Cache
+	trustDomain          string
+	clock                clock.Clock
+	observer             JWTValidatorObserver
+	allowedAudiences     []string
+	allowMissingAudience bool
 }
 
 // JWTValidatorConfig contains configuration for JWT validation
@@ -59,6 +60,12 @@ type JWTValidatorConfig struct {
 
 	// AllowedAudiences restricts token aud claims. Empty disables enforcement.
 	AllowedAudiences []string
+
+	// AllowMissingAudience, when true, permits tokens that carry no aud claim
+	// even when AllowedAudiences is configured. Tokens that do carry an aud
+	// must still match the allowlist. This is useful for issuers whose tokens
+	// legitimately omit audience (e.g. client_credentials grants).
+	AllowMissingAudience bool
 }
 
 // NewJWTValidator creates a new JWT validator with JWKS support
@@ -114,13 +121,14 @@ func NewJWTValidator(cfg JWTValidatorConfig) (*JWTValidator, error) {
 	}
 
 	return &JWTValidator{
-		issuer:           cfg.Issuer,
-		jwksURL:          jwksURL,
-		cache:            cache,
-		trustDomain:      cfg.TrustDomain,
-		clock:            clk,
-		observer:         obs,
-		allowedAudiences: slices.Clone(cfg.AllowedAudiences),
+		issuer:               cfg.Issuer,
+		jwksURL:              jwksURL,
+		cache:                cache,
+		trustDomain:          cfg.TrustDomain,
+		clock:                clk,
+		observer:             obs,
+		allowedAudiences:     slices.Clone(cfg.AllowedAudiences),
+		allowMissingAudience: cfg.AllowMissingAudience,
 	}, nil
 }
 
@@ -222,6 +230,9 @@ func (v *JWTValidator) validateAudience(tokenAudiences []string) error {
 		return nil
 	}
 	if len(tokenAudiences) == 0 {
+		if v.allowMissingAudience {
+			return nil
+		}
 		return fmt.Errorf("%w: missing audience claim", ErrInvalidToken)
 	}
 	for _, aud := range tokenAudiences {
