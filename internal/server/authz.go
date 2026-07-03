@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -32,23 +34,18 @@ type AuthzServer struct {
 	tokenService      *service.TokenService
 	observer          service.AuthzCheckObserver
 	credentialSources CredentialSources
-
-	// TokenTypesToIssue specifies which token types to issue and their headers
-	TokenTypesToIssue []TokenTypeSpec
+	policy            AuthzCheckPolicy
 }
 
 // NewAuthzServer creates a new ext_authz server.
+// policy decides, for each request, whether to issue tokens, allow without
+// issue, or deny. If nil, a [StaticAuthenticatedPolicy] with default token types
+// is used (preserving pre-policy behavior).
 // credentialSources defines where credentials are extracted from for both
 // subject and actor authentication.
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, tokenTypes []TokenTypeSpec, credentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
-	// Default to transaction tokens if none specified
-	if len(tokenTypes) == 0 {
-		tokenTypes = []TokenTypeSpec{
-			{
-				Type:       service.TokenTypeTransactionToken,
-				HeaderName: "Transaction-Token",
-			},
-		}
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
+	if policy == nil {
+		policy = NewStaticAuthenticatedPolicy(nil)
 	}
 
 	if observer == nil {
@@ -58,7 +55,7 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 	return &AuthzServer{
 		trustStore:        trustStore,
 		tokenService:      tokenService,
-		TokenTypesToIssue: tokenTypes,
+		policy:            policy,
 		observer:          observer,
 		credentialSources: credentialSources,
 	}
@@ -75,64 +72,124 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	p.RequestAttributesParsed(reqAttrs)
 
 	// 2. Authenticate actor from gRPC context
-	actor, err := authenticateActor(ctx, s.credentialSources, s.trustStore, p)
+	actorResult, actorExt, err := authenticateActorWithExtraction(ctx, s.credentialSources, s.trustStore, p)
 	if err != nil {
 		return s.denyResponse(codes.Unauthenticated,
 			fmt.Sprintf("%v", err)), nil
 	}
 
-	// 3. Filter trust store based on actor permissions
-	filteredStore, err := s.trustStore.ForActor(ctx, actor, reqAttrs)
-	if err != nil {
-		return s.denyResponse(codes.PermissionDenied,
-			fmt.Sprintf("failed to filter trust store: %v", err)), nil
+	var actorPrin Principal
+	if actorExt != nil {
+		actorPrin = newPrincipal(actorResult, actorExt)
+	} else {
+		actorPrin = anonymousPrincipal()
 	}
 
-	// 4. Extract subject credentials from request
+	// 3. Extract subject credential and build subject Principal.
+	// Only "no credential found" enters the anonymous path; malformed or
+	// invalid credentials are hard failures.
+	var subjectPrin Principal
+	var subjectExt *CredentialExtraction
+
 	cc, err := CredentialContextFromCheckRequest(req)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
-	ext, err := s.credentialSources.Extract(ctx, cc)
+	subjectExt, err = s.credentialSources.Extract(ctx, cc)
 	if err != nil {
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
-	p.SubjectCredentialExtracted(ext.Credential, ext.HeadersToRemove)
 
-	// 5. Validate subject credentials against filtered trust store
-	result, err := validateCredential(ctx, filteredStore, ext)
-	if err != nil {
-		p.SubjectValidationFailed(err)
-		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", err)), nil
+	if subjectExt == nil {
+		subjectPrin = anonymousPrincipal()
+		p.SubjectAnonymous()
+	} else {
+		// If we got a credential, filter trust store and validate it
+		p.SubjectCredentialExtracted(subjectExt.Credential, subjectExt.HeadersUsed)
+
+		filteredStore, filterErr := s.trustStore.ForActor(ctx, actorResult, reqAttrs)
+		if filterErr != nil {
+			return s.denyResponse(codes.PermissionDenied,
+				fmt.Sprintf("failed to filter trust store: %v", filterErr)), nil
+		}
+
+		result, validationErr := filteredStore.Validate(ctx, subjectExt.Credential)
+		if validationErr != nil {
+			p.SubjectValidationFailed(validationErr)
+			return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", validationErr)), nil
+		}
+		p.SubjectValidationSucceeded(result)
+		subjectPrin = newPrincipal(result, subjectExt)
 	}
-	p.SubjectValidationSucceeded(result)
 
-	// 6. Issue tokens via TokenService
-	tokenTypes := make([]service.TokenType, len(s.TokenTypesToIssue))
-	for i, spec := range s.TokenTypesToIssue {
+	// 4. Evaluate authz check policy
+	decision, err := s.policy.Decide(ctx, AuthzCheckPolicyInput{
+		Subject: subjectPrin,
+		Actor:   actorPrin,
+		Request: reqAttrs,
+	})
+	if err != nil {
+		p.PolicyEvaluationFailed(err)
+		return s.denyResponse(codes.Internal,
+			fmt.Sprintf("policy evaluation failed: %v", err)), nil
+	}
+
+	// 5. Handle policy decision
+	switch decision.Action {
+	case AuthzCheckDeny:
+		p.PolicyDecisionDeny(decision.Reason)
+		return s.denyResponse(codes.PermissionDenied, decision.Reason), nil
+
+	case AuthzCheckAllowWithoutIssue:
+		p.PolicyDecisionAllowWithoutIssue(decision.Reason)
+		rewrite, remove := removeCredentialPresentation(subjectExt, cc.Cookies)
+		return s.okResponse(rewrite, remove), nil
+
+	case AuthzCheckIssue:
+		p.PolicyDecisionIssue(len(decision.TokenTypes), decision.Scope, decision.Reason)
+		rewrite, remove := removeCredentialPresentation(subjectExt, cc.Cookies)
+		return s.issueResponse(ctx, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
+
+	default:
+		return s.denyResponse(codes.Internal,
+			fmt.Sprintf("unknown policy action: %s", decision.Action)), nil
+	}
+}
+
+// issueResponse calls TokenService.IssueTokens and builds an OK response
+// with the issued tokens appended to any credential sanitization headers.
+func (s *AuthzServer) issueResponse(
+	ctx context.Context,
+	decision AuthzCheckDecision,
+	subject, actor Principal,
+	reqAttrs *request.RequestAttributes,
+	credHeaders []*corev3.HeaderValueOption,
+	headersToRemove []string,
+) (*authv3.CheckResponse, error) {
+	tokenTypes := make([]service.TokenType, len(decision.TokenTypes))
+	for i, spec := range decision.TokenTypes {
 		tokenTypes[i] = spec.Type
 	}
 
 	issuedTokens, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
-		Subject:           result,
-		Actor:             actor,
+		Subject:           subject.Result,
+		Actor:             actor.Result,
 		RequestAttributes: reqAttrs,
 		TokenTypes:        tokenTypes,
-		// TODO: Get scope from configuration or request
-		Scope: "",
+		Scope:             decision.Scope,
 	})
 	if err != nil {
 		return s.denyResponse(codes.Internal, fmt.Sprintf("failed to issue tokens: %v", err)), nil
 	}
 
-	// 7. Build response headers from issued tokens and credential sanitization
-	responseHeaders := make([]*corev3.HeaderValueOption, 0, len(issuedTokens)+len(ext.HeadersToSet))
-	for _, spec := range s.TokenTypesToIssue {
+	headers := make([]*corev3.HeaderValueOption, 0, len(credHeaders)+len(issuedTokens))
+	headers = append(headers, credHeaders...)
+	for _, spec := range decision.TokenTypes {
 		if token, ok := issuedTokens[spec.Type]; ok {
-			responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
+			headers = append(headers, &corev3.HeaderValueOption{
 				Header: &corev3.HeaderValue{
 					Key:   spec.HeaderName,
 					Value: token.Value,
@@ -141,31 +198,75 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 			})
 		}
 	}
-	for name, value := range ext.HeadersToSet {
-		responseHeaders = append(responseHeaders, &corev3.HeaderValueOption{
-			Header: &corev3.HeaderValue{
-				Key:   name,
-				Value: value,
-			},
-			AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
-		})
+
+	return s.okResponse(headers, headersToRemove), nil
+}
+
+// removeCredentialPresentation builds the Envoy header mutations needed to
+// strip credential material from the upstream request. Headers listed in
+// ext.HeadersUsed are returned for removal. Cookies listed in ext.CookiesUsed
+// are removed from cookies: if all cookies are consumed the cookie header is
+// added to the removal list; otherwise a rewritten Cookie header option is
+// returned.
+//
+// Returns (nil, nil) when ext is nil.
+func removeCredentialPresentation(ext *CredentialExtraction, cookies []*http.Cookie) ([]*corev3.HeaderValueOption, []string) {
+	if ext == nil {
+		return nil, nil
 	}
 
-	// 8. Return OK with issued tokens in headers
-	// Remove the external credential headers so they don't leak to backend
-	// This creates a security boundary - external credentials stay outside
+	var headers []*corev3.HeaderValueOption
+	headersToRemove := append([]string(nil), ext.HeadersUsed...)
+
+	if len(ext.CookiesUsed) > 0 && len(cookies) > 0 {
+		sanitized := sanitizeCookieHeader(cookies, ext.CookiesUsed...)
+		if sanitized == "" {
+			headersToRemove = append(headersToRemove, "cookie")
+		} else {
+			headers = append(headers, &corev3.HeaderValueOption{
+				Header: &corev3.HeaderValue{
+					Key:   "cookie",
+					Value: sanitized,
+				},
+				AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
+			})
+		}
+	}
+
+	return headers, headersToRemove
+}
+
+// sanitizeCookieHeader rebuilds a Cookie header value without the named
+// cookies. Returns an empty string when all cookies are omitted.
+func sanitizeCookieHeader(cookies []*http.Cookie, omitNames ...string) string {
+	omit := make(map[string]struct{}, len(omitNames))
+	for _, name := range omitNames {
+		omit[name] = struct{}{}
+	}
+
+	var remaining []string
+	for _, c := range cookies {
+		if _, skip := omit[c.Name]; !skip {
+			remaining = append(remaining, c.String())
+		}
+	}
+	return strings.Join(remaining, "; ")
+}
+
+// okResponse wraps pre-built header options and a removal list into an
+// OK [authv3.CheckResponse].
+func (s *AuthzServer) okResponse(headers []*corev3.HeaderValueOption, headersToRemove []string) *authv3.CheckResponse {
 	return &authv3.CheckResponse{
 		Status: &status.Status{
 			Code: int32(codes.OK),
 		},
 		HttpResponse: &authv3.CheckResponse_OkResponse{
 			OkResponse: &authv3.OkHttpResponse{
-				Headers: responseHeaders,
-				// Remove external credential headers - security boundary
-				HeadersToRemove: ext.HeadersToRemove,
+				Headers:         headers,
+				HeadersToRemove: headersToRemove,
 			},
 		},
-	}, nil
+	}
 }
 
 // buildRequestAttributes extracts request attributes from the Envoy request

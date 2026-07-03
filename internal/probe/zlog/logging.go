@@ -328,6 +328,37 @@ func (p *loggingAuthzCheckProbe) SubjectValidationFailed(err error) {
 		Msg("Subject validation failed")
 }
 
+func (p *loggingAuthzCheckProbe) SubjectAnonymous() {
+	p.logger.Debug().
+		Msg("No subject credential found, treating as anonymous")
+}
+
+func (p *loggingAuthzCheckProbe) PolicyDecisionIssue(tokenTypeCount int, scope string, reason string) {
+	p.logger.Debug().
+		Int("token_type_count", tokenTypeCount).
+		Str("scope", scope).
+		Str("reason", reason).
+		Msg("Authz check policy: issue")
+}
+
+func (p *loggingAuthzCheckProbe) PolicyDecisionAllowWithoutIssue(reason string) {
+	p.logger.Debug().
+		Str("reason", reason).
+		Msg("Authz check policy: allow without issue")
+}
+
+func (p *loggingAuthzCheckProbe) PolicyDecisionDeny(reason string) {
+	p.logger.Warn().
+		Str("reason", reason).
+		Msg("Authz check policy: deny")
+}
+
+func (p *loggingAuthzCheckProbe) PolicyEvaluationFailed(err error) {
+	p.logger.Error().
+		Err(err).
+		Msg("Authz check policy evaluation failed")
+}
+
 func (p *loggingAuthzCheckProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).

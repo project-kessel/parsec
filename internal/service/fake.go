@@ -241,6 +241,26 @@ func (p *FakeProbe) SubjectValidationFailed(err error) {
 	p.recordCall("SubjectValidationFailed", err)
 }
 
+func (p *FakeProbe) SubjectAnonymous() {
+	p.recordCall("SubjectAnonymous")
+}
+
+func (p *FakeProbe) PolicyDecisionIssue(tokenTypeCount int, scope string, reason string) {
+	p.recordCall("PolicyDecisionIssue", tokenTypeCount, scope, reason)
+}
+
+func (p *FakeProbe) PolicyDecisionAllowWithoutIssue(reason string) {
+	p.recordCall("PolicyDecisionAllowWithoutIssue", reason)
+}
+
+func (p *FakeProbe) PolicyDecisionDeny(reason string) {
+	p.recordCall("PolicyDecisionDeny", reason)
+}
+
+func (p *FakeProbe) PolicyEvaluationFailed(err error) {
+	p.recordCall("PolicyEvaluationFailed", err)
+}
+
 // End is common to all probes
 func (p *FakeProbe) End() {
 	p.recordCall("End")

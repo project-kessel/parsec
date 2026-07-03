@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"strings"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -24,6 +25,7 @@ type TLSPeerInfo struct {
 // before credential extraction.
 type CredentialContext struct {
 	Headers map[string]string // normalized lowercase header keys
+	Cookies []*http.Cookie    // parsed from the cookie header; nil when absent
 	TLSPeer *TLSPeerInfo      // mTLS client cert info; nil when absent
 }
 
@@ -34,14 +36,20 @@ func CredentialContextFromCheckRequest(req *authv3.CheckRequest) (CredentialCont
 	if httpReq == nil {
 		return CredentialContext{}, fmt.Errorf("no HTTP request attributes")
 	}
+	headers := normalizeHeaderKeys(httpReq.GetHeaders())
+	cookies, err := parseCookies(headers["cookie"])
+	if err != nil {
+		return CredentialContext{}, err
+	}
 	return CredentialContext{
-		Headers: normalizeHeaderKeys(httpReq.GetHeaders()),
+		Headers: headers,
+		Cookies: cookies,
 	}, nil
 }
 
 // CredentialContextFromGRPC builds a CredentialContext from a gRPC server
 // context, extracting metadata headers and TLS peer certificate info.
-func CredentialContextFromGRPC(ctx context.Context) CredentialContext {
+func CredentialContextFromGRPC(ctx context.Context) (CredentialContext, error) {
 	tc := CredentialContext{}
 
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
@@ -51,6 +59,11 @@ func CredentialContextFromGRPC(ctx context.Context) CredentialContext {
 				tc.Headers[strings.ToLower(k)] = vals[0]
 			}
 		}
+		cookies, err := parseCookies(tc.Headers["cookie"])
+		if err != nil {
+			return CredentialContext{}, err
+		}
+		tc.Cookies = cookies
 	}
 
 	if p, ok := peer.FromContext(ctx); ok {
@@ -63,7 +76,18 @@ func CredentialContextFromGRPC(ctx context.Context) CredentialContext {
 		}
 	}
 
-	return tc
+	return tc, nil
+}
+
+func parseCookies(cookieHeader string) ([]*http.Cookie, error) {
+	if cookieHeader == "" {
+		return nil, nil
+	}
+	cookies, err := http.ParseCookie(cookieHeader)
+	if err != nil {
+		return nil, fmt.Errorf("malformed cookie header: %w", err)
+	}
+	return cookies, nil
 }
 
 func normalizeHeaderKeys(headers map[string]string) map[string]string {

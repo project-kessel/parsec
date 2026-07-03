@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,15 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
+
+func mustParseCookies(t *testing.T, header string) []*http.Cookie {
+	t.Helper()
+	cookies, err := parseCookies(header)
+	if err != nil {
+		t.Fatalf("parseCookies(%q): %v", header, err)
+	}
+	return cookies
+}
 
 func TestAuthzServer_Check(t *testing.T) {
 	ctx := context.Background()
@@ -110,7 +120,7 @@ func TestAuthzServer_Check(t *testing.T) {
 			}
 		}
 		if !foundAuthRemoval {
-			t.Errorf("authorization header not in removal list. Headers to remove: %v", okResp.HeadersToRemove)
+			t.Errorf("authorization header not in removal list: %v", okResp.HeadersToRemove)
 		}
 	})
 
@@ -812,6 +822,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			"ActorValidationSucceeded",
 			"SubjectCredentialExtracted",
 			"SubjectValidationSucceeded",
+			"PolicyDecisionIssue",
 			"End",
 		)
 	})
@@ -858,12 +869,17 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			"ActorValidationSucceeded",
 			"SubjectCredentialExtracted",
 			"SubjectValidationSucceeded", // Still succeeds even for invalid token with StubValidator
+			"PolicyDecisionIssue",
 			"End",
 		)
 	})
 
-	t.Run("missing credentials calls probe correctly", func(t *testing.T) {
-		// Setup
+	t.Run("missing credentials triggers anonymous subject and policy denial", func(t *testing.T) {
+		// With the authz check policy, missing credentials results in an
+		// anonymous subject. The default StaticAuthenticatedPolicy denies
+		// anonymous subjects. This should NOT fire
+		// SubjectCredentialExtractionFailed (that's for malformed
+		// credentials, not absent ones).
 		fakeObs := service.NewFakeObserver(t)
 
 		trustStore := trust.NewStubStore()
@@ -887,18 +903,435 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			},
 		}
 
-		_, err := authzServer.Check(ctx, req)
+		resp, err := authzServer.Check(ctx, req)
 		if err != nil {
 			t.Fatalf("Check failed: %v", err)
 		}
 
-		// Verify observer saw probe with credential extraction failure
+		// Verify denial (anonymous subjects not allowed by default policy)
+		if resp.Status.Code == 0 {
+			t.Error("expected denial for missing credentials, got OK")
+		}
+
 		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
 		p.AssertProbeSequence(
 			"RequestAttributesParsed",
 			"ActorValidationSucceeded",
-			"SubjectCredentialExtractionFailed",
+			"SubjectAnonymous",
+			"PolicyDecisionDeny",
 			"End",
 		)
 	})
+}
+
+func TestCredentialSanitizationHeaders(t *testing.T) {
+	t.Run("rewrites cookie header when other cookies remain", func(t *testing.T) {
+		ext := &CredentialExtraction{
+			CookiesUsed: []string{"cs_jwt"},
+		}
+
+		headers, headersToRemove := removeCredentialPresentation(ext, mustParseCookies(t, "session=abc; cs_jwt=secret; theme=dark"))
+
+		if len(headers) != 1 || headers[0].Header.Key != "cookie" {
+			t.Fatalf("expected one cookie rewrite header, got %d headers", len(headers))
+		}
+		if headers[0].Header.Value != "session=abc; theme=dark" {
+			t.Errorf("expected sanitized cookie %q, got %q",
+				"session=abc; theme=dark", headers[0].Header.Value)
+		}
+
+		for _, name := range headersToRemove {
+			if name == "cookie" {
+				t.Error("cookie should not be in removal list when other cookies remain")
+			}
+		}
+	})
+
+	t.Run("removes entire cookie header when credential is the only cookie", func(t *testing.T) {
+		ext := &CredentialExtraction{
+			CookiesUsed: []string{"cs_jwt"},
+		}
+
+		headers, headersToRemove := removeCredentialPresentation(ext, mustParseCookies(t, "cs_jwt=secret"))
+
+		if len(headers) != 0 {
+			t.Errorf("expected no rewrite headers, got %d", len(headers))
+		}
+
+		found := false
+		for _, name := range headersToRemove {
+			if name == "cookie" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected cookie in removal list when credential is the only cookie")
+		}
+	})
+
+	t.Run("bearer headers used are returned for removal", func(t *testing.T) {
+		ext := &CredentialExtraction{
+			HeadersUsed: []string{"authorization"},
+		}
+
+		headers, headersToRemove := removeCredentialPresentation(ext, nil)
+
+		if len(headers) != 0 {
+			t.Errorf("expected no rewrite headers, got %d", len(headers))
+		}
+		if len(headersToRemove) != 1 || headersToRemove[0] != "authorization" {
+			t.Errorf("expected [authorization] for removal, got %v", headersToRemove)
+		}
+	})
+
+	t.Run("nil extraction returns nil", func(t *testing.T) {
+		headers, headersToRemove := removeCredentialPresentation(nil, mustParseCookies(t, "some=cookies"))
+
+		if headers != nil {
+			t.Errorf("expected nil headers, got %v", headers)
+		}
+		if headersToRemove != nil {
+			t.Errorf("expected nil headersToRemove, got %v", headersToRemove)
+		}
+	})
+
+	t.Run("does not mutate the extraction HeadersUsed slice", func(t *testing.T) {
+		ext := &CredentialExtraction{
+			HeadersUsed: []string{"authorization"},
+			CookiesUsed: []string{"cs_jwt"},
+		}
+
+		_, _ = removeCredentialPresentation(ext, mustParseCookies(t, "cs_jwt=secret"))
+
+		if len(ext.HeadersUsed) != 1 || ext.HeadersUsed[0] != "authorization" {
+			t.Errorf("HeadersUsed was mutated: %v", ext.HeadersUsed)
+		}
+	})
+}
+
+func TestSanitizeCookieHeader_roundTrip(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		header string
+		omit   []string
+		want   string
+	}{
+		{
+			name:   "JWT-like value with dots and base64url",
+			header: "cred=remove-me; token=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl",
+			omit:   []string{"cred"},
+			want:   "token=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl",
+		},
+		{
+			name:   "base64 padding with equals signs",
+			header: "cred=remove-me; session=dGVzdA==",
+			omit:   []string{"cred"},
+			want:   "session=dGVzdA==",
+		},
+		{
+			name:   "URL-encoded value",
+			header: "cred=remove-me; redir=https%3A%2F%2Fexample.com%2Fpath%3Fq%3D1",
+			omit:   []string{"cred"},
+			want:   "redir=https%3A%2F%2Fexample.com%2Fpath%3Fq%3D1",
+		},
+		{
+			name:   "value containing embedded equals",
+			header: "cred=remove-me; data=key=val=ue",
+			omit:   []string{"cred"},
+			want:   "data=key=val=ue",
+		},
+		{
+			name:   "empty value survives",
+			header: "cred=remove-me; empty=",
+			omit:   []string{"cred"},
+			want:   "empty=",
+		},
+		{
+			name:   "middle cookie omitted preserves neighbors",
+			header: "before=aaa; cred=remove-me; after=zzz",
+			omit:   []string{"cred"},
+			want:   "before=aaa; after=zzz",
+		},
+		{
+			name:   "special allowed characters in value",
+			header: "cred=remove-me; prefs=!#$&'*+-.^`|~",
+			omit:   []string{"cred"},
+			want:   "prefs=!#$&'*+-.^`|~",
+		},
+		{
+			name:   "multiple omitted cookies among multiple survivors",
+			header: "a=1; cred1=x; b=2; cred2=y; c=3",
+			omit:   []string{"cred1", "cred2"},
+			want:   "a=1; b=2; c=3",
+		},
+		{
+			name:   "case-sensitive match only omits exact name",
+			header: "CS_JWT=upper; cs_jwt=lower; Cs_Jwt=mixed",
+			omit:   []string{"cs_jwt"},
+			want:   "CS_JWT=upper; Cs_Jwt=mixed",
+		},
+		{
+			name:   "case-sensitive miss leaves all cookies intact",
+			header: "Session=abc; TOKEN=xyz",
+			omit:   []string{"session", "token"},
+			want:   "Session=abc; TOKEN=xyz",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sanitizeCookieHeader(mustParseCookies(t, tt.header), tt.omit...)
+			if got != tt.want {
+				t.Errorf("round trip mismatch:\n  input: %q\n  got:   %q\n  want:  %q", tt.header, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAuthzServer_Check_AllowWithoutIssue(t *testing.T) {
+	ctx := context.Background()
+
+	trustStore := trust.NewStubStore()
+	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
+	trustStore.AddValidator(stubValidator)
+
+	// A policy that returns AllowWithoutIssue for authenticated subjects
+	policy := &stubPolicy{decision: AuthzCheckDecision{
+		Action: AuthzCheckAllowWithoutIssue,
+		Reason: "allow without issue",
+	}}
+
+	authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), nil)
+
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Method: "GET",
+					Path:   "/health",
+					Headers: map[string]string{
+						"authorization": "Bearer valid-token",
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := authzServer.Check(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.Status.Code != 0 {
+		t.Errorf("expected OK, got code %d: %s", resp.Status.Code, resp.Status.Message)
+	}
+
+	okResp := resp.GetOkResponse()
+	if okResp == nil {
+		t.Fatal("expected OK response, got nil")
+	}
+
+	// Should still sanitize credential headers
+	foundAuthRemoval := false
+	for _, name := range okResp.HeadersToRemove {
+		if name == "authorization" {
+			foundAuthRemoval = true
+		}
+	}
+	if !foundAuthRemoval {
+		t.Errorf("expected authorization header removed even in AllowWithoutIssue, got %v", okResp.HeadersToRemove)
+	}
+}
+
+func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
+	t.Parallel()
+
+	trustStore := trust.NewStubStore()
+	trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
+
+	policy := &stubPolicy{decision: AuthzCheckDecision{
+		Action: AuthzCheckAllowWithoutIssue,
+		Reason: "allow",
+	}}
+
+	cookieSource := mustCookieSource(t, "cookie-jwt", "cs_jwt")
+	authzServer := NewAuthzServer(trustStore, nil, policy, NewCredentialSources(cookieSource), nil)
+	ctx := context.Background()
+
+	t.Run("mixed-case Cookie header key is normalized and sanitized", func(t *testing.T) {
+		t.Parallel()
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api",
+						Headers: map[string]string{
+							"Cookie": "session=keep; cs_jwt=secret; theme=dark",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatalf("expected OK response, got %v", resp.Status)
+		}
+
+		// The credential cookie should be stripped; other cookies should survive.
+		var rewrittenCookie string
+		for _, h := range okResp.Headers {
+			if h.Header.Key == "cookie" {
+				rewrittenCookie = h.Header.Value
+			}
+		}
+		if rewrittenCookie != "session=keep; theme=dark" {
+			t.Errorf("expected surviving cookies %q, got %q",
+				"session=keep; theme=dark", rewrittenCookie)
+		}
+
+		for _, name := range okResp.HeadersToRemove {
+			if name == "cookie" {
+				t.Error("cookie header should be rewritten, not removed, when other cookies remain")
+			}
+		}
+	})
+
+	t.Run("only credential cookie removes entire header", func(t *testing.T) {
+		t.Parallel()
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api",
+						Headers: map[string]string{
+							"Cookie": "cs_jwt=secret",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatalf("expected OK response, got %v", resp.Status)
+		}
+
+		if len(okResp.Headers) != 0 {
+			t.Errorf("expected no rewrite headers when all cookies consumed, got %v", okResp.Headers)
+		}
+
+		found := false
+		for _, name := range okResp.HeadersToRemove {
+			if name == "cookie" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected cookie in removal list when credential is the only cookie")
+		}
+	})
+
+	t.Run("case mismatch in cookie name does not strip wrong cookie", func(t *testing.T) {
+		t.Parallel()
+		// Source is configured for "cs_jwt" but header has "CS_JWT" (different case).
+		// Cookie names are case-sensitive per RFC 6265, so no credential should
+		// be extracted and no sanitization should occur.
+		noMatchServer := NewAuthzServer(trustStore, nil, nil, NewCredentialSources(cookieSource), nil)
+
+		resp, err := noMatchServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api",
+						Headers: map[string]string{
+							"Cookie": "CS_JWT=secret; session=abc",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// No credential extracted → default policy denies (unauthenticated)
+		// or allows anonymously, depending on policy. Either way, the cookies
+		// must NOT be touched.
+		if okResp := resp.GetOkResponse(); okResp != nil {
+			for _, h := range okResp.Headers {
+				if h.Header.Key == "cookie" {
+					t.Errorf("cookie header should not be rewritten when name case doesn't match, got %q", h.Header.Value)
+				}
+			}
+			for _, name := range okResp.HeadersToRemove {
+				if name == "cookie" {
+					t.Error("cookie header should not be removed when name case doesn't match")
+				}
+			}
+		}
+	})
+}
+
+func TestAuthzServer_Check_NilHttpRequest(t *testing.T) {
+	ctx := context.Background()
+
+	authzServer := NewAuthzServer(trust.NewStubStore(), nil, nil, DefaultCredentialSources(), nil)
+
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Request: &authv3.AttributeContext_Request{
+				// Http is nil
+			},
+		},
+	}
+
+	resp, err := authzServer.Check(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should deny — nil HTTP request means credential context extraction fails
+	if resp.Status.Code == 0 {
+		t.Error("expected denial for nil HTTP request, got OK")
+	}
+}
+
+func TestBuildRequestAttributes_NilHttp(t *testing.T) {
+	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil)
+
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Request: &authv3.AttributeContext_Request{},
+		},
+	}
+
+	attrs := srv.buildRequestAttributes(req)
+	if attrs.Method != "" {
+		t.Errorf("expected empty method, got %q", attrs.Method)
+	}
+	if attrs.Path != "" {
+		t.Errorf("expected empty path, got %q", attrs.Path)
+	}
+}
+
+// stubPolicy is a simple AuthzCheckPolicy that returns a fixed decision.
+type stubPolicy struct {
+	decision AuthzCheckDecision
+}
+
+func (p *stubPolicy) Decide(_ context.Context, _ AuthzCheckPolicyInput) (AuthzCheckDecision, error) {
+	return p.decision, nil
 }

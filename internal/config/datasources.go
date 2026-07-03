@@ -2,23 +2,25 @@ package config
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
 	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/service"
 )
 
+const defaultCacheTTL = 5 * time.Minute
+
 // NewDataSourceRegistry creates a data source registry from configuration.
 // The observer provides cache lifecycle events for data sources that use caching.
-func NewDataSourceRegistry(cfg []DataSourceConfig, transport http.RoundTripper, obs observer.Observer) (*service.DataSourceRegistry, error) {
+func NewDataSourceRegistry(cfg []DataSourceConfig, httpRegistry *httpclient.Registry, obs observer.Observer) (*service.DataSourceRegistry, error) {
 	registry := service.NewDataSourceRegistry()
 
 	for _, dsCfg := range cfg {
-		ds, err := newDataSource(dsCfg, transport, obs)
+		ds, err := newDataSource(dsCfg, httpRegistry, obs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create data source %s: %w", dsCfg.Name, err)
 		}
@@ -28,10 +30,10 @@ func NewDataSourceRegistry(cfg []DataSourceConfig, transport http.RoundTripper, 
 	return registry, nil
 }
 
-func newDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs observer.Observer) (service.DataSource, error) {
+func newDataSource(cfg DataSourceConfig, httpRegistry *httpclient.Registry, obs observer.Observer) (service.DataSource, error) {
 	switch cfg.Type {
 	case "lua":
-		return newLuaDataSource(cfg, transport, obs)
+		return newLuaDataSource(cfg, httpRegistry, obs)
 	case "static":
 		return newStaticDataSource(cfg)
 	default:
@@ -46,21 +48,15 @@ func newStaticDataSource(cfg DataSourceConfig) (service.DataSource, error) {
 	return datasource.NewStaticDataSource(cfg.Name, cfg.Data)
 }
 
-func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs observer.Observer) (service.DataSource, error) {
+func newLuaDataSource(cfg DataSourceConfig, httpRegistry *httpclient.Registry, obs observer.Observer) (service.DataSource, error) {
 	if cfg.Name == "" {
 		return nil, fmt.Errorf("data source name is required")
 	}
 
-	// Get script content (either from file or inline)
-	script := cfg.Script
-	if cfg.ScriptFile != "" {
-		content, err := os.ReadFile(cfg.ScriptFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read script file %s: %w", cfg.ScriptFile, err)
-		}
-		script = string(content)
+	script, err := readScript(cfg.Script, cfg.ScriptFile)
+	if err != nil {
+		return nil, err
 	}
-
 	if script == "" {
 		return nil, fmt.Errorf("lua data source requires either script or script_file")
 	}
@@ -71,36 +67,21 @@ func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs obs
 		configSource = luaservices.NewMapConfigSource(cfg.Config)
 	}
 
-	// Build HTTP options
-	var httpOptions []luaservices.HTTPServiceOption
-	if cfg.HTTPConfig != nil {
-		opts, err := buildHTTPOptions(cfg.HTTPConfig, transport)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build HTTP options: %w", err)
-		}
-		httpOptions = opts
+	// Resolve HTTP client from registry
+	client, err := resolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientSpec, httpRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve HTTP client: %w", err)
 	}
 
 	var baseDS service.DataSource
 
-	if cfg.CacheKeyFunc != "" {
-		var cacheTTL time.Duration
-		if cfg.LuaCacheTTL != "" {
-			var err error
-			cacheTTL, err = time.ParseDuration(cfg.LuaCacheTTL)
-			if err != nil {
-				return nil, fmt.Errorf("invalid lua_cache_ttl: %w", err)
-			}
-		}
-
+	if cachingEnabled(cfg.Caching) {
 		cacheable, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourceConfig{
 			Name:         cfg.Name,
 			Script:       script,
 			ConfigSource: configSource,
-			HTTPOptions:  httpOptions,
+			HTTPClient:   client,
 			Observer:     obs,
-			CacheKeyFunc: cfg.CacheKeyFunc,
-			CacheTTL:     cacheTTL,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cacheable lua data source: %w", err)
@@ -111,7 +92,7 @@ func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs obs
 			Name:         cfg.Name,
 			Script:       script,
 			ConfigSource: configSource,
-			HTTPOptions:  httpOptions,
+			HTTPClient:   client,
 			Observer:     obs,
 		}
 
@@ -129,31 +110,54 @@ func newLuaDataSource(cfg DataSourceConfig, transport http.RoundTripper, obs obs
 	return baseDS, nil
 }
 
-func buildHTTPOptions(cfg *HTTPConfig, transport http.RoundTripper) ([]luaservices.HTTPServiceOption, error) {
-	var opts []luaservices.HTTPServiceOption
-
-	if cfg.Timeout != "" {
-		duration, err := time.ParseDuration(cfg.Timeout)
-		if err != nil {
-			return nil, fmt.Errorf("invalid http timeout: %w", err)
-		}
-		opts = append(opts, luaservices.WithTimeout(duration))
+func readScript(inline, file string) (string, error) {
+	if file == "" {
+		return inline, nil
 	}
-
-	if transport != nil {
-		opts = append(opts, luaservices.WithTransport(transport))
+	content, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read script file %s: %w", file, err)
 	}
+	return string(content), nil
+}
 
-	return opts, nil
+func cachingEnabled(cfg *CachingConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	switch cfg.Type {
+	case "in_memory", "distributed":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseCacheTTL(cfg *CachingConfig) (time.Duration, error) {
+	if cfg == nil || cfg.TTL == "" {
+		return defaultCacheTTL, nil
+	}
+	duration, err := time.ParseDuration(cfg.TTL)
+	if err != nil {
+		return 0, fmt.Errorf("invalid cache ttl: %w", err)
+	}
+	return duration, nil
 }
 
 // wrapWithCaching wraps a data source with the configured caching layer.
 // This is the coupling point where the central observer is narrowed to
 // the cache-specific CacheObserver sub-interface.
 func wrapWithCaching(ds service.DataSource, cfg CachingConfig, obs observer.Observer) (service.DataSource, error) {
+	cacheTTL, err := parseCacheTTL(&cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	switch cfg.Type {
 	case "in_memory":
-		return datasource.NewInMemoryCachingDataSource(ds, obs), nil
+		return datasource.NewInMemoryCachingDataSource(ds, obs,
+			datasource.WithCacheTTL(cacheTTL),
+		), nil
 
 	case "distributed":
 		groupName := cfg.GroupName
@@ -169,6 +173,7 @@ func wrapWithCaching(ds service.DataSource, cfg CachingConfig, obs observer.Obse
 		cachingCfg := datasource.DistributedCachingConfig{
 			GroupName:      groupName,
 			CacheSizeBytes: cacheSize,
+			CacheTTL:       cacheTTL,
 		}
 
 		return datasource.NewDistributedCachingDataSource(ds, cachingCfg), nil

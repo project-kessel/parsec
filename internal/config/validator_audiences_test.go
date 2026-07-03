@@ -79,6 +79,11 @@ func TestTrustStoreRejectsDisallowedAudience(t *testing.T) {
 		Strict:   true,
 	})
 
+	httpRegistry, err := NewHTTPClientRegistry(nil, transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	store, err := NewTrustStore(TrustStoreConfig{
 		Type: "stub_store",
 		Validators: []NamedValidatorConfig{{
@@ -91,7 +96,7 @@ func TestTrustStoreRejectsDisallowedAudience(t *testing.T) {
 				Audiences:   []string{"allowed-aud"},
 			},
 		}},
-	}, transport, trust.NoOpTrustObserver{})
+	}, httpRegistry, trust.NoOpTrustObserver{})
 	if err != nil {
 		t.Fatal(err)
 	}

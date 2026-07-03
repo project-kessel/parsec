@@ -6,6 +6,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
 	"github.com/project-kessel/parsec/internal/probe/otel"
@@ -29,6 +30,7 @@ type Provider struct {
 	bootstrapFields map[string]string
 
 	// Lazily constructed components (cached after first call)
+	httpClientRegistry   *httpclient.Registry
 	trustStore           trust.Store
 	dataSourceRegistry   *service.DataSourceRegistry
 	issuerRegistry       service.Registry
@@ -185,8 +187,12 @@ func (p *Provider) TrustStore() (trust.Store, error) {
 		return nil, err
 	}
 
-	transport := p.HTTPTransport()
-	store, err := NewTrustStore(p.config.TrustStore, transport, obs)
+	registry, err := p.HTTPClientRegistry()
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := NewTrustStore(p.config.TrustStore, registry, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trust store: %w", err)
 	}
@@ -206,8 +212,12 @@ func (p *Provider) DataSourceRegistry() (*service.DataSourceRegistry, error) {
 		return nil, err
 	}
 
-	transport := p.HTTPTransport()
-	registry, err := NewDataSourceRegistry(p.config.DataSources, transport, obs)
+	httpRegistry, err := p.HTTPClientRegistry()
+	if err != nil {
+		return nil, err
+	}
+
+	registry, err := NewDataSourceRegistry(p.config.DataSources, httpRegistry, obs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data source registry: %w", err)
 	}
@@ -356,31 +366,86 @@ func (p *Provider) HTTPFixtureProvider() httpfixture.FixtureProvider {
 	return p.httpFixtureProvider
 }
 
-// AuthzServerTokenTypes returns the configured token types for ext_authz
-func (p *Provider) AuthzServerTokenTypes() ([]server.TokenTypeSpec, error) {
-	// If no authz server config, return nil (will use defaults)
-	if p.config.AuthzServer == nil || len(p.config.AuthzServer.TokenTypes) == 0 {
+// HTTPClientRegistry returns the HTTP client registry, lazily built from
+// configuration. All named clients and the implicit "default" are available.
+func (p *Provider) HTTPClientRegistry() (*httpclient.Registry, error) {
+	if p.httpClientRegistry != nil {
+		return p.httpClientRegistry, nil
+	}
+
+	fixtureTransport := p.HTTPTransport()
+	registry, err := NewHTTPClientRegistry(p.config.HTTPClients, fixtureTransport)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP client registry: %w", err)
+	}
+
+	p.httpClientRegistry = registry
+	return registry, nil
+}
+
+// AuthzCheckPolicy returns the configured authz check policy for ext_authz.
+// When the policy section is present, uses its type and token_types.
+// Falls back to legacy top-level token_types for backward compatibility.
+// Defaults to a StaticAuthenticatedPolicy with the default transaction token
+// spec when nothing is configured.
+func (p *Provider) AuthzCheckPolicy() (server.AuthzCheckPolicy, error) {
+	if p.config.AuthzServer == nil {
+		return server.NewStaticAuthenticatedPolicy(nil), nil
+	}
+
+	policyCfg := p.config.AuthzServer.Policy
+
+	switch policyCfg.Type {
+	case "":
+		// Legacy case predating the policy config.
+		// In this case, use top level token types and
+		// implicitly use the static_authenticated policy.
+
+		// If there is any policy config, though, error. It means type is missing.
+		if len(policyCfg.TokenTypes) > 0 {
+			return nil, fmt.Errorf("authz_server.policy.type is required when policy section is defined")
+		}
+
+		tokenTypes, err := buildTokenTypeSpecs(p.config.AuthzServer.TokenTypes)
+		if err != nil {
+			return nil, err
+		}
+		return server.NewStaticAuthenticatedPolicy(tokenTypes), nil
+	case "static_authenticated":
+		// Prevent ambiguity with legacy fallback path.
+		if len(p.config.AuthzServer.TokenTypes) > 0 {
+			return nil, fmt.Errorf("authz_server.token_types and authz_server.policy are mutually exclusive; use policy.token_types instead")
+		}
+		tokenTypes, err := buildTokenTypeSpecs(policyCfg.TokenTypes)
+		if err != nil {
+			return nil, err
+		}
+		return server.NewStaticAuthenticatedPolicy(tokenTypes), nil
+	default:
+		return nil, fmt.Errorf("unknown authz check policy type: %q", policyCfg.Type)
+	}
+}
+
+// buildTokenTypeSpecs converts config token type entries to server.TokenTypeSpec values.
+func buildTokenTypeSpecs(cfgs []TokenTypeConfig) ([]server.TokenTypeSpec, error) {
+	if len(cfgs) == 0 {
 		return nil, nil
 	}
 
-	var tokenTypes []server.TokenTypeSpec
-	for _, ttCfg := range p.config.AuthzServer.TokenTypes {
+	specs := make([]server.TokenTypeSpec, 0, len(cfgs))
+	for _, ttCfg := range cfgs {
 		if ttCfg.Type == "" {
 			return nil, fmt.Errorf("token type is required")
 		}
-
 		if ttCfg.HeaderName == "" {
 			return nil, fmt.Errorf("header_name is required for token type %s", ttCfg.Type)
 		}
-
-		// Use token type directly as service.TokenType (it's already a URN string)
-		tokenTypes = append(tokenTypes, server.TokenTypeSpec{
+		specs = append(specs, server.TokenTypeSpec{
 			Type:       service.TokenType(ttCfg.Type),
 			HeaderName: ttCfg.HeaderName,
 		})
 	}
-
-	return tokenTypes, nil
+	return specs, nil
 }
 
 // CredentialSources returns the global credential extraction sources shared by

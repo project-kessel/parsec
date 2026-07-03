@@ -14,8 +14,8 @@ func Test_newCredentialSource(t *testing.T) {
 		cfg  CredentialSourceConfig
 		want server.CredentialSource
 	}{
-		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "authorization_bearer_opaque"}, want: server.NewBearerCredentialSource("authorization-bearer")},
-		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie_bearer_opaque", CookieName: "cs_jwt"}, want: server.NewCookieCredentialSource("cs-jwt-cookie", "cs_jwt")},
+		{name: "bearer", cfg: CredentialSourceConfig{Name: "authorization-bearer", Type: "authorization_bearer_opaque"}, want: mustBearerSource(t, "authorization-bearer")},
+		{name: "cookie", cfg: CredentialSourceConfig{Name: "cs-jwt-cookie", Type: "cookie_bearer_opaque", CookieName: "cs_jwt"}, want: mustCookieSource(t, "cs-jwt-cookie", "cs_jwt")},
 	}
 
 	for _, tt := range tests {
@@ -71,4 +71,22 @@ func Test_newCredentialSource(t *testing.T) {
 			t.Fatal("expected error for unknown type")
 		}
 	})
+}
+
+func mustBearerSource(t *testing.T, name string) *server.BearerCredentialSource {
+	t.Helper()
+	src, err := server.NewBearerCredentialSource(name)
+	if err != nil {
+		t.Fatalf("NewBearerCredentialSource(%q): %v", name, err)
+	}
+	return src
+}
+
+func mustCookieSource(t *testing.T, name, cookieName string) *server.CookieCredentialSource {
+	t.Helper()
+	src, err := server.NewCookieCredentialSource(name, cookieName)
+	if err != nil {
+		t.Fatalf("NewCookieCredentialSource(%q, %q): %v", name, cookieName, err)
+	}
+	return src
 }

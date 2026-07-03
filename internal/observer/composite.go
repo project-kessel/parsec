@@ -151,6 +151,30 @@ func (c *compositeAll) JWTValidateStarted(ctx context.Context, issuer string) (c
 	return ctx, &compositeJWTValidateProbe{probes}
 }
 
+func (c *compositeAll) LuaValidateStarted(ctx context.Context, validatorName string) (context.Context, trust.LuaValidateProbe) {
+	probes := make([]trust.LuaValidateProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.LuaValidateStarted(ctx, validatorName)
+	}
+	return ctx, &compositeLuaValidateProbe{probes}
+}
+
+func (c *compositeAll) InMemoryValidateStarted(ctx context.Context, validatorName string) (context.Context, trust.InMemoryValidateProbe) {
+	probes := make([]trust.InMemoryValidateProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.InMemoryValidateStarted(ctx, validatorName)
+	}
+	return ctx, &compositeInMemoryValidateProbe{probes}
+}
+
+func (c *compositeAll) DistributedValidateStarted(ctx context.Context, validatorName string) (context.Context, trust.DistributedValidateProbe) {
+	probes := make([]trust.DistributedValidateProbe, len(c.children))
+	for i, ch := range c.children {
+		ctx, probes[i] = ch.DistributedValidateStarted(ctx, validatorName)
+	}
+	return ctx, &compositeDistributedValidateProbe{probes}
+}
+
 func (c *compositeAll) InitPopulationStarted(ctx context.Context) (context.Context, server.InitPopulationProbe) {
 	probes := make([]server.InitPopulationProbe, len(c.children))
 	for i, ch := range c.children {
@@ -464,6 +488,109 @@ func (m *compositeJWTValidateProbe) End() {
 	}
 }
 
+type compositeLuaValidateProbe struct{ probes []trust.LuaValidateProbe }
+
+func (m *compositeLuaValidateProbe) ScriptLoadFailed(err error) {
+	for _, p := range m.probes {
+		p.ScriptLoadFailed(err)
+	}
+}
+func (m *compositeLuaValidateProbe) ScriptExecutionFailed(err error) {
+	for _, p := range m.probes {
+		p.ScriptExecutionFailed(err)
+	}
+}
+func (m *compositeLuaValidateProbe) InvalidReturnType(got string) {
+	for _, p := range m.probes {
+		p.InvalidReturnType(got)
+	}
+}
+func (m *compositeLuaValidateProbe) TokenInvalid(err error) {
+	for _, p := range m.probes {
+		p.TokenInvalid(err)
+	}
+}
+func (m *compositeLuaValidateProbe) ValidationRejected() {
+	for _, p := range m.probes {
+		p.ValidationRejected()
+	}
+}
+func (m *compositeLuaValidateProbe) ResultConversionFailed(err error) {
+	for _, p := range m.probes {
+		p.ResultConversionFailed(err)
+	}
+}
+func (m *compositeLuaValidateProbe) ValidationCompleted() {
+	for _, p := range m.probes {
+		p.ValidationCompleted()
+	}
+}
+func (m *compositeLuaValidateProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeInMemoryValidateProbe struct {
+	probes []trust.InMemoryValidateProbe
+}
+
+func (m *compositeInMemoryValidateProbe) CacheKeyFailed(err error) {
+	for _, p := range m.probes {
+		p.CacheKeyFailed(err)
+	}
+}
+func (m *compositeInMemoryValidateProbe) CacheHit() {
+	for _, p := range m.probes {
+		p.CacheHit()
+	}
+}
+func (m *compositeInMemoryValidateProbe) CacheExpired() {
+	for _, p := range m.probes {
+		p.CacheExpired()
+	}
+}
+func (m *compositeInMemoryValidateProbe) CacheMiss() {
+	for _, p := range m.probes {
+		p.CacheMiss()
+	}
+}
+func (m *compositeInMemoryValidateProbe) SourceFailed(err error) {
+	for _, p := range m.probes {
+		p.SourceFailed(err)
+	}
+}
+func (m *compositeInMemoryValidateProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type compositeDistributedValidateProbe struct {
+	probes []trust.DistributedValidateProbe
+}
+
+func (m *compositeDistributedValidateProbe) CacheKeyFailed(err error) {
+	for _, p := range m.probes {
+		p.CacheKeyFailed(err)
+	}
+}
+func (m *compositeDistributedValidateProbe) GetFailed(err error) {
+	for _, p := range m.probes {
+		p.GetFailed(err)
+	}
+}
+func (m *compositeDistributedValidateProbe) ResultExpired() {
+	for _, p := range m.probes {
+		p.ResultExpired()
+	}
+}
+func (m *compositeDistributedValidateProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
 type compositeInitPopulationProbe struct{ probes []server.InitPopulationProbe }
 
 func (m *compositeInitPopulationProbe) InitialCachePopulationFailed(err error) {
@@ -650,6 +777,36 @@ func (m *compositeAuthzCheckProbe) SubjectValidationSucceeded(subject *trust.Res
 func (m *compositeAuthzCheckProbe) SubjectValidationFailed(err error) {
 	for _, p := range m.probes {
 		p.SubjectValidationFailed(err)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) SubjectAnonymous() {
+	for _, p := range m.probes {
+		p.SubjectAnonymous()
+	}
+}
+
+func (m *compositeAuthzCheckProbe) PolicyDecisionIssue(tokenTypeCount int, scope string, reason string) {
+	for _, p := range m.probes {
+		p.PolicyDecisionIssue(tokenTypeCount, scope, reason)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) PolicyDecisionAllowWithoutIssue(reason string) {
+	for _, p := range m.probes {
+		p.PolicyDecisionAllowWithoutIssue(reason)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) PolicyDecisionDeny(reason string) {
+	for _, p := range m.probes {
+		p.PolicyDecisionDeny(reason)
+	}
+}
+
+func (m *compositeAuthzCheckProbe) PolicyEvaluationFailed(err error) {
+	for _, p := range m.probes {
+		p.PolicyEvaluationFailed(err)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -17,23 +16,11 @@ type RequestOptions func(*http.Request) error
 
 // httpServiceConfig collects option values during construction.
 type httpServiceConfig struct {
-	timeout        time.Duration
-	transport      http.RoundTripper
 	requestOptions RequestOptions
 }
 
 // HTTPServiceOption configures optional settings for NewHTTPService.
 type HTTPServiceOption func(*httpServiceConfig)
-
-// WithTimeout sets the HTTP request timeout (default: 30s).
-func WithTimeout(d time.Duration) HTTPServiceOption {
-	return func(c *httpServiceConfig) { c.timeout = d }
-}
-
-// WithTransport sets the HTTP transport (default: http.DefaultTransport).
-func WithTransport(rt http.RoundTripper) HTTPServiceOption {
-	return func(c *httpServiceConfig) { c.transport = rt }
-}
 
 // WithRequestOptions sets a function that processes requests before sending.
 func WithRequestOptions(ro RequestOptions) HTTPServiceOption {
@@ -49,23 +36,24 @@ type HTTPService struct {
 
 // NewHTTPService creates a new HTTP service. ctx is required and propagated
 // to every outgoing request, enabling cancellation, tracing, and request-ID
-// propagation. Optional settings are provided via HTTPServiceOption values.
-func NewHTTPService(ctx context.Context, opts ...HTTPServiceOption) *HTTPService {
-	cfg := httpServiceConfig{timeout: 30 * time.Second}
+// propagation. client is the fully-configured HTTP client (auth, timeout,
+// transport already set) and must not be nil. Optional settings are provided
+// via HTTPServiceOption.
+func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServiceOption) (*HTTPService, error) {
+	if client == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+
+	var cfg httpServiceConfig
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
-	transport := cfg.transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-
 	return &HTTPService{
 		ctx:            ctx,
-		client:         &http.Client{Timeout: cfg.timeout, Transport: transport},
+		client:         client,
 		requestOptions: cfg.requestOptions,
-	}
+	}, nil
 }
 
 // Register adds the HTTP service to the Lua state

@@ -139,14 +139,14 @@ Each service instance can be registered to multiple Lua states. However, Lua sta
 ### HTTP Service
 
 ```go
-// Simple configuration with just timeout
-httpService := lua.NewHTTPService(ctx, lua.WithTimeout(30*time.Second))
+// Simple usage with a pre-configured HTTP client (must not be nil)
+client := &http.Client{Timeout: 30 * time.Second}
+httpService, err := lua.NewHTTPService(ctx, client)
 
-// Full configuration with request options
-httpService := lua.NewHTTPService(ctx,
-    lua.WithTimeout(30*time.Second),
+// With request options (per-request hooks applied before sending)
+httpService, err := lua.NewHTTPService(ctx, client,
     lua.WithRequestOptions(func(req *http.Request) error {
-        req.Header.Set("Authorization", "Bearer "+apiKey)
+        req.Header.Set("X-Tenant-ID", tenantFromContext(ctx))
         return nil
     }),
 )
@@ -293,7 +293,7 @@ function fetch(input)
   }
 end
 
-function cache_key(input)
+function fetch_cache_key(input)
   -- Only cache based on subject
   return {
     subject = {

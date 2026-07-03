@@ -48,6 +48,9 @@ func TestCredentialContextFromCheckRequest(t *testing.T) {
 		if tc.Headers["cookie"] != "a=b" {
 			t.Errorf("expected cookie header, got %q", tc.Headers["cookie"])
 		}
+		if len(tc.Cookies) != 1 || tc.Cookies[0].Name != "a" || tc.Cookies[0].Value != "b" {
+			t.Errorf("expected one parsed cookie a=b, got %v", tc.Cookies)
+		}
 		if tc.TLSPeer != nil {
 			t.Error("expected nil TLSPeer for HTTP check request")
 		}
@@ -106,9 +109,32 @@ func TestCredentialContextFromCheckRequest(t *testing.T) {
 			},
 		}
 
-		_, err := CredentialContextFromCheckRequest(req)
+		cc, err := CredentialContextFromCheckRequest(req)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if cc.Cookies != nil {
+			t.Errorf("expected nil Cookies when no cookie header present, got %v", cc.Cookies)
+		}
+	})
+
+	t.Run("returns error for malformed cookie header", func(t *testing.T) {
+		t.Parallel()
+		req := &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Headers: map[string]string{
+							"cookie": "=no-name",
+						},
+					},
+				},
+			},
+		}
+
+		_, err := CredentialContextFromCheckRequest(req)
+		if err == nil {
+			t.Fatal("expected error for malformed cookie header")
 		}
 	})
 }
@@ -124,7 +150,10 @@ func TestCredentialContextFromGRPC(t *testing.T) {
 		})
 		ctx := metadata.NewIncomingContext(context.Background(), md)
 
-		tc := CredentialContextFromGRPC(ctx)
+		tc, err := CredentialContextFromGRPC(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if tc.Headers["authorization"] != "Bearer grpc-token" {
 			t.Errorf("expected authorization header, got %q", tc.Headers["authorization"])
@@ -149,7 +178,10 @@ func TestCredentialContextFromGRPC(t *testing.T) {
 			},
 		})
 
-		tc := CredentialContextFromGRPC(ctx)
+		tc, err := CredentialContextFromGRPC(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if tc.TLSPeer == nil {
 			t.Fatal("expected TLSPeer to be set")
@@ -164,7 +196,10 @@ func TestCredentialContextFromGRPC(t *testing.T) {
 
 	t.Run("empty context produces empty CredentialContext", func(t *testing.T) {
 		t.Parallel()
-		tc := CredentialContextFromGRPC(context.Background())
+		tc, err := CredentialContextFromGRPC(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if tc.Headers != nil {
 			t.Errorf("expected nil headers, got %v", tc.Headers)
@@ -178,10 +213,26 @@ func TestCredentialContextFromGRPC(t *testing.T) {
 		t.Parallel()
 		ctx := peer.NewContext(context.Background(), &peer.Peer{})
 
-		tc := CredentialContextFromGRPC(ctx)
+		tc, err := CredentialContextFromGRPC(ctx)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
 		if tc.TLSPeer != nil {
 			t.Error("expected nil TLSPeer for non-TLS peer")
+		}
+	})
+
+	t.Run("returns error for malformed cookie header", func(t *testing.T) {
+		t.Parallel()
+		md := metadata.New(map[string]string{
+			"cookie": "=no-name",
+		})
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+
+		_, err := CredentialContextFromGRPC(ctx)
+		if err == nil {
+			t.Fatal("expected error for malformed cookie header")
 		}
 	})
 }

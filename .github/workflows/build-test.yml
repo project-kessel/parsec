@@ -17,7 +17,7 @@ jobs:
     name: Build & run tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
       - name: Setup Go
@@ -45,7 +45,7 @@ jobs:
           path: coverage.txt
       - name: Upload main coverage to Codecov
         id: code-cov-report
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: coverage.txt
           flags: main

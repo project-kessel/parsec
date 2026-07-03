@@ -15,7 +15,6 @@ import (
 	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/issuer"
-	"github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/mapper"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -150,13 +149,13 @@ function fetch(input)
     end
     return nil
 end`,
-		HTTPOptions: []lua.HTTPServiceOption{
-			lua.WithTimeout(30 * time.Second),
-			lua.WithTransport(httpfixture.NewTransport(httpfixture.TransportConfig{
+		HTTPClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: allFixtures,
 				Strict:   true,
 				Clock:    clk,
-			})),
+			}),
 		},
 	})
 	if err != nil {

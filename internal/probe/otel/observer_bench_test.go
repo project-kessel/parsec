@@ -69,7 +69,7 @@ func BenchmarkProbeRecord_WithResult_Error(b *testing.B) {
 }
 
 // BenchmarkProbeRecord_KnownAtStartAttrs benchmarks a probe with attributes
-// known at creation (issuer + result + status = 3 KeyValues).
+// known at creation (validator_type + validator + result + status = 4 KeyValues).
 func BenchmarkProbeRecord_KnownAtStartAttrs(b *testing.B) {
 	p := benchProvider(b)
 	obs, err := NewObserver(p, "/metrics")

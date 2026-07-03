@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/project-kessel/parsec/internal/httpfixture"
-	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -49,12 +48,12 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPOptions: []luaservices.HTTPServiceOption{
-			luaservices.WithTimeout(5 * time.Second),
-			luaservices.WithTransport(httpfixture.NewTransport(httpfixture.TransportConfig{
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
-			})),
+			}),
 		},
 	})
 	if err != nil {
@@ -136,12 +135,12 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPOptions: []luaservices.HTTPServiceOption{
-			luaservices.WithTimeout(5 * time.Second),
-			luaservices.WithTransport(httpfixture.NewTransport(httpfixture.TransportConfig{
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
-			})),
+			}),
 		},
 	})
 	if err != nil {
@@ -227,12 +226,12 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPOptions: []luaservices.HTTPServiceOption{
-			luaservices.WithTimeout(5 * time.Second),
-			luaservices.WithTransport(httpfixture.NewTransport(httpfixture.TransportConfig{
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
-			})),
+			}),
 		},
 	})
 	if err != nil {
@@ -320,12 +319,12 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPOptions: []luaservices.HTTPServiceOption{
-			luaservices.WithTimeout(5 * time.Second),
-			luaservices.WithTransport(httpfixture.NewTransport(httpfixture.TransportConfig{
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
-			})),
+			}),
 		},
 	})
 	if err != nil {
@@ -369,8 +368,8 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPOptions: []luaservices.HTTPServiceOption{
-			luaservices.WithTimeout(5 * time.Second),
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
 		},
 	})
 	if err != nil {
@@ -419,7 +418,7 @@ function fetch(input)
 	return nil
 end
 
-function cache_key(input)
+function fetch_cache_key(input)
 	return {
 		subject = {
 			subject = input.subject.subject
@@ -438,15 +437,13 @@ end
 	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPOptions: []luaservices.HTTPServiceOption{
-			luaservices.WithTimeout(5 * time.Second),
-			luaservices.WithTransport(httpfixture.NewTransport(httpfixture.TransportConfig{
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
-			})),
+			}),
 		},
-		CacheKeyFunc: "cache_key",
-		CacheTTL:     10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("failed to create data source: %v", err)

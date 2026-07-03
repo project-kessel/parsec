@@ -1,4 +1,3 @@
-FIPS_ENABLED?=true
 ifeq ($(GO),)
 GO:=$(shell command -v go)
 endif
@@ -8,20 +7,10 @@ GOPATH:=$(shell $(GO) env GOPATH)
 GOOS?=$(shell $(GO) env GOOS)
 GOARCH?=$(shell $(GO) env GOARCH)
 GOBIN?=$(shell $(GO) env GOBIN)
-GOFLAGS_MOD ?=
 
-GOENV=GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 GOFLAGS="${GOFLAGS_MOD}"
+GOENV=GOOS=${GOOS} GOARCH=${GOARCH} GOEXPERIMENT=jsonv2
+GOTESTENV=GOEXPERIMENT=jsonv2
 GOBUILDFLAGS=-gcflags="all=-trimpath=${GOPATH}" -asmflags="all=-trimpath=${GOPATH}"
-
-ifeq (${FIPS_ENABLED}, true)
-GOFLAGS_MOD+=-tags=fips_enabled
-GOFLAGS_MOD:=$(strip ${GOFLAGS_MOD})
-GOENV+=GOEXPERIMENT=jsonv2,strictfipsruntime,boringcrypto
-GOENV:=$(strip ${GOENV})
-else
-GOENV+=GOEXPERIMENT=jsonv2
-GOENV:=$(strip ${GOENV})
-endif
 
 IMAGE ?="quay.io/cloudservices/kessel-parsec"
 IMAGE_TAG=$(git rev-parse --short=7 HEAD)
@@ -57,13 +46,7 @@ api:
 .PHONY: build
 # build
 build:
-	$(warning Setting GOEXPERIMENT=strictfipsruntime,boringcrypto - this generally causes builds to fail unless building inside the provided Dockerfile. If building locally, run `make local-build`)
-	mkdir -p bin/ && ${GOENV} GOOS=${GOOS} ${GO} build ${GOBUILDFLAGS} -ldflags "-X cmd.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
-
-.PHONY: local-build
-# local-build to ensure FIPS is not enabled which would likely result in a failed build locally
-local-build:
-	mkdir -p bin/ && $(GO) build -ldflags "-X cmd.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
+	mkdir -p bin/ && ${GOENV} ${GO} build ${GOBUILDFLAGS} -ldflags "-X cmd.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
 
 .PHONY: docker-build-push
 docker-build-push:
@@ -79,7 +62,7 @@ clean:
 test:
 	@echo ""
 	@echo "Running tests."
-	@$(GO) test ./... -count=1 -race -short -covermode=atomic -coverprofile=coverage.txt
+	@${GOTESTENV} $(GO) test ./... -count=1 -race -short -covermode=atomic -coverprofile=coverage.txt
 	@echo "Overall test coverage:"
 	@$(GO) tool cover -func=coverage.txt | grep total: | awk '{print $$3}'
 
@@ -115,14 +98,14 @@ pr-check:
 	make generate;
 	make test;
 	make lint;
-	make local-build;
+	make build;
 
 .PHONY: run
 # run parsec locally
-run: local-build
+run: build
 	./bin/parsec serve
 
-run-help: local-build
+run-help: build
 	./bin/parsec serve --help
 
 help:

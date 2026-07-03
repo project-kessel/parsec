@@ -15,7 +15,6 @@ import (
 type mockCacheableDataSource struct {
 	name       string
 	fetchCount int // Track how many times Fetch is called
-	ttl        time.Duration
 }
 
 func (m *mockCacheableDataSource) Name() string {
@@ -41,10 +40,6 @@ func (m *mockCacheableDataSource) CacheKey(input *service.DataSourceInput) servi
 	return masked
 }
 
-func (m *mockCacheableDataSource) CacheTTL() time.Duration {
-	return m.ttl
-}
-
 // mockNonCacheableDataSource doesn't implement Cacheable
 type mockNonCacheableDataSource struct {
 	name       string
@@ -63,6 +58,30 @@ func (m *mockNonCacheableDataSource) Fetch(ctx context.Context, input *service.D
 	}, nil
 }
 
+// recordingCacheFetchProbe captures which cache-outcome method was called.
+type recordingCacheFetchProbe struct {
+	NoOpCacheFetchProbe
+	hitCalled     bool
+	missCalled    bool
+	expiredCalled bool
+}
+
+func (p *recordingCacheFetchProbe) CacheHit()     { p.hitCalled = true }
+func (p *recordingCacheFetchProbe) CacheMiss()    { p.missCalled = true }
+func (p *recordingCacheFetchProbe) CacheExpired() { p.expiredCalled = true }
+
+// recordingCacheObserver collects a probe per Fetch call.
+type recordingCacheObserver struct {
+	NoOpCacheObserver
+	probes []*recordingCacheFetchProbe
+}
+
+func (o *recordingCacheObserver) CacheFetchStarted(ctx context.Context, _ string) (context.Context, CacheFetchProbe) {
+	p := &recordingCacheFetchProbe{}
+	o.probes = append(o.probes, p)
+	return ctx, p
+}
+
 // newTestCachingDataSource wraps a source with in-memory caching and a
 // NoOpDataSourceObserver. Callers can pass additional options (e.g. WithClock).
 func newTestCachingDataSource(t *testing.T, source service.DataSource, opts ...InMemoryCachingDataSourceOption) service.DataSource {
@@ -76,10 +95,9 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 	t.Run("caches results for cacheable source", func(t *testing.T) {
 		source := &mockCacheableDataSource{
 			name: "test-source",
-			ttl:  1 * time.Hour,
 		}
 
-		cached := newTestCachingDataSource(t, source)
+		cached := newTestCachingDataSource(t, source, WithCacheTTL(1*time.Hour))
 
 		input := &service.DataSourceInput{
 			Subject: &trust.Result{
@@ -118,10 +136,9 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 
 		source := &mockCacheableDataSource{
 			name: "test-source",
-			ttl:  50 * time.Millisecond,
 		}
 
-		cached := newTestCachingDataSource(t, source, WithClock(clk))
+		cached := newTestCachingDataSource(t, source, WithClock(clk), WithCacheTTL(50*time.Millisecond))
 
 		input := &service.DataSourceInput{
 			Subject: &trust.Result{
@@ -154,10 +171,9 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 	t.Run("different cache keys result in different cache entries", func(t *testing.T) {
 		source := &mockCacheableDataSource{
 			name: "test-source",
-			ttl:  1 * time.Hour,
 		}
 
-		cached := newTestCachingDataSource(t, source)
+		cached := newTestCachingDataSource(t, source, WithCacheTTL(1*time.Hour))
 
 		input1 := &service.DataSourceInput{
 			Subject: &trust.Result{
@@ -208,10 +224,9 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 
 		source := &mockCacheableDataSource{
 			name: "test-source",
-			ttl:  50 * time.Millisecond,
 		}
 
-		cached := newTestCachingDataSource(t, source, WithClock(clk)).(*InMemoryCachingDataSource)
+		cached := newTestCachingDataSource(t, source, WithClock(clk), WithCacheTTL(50*time.Millisecond)).(*InMemoryCachingDataSource)
 
 		input := &service.DataSourceInput{
 			Subject: &trust.Result{
@@ -236,4 +251,55 @@ func TestInMemoryCachingDataSource(t *testing.T) {
 			t.Errorf("expected cache size 0 after cleanup, got %d", cached.Size())
 		}
 	})
+}
+
+func TestInMemoryCachingDataSource_CacheOutcomesAreMutuallyExclusive(t *testing.T) {
+	clk := clock.NewFixtureClock(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
+	source := &mockCacheableDataSource{name: "test-source"}
+	obs := &recordingCacheObserver{}
+	cached := NewInMemoryCachingDataSource(source, obs, WithClock(clk), WithCacheTTL(50*time.Millisecond))
+
+	input := &service.DataSourceInput{
+		Subject: &trust.Result{Subject: "user@example.com"},
+	}
+
+	// Call 0: cold miss — entry not in cache.
+	if _, err := cached.Fetch(context.Background(), input); err != nil {
+		t.Fatalf("cold miss: %v", err)
+	}
+	p := obs.probes[0]
+	if !p.missCalled {
+		t.Fatal("cold miss: expected CacheMiss")
+	}
+	if p.hitCalled || p.expiredCalled {
+		t.Fatalf("cold miss: unexpected hit=%v expired=%v", p.hitCalled, p.expiredCalled)
+	}
+
+	// Call 1: cache hit.
+	if _, err := cached.Fetch(context.Background(), input); err != nil {
+		t.Fatalf("cache hit: %v", err)
+	}
+	p = obs.probes[1]
+	if !p.hitCalled {
+		t.Fatal("cache hit: expected CacheHit")
+	}
+	if p.missCalled || p.expiredCalled {
+		t.Fatalf("cache hit: unexpected miss=%v expired=%v", p.missCalled, p.expiredCalled)
+	}
+
+	// Call 2: expired — entry found but stale. CacheExpired only, not CacheMiss.
+	clk.Advance(100 * time.Millisecond)
+	if _, err := cached.Fetch(context.Background(), input); err != nil {
+		t.Fatalf("expired: %v", err)
+	}
+	p = obs.probes[2]
+	if !p.expiredCalled {
+		t.Fatal("expired: expected CacheExpired")
+	}
+	if p.missCalled {
+		t.Fatal("expired: CacheMiss must not be called when CacheExpired was called")
+	}
+	if p.hitCalled {
+		t.Fatalf("expired: unexpected CacheHit")
+	}
 }

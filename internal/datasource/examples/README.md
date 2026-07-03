@@ -70,8 +70,10 @@ package main
 
 import (
     "io/ioutil"
+    "net/http"
     "time"
     "github.com/project-kessel/parsec/internal/datasource"
+    luaservices "github.com/project-kessel/parsec/internal/lua"
 )
 
 func main() {
@@ -81,25 +83,32 @@ func main() {
         panic(err)
     }
     
-    // Create data source
-    ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
-        Name:        "user-data",
-        Script:      string(script),
-        Config: map[string]interface{}{
-            "api_endpoint": "https://api.example.com",
-            "api_key":      "secret123",
+    configSource := luaservices.NewMapConfigSource(map[string]interface{}{
+        "api_endpoint": "https://api.example.com",
+        "api_key":      "secret123",
+    })
+
+    // Create cacheable data source. The script must define fetch_cache_key(input).
+    ds, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourceConfig{
+        Name:         "user-data",
+        Script:       string(script),
+        ConfigSource: configSource,
+        HTTPClient: &http.Client{Timeout: 30 * time.Second},
+        RequestOptions: func(req *http.Request) error {
+            apiKey, _ := configSource.Get("api_key")
+            req.Header.Set("Authorization", "Bearer "+apiKey.(string))
+            return nil
         },
-        HTTPTimeout: 30 * time.Second,
-        Cacheable:   true,
-        CacheKeyFunc: "cache_key",
-        CacheTTL:    5 * time.Minute,
     })
     if err != nil {
         panic(err)
     }
-    
-    // Use the data source
-    // ...
+
+    // Wrap with caching (TTL is configured on the wrapper, not the data source)
+    cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
+        datasource.WithCacheTTL(5 * time.Minute),
+    )
+    _ = cachedDS
 }
 ```
 
@@ -228,7 +237,7 @@ local url = base_url .. "/users/" .. subject .. "/data"
 2. **Handle Errors Gracefully**: Use error() for fatal errors, return nil for non-fatal
 3. **Add Context**: Enrich response data with metadata (fetched_at, source, etc.)
 4. **Use Helper Functions**: Extract common logic into helper functions
-5. **Cache Wisely**: Only include fields in cache_key that affect the result
+5. **Cache Wisely**: Only include fields in fetch_cache_key that affect the result
 6. **Log Debug Info**: Use print() to output debug information
 7. **Test Thoroughly**: Write tests for your scripts before deployment
 
@@ -237,7 +246,7 @@ local url = base_url .. "/users/" .. subject .. "/data"
 ### Script Won't Load
 - Check Lua syntax
 - Ensure fetch() function is defined
-- Verify cache_key() function exists if CacheKeyFunc is set
+- Verify fetch_cache_key() function exists for cacheable data sources
 
 ### HTTP Errors
 - Check API endpoint configuration
@@ -251,8 +260,8 @@ local url = base_url .. "/users/" .. subject .. "/data"
 - Handle null values appropriately
 
 ### Cache Issues
-- Verify cache_key() returns consistent results
-- Ensure cache_key() includes all relevant fields
+- Verify fetch_cache_key() returns consistent results
+- Ensure fetch_cache_key() includes all relevant fields
 - Check TTL is appropriate for your use case
 
 ## Additional Resources
@@ -260,4 +269,3 @@ local url = base_url .. "/users/" .. subject .. "/data"
 - [LUA_DATASOURCE.md](../LUA_DATASOURCE.md) - Full documentation
 - [internal/lua/README.md](../../lua/README.md) - Lua services documentation
 - Test files in `internal/datasource/lua_datasource_test.go` for more examples
-

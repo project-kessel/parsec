@@ -41,7 +41,7 @@ Parsec uses [buf](https://buf.build/) to manage protobuf definitions. Proto file
    ```
 3. Verify generated code compiles:
    ```bash
-   make local-build
+   make build
    ```
 
 ## Running Tests
@@ -60,14 +60,6 @@ make test-coverage
 
 ## Building
 
-For local development builds (no FIPS):
-
-```bash
-make local-build
-```
-
-For production FIPS-enabled builds (typically done inside the Dockerfile):
-
 ```bash
 make build
 ```
@@ -80,4 +72,4 @@ Before submitting a PR, run the full pre-check suite:
 make pr-check
 ```
 
-This runs `generate`, `test`, `lint`, and `local-build` to ensure everything passes.
+This runs `generate`, `test`, `lint`, and `build` to ensure everything passes.

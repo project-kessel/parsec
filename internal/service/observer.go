@@ -121,6 +121,26 @@ type AuthzCheckProbe interface {
 	// SubjectValidationFailed is called when subject credential validation fails.
 	SubjectValidationFailed(err error)
 
+	// SubjectAnonymous is called when no subject credential is found and the
+	// subject is treated as anonymous.
+	SubjectAnonymous()
+
+	// PolicyDecisionIssue is called when the authz check policy decides to
+	// issue tokens.
+	PolicyDecisionIssue(tokenTypeCount int, scope string, reason string)
+
+	// PolicyDecisionAllowWithoutIssue is called when the authz check policy
+	// decides to allow the request without issuing tokens.
+	PolicyDecisionAllowWithoutIssue(reason string)
+
+	// PolicyDecisionDeny is called when the authz check policy decides to
+	// deny the request.
+	PolicyDecisionDeny(reason string)
+
+	// PolicyEvaluationFailed is called when the authz check policy fails to
+	// evaluate (as opposed to a deliberate denial).
+	PolicyEvaluationFailed(err error)
+
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
 }
@@ -173,6 +193,11 @@ func (NoOpAuthzCheckProbe) SubjectCredentialExtracted(trust.Credential, []string
 func (NoOpAuthzCheckProbe) SubjectCredentialExtractionFailed(error)               {}
 func (NoOpAuthzCheckProbe) SubjectValidationSucceeded(*trust.Result)              {}
 func (NoOpAuthzCheckProbe) SubjectValidationFailed(error)                         {}
+func (NoOpAuthzCheckProbe) SubjectAnonymous()                                     {}
+func (NoOpAuthzCheckProbe) PolicyDecisionIssue(int, string, string)               {}
+func (NoOpAuthzCheckProbe) PolicyDecisionAllowWithoutIssue(string)                {}
+func (NoOpAuthzCheckProbe) PolicyDecisionDeny(string)                             {}
+func (NoOpAuthzCheckProbe) PolicyEvaluationFailed(error)                          {}
 func (NoOpAuthzCheckProbe) End()                                                  {}
 
 // --- NoOp observer implementations ---

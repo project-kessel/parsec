@@ -27,6 +27,10 @@ var (
 	resultSubjectTokenValidationFailed      = attribute.String("result", "subject_token_validation_failed")
 	resultSubjectCredentialExtractionFailed = attribute.String("result", "subject_credential_extraction_failed")
 	resultSubjectValidationFailed           = attribute.String("result", "subject_validation_failed")
+	resultPolicyIssue                       = attribute.String("result", "policy_issue")
+	resultPolicyAllowWithoutIssue           = attribute.String("result", "policy_allow_without_issue")
+	resultPolicyDenied                      = attribute.String("result", "policy_denied")
+	resultPolicyEvaluationFailed            = attribute.String("result", "policy_evaluation_failed")
 )
 
 // serviceObserver implements [service.ServiceObserver] using OTel histograms.
@@ -186,6 +190,20 @@ func (p *authzCheckProbe) SubjectCredentialExtractionFailed(_ error) {
 func (p *authzCheckProbe) SubjectValidationFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = resultSubjectValidationFailed
+}
+func (p *authzCheckProbe) PolicyDecisionIssue(_ int, _ string, _ string) {
+	p.result = resultPolicyIssue
+}
+func (p *authzCheckProbe) PolicyDecisionAllowWithoutIssue(_ string) {
+	p.result = resultPolicyAllowWithoutIssue
+}
+func (p *authzCheckProbe) PolicyDecisionDeny(_ string) {
+	p.status = errorStatusAttr
+	p.result = resultPolicyDenied
+}
+func (p *authzCheckProbe) PolicyEvaluationFailed(_ error) {
+	p.status = errorStatusAttr
+	p.result = resultPolicyEvaluationFailed
 }
 func (p *authzCheckProbe) End() {
 	attrs := metric.WithAttributeSet(attribute.NewSet(p.result, p.status))

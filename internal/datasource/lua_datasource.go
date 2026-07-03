@@ -3,7 +3,7 @@ package datasource
 import (
 	"context"
 	"fmt"
-	"time"
+	"net/http"
 
 	lua "github.com/yuin/gopher-lua"
 
@@ -13,14 +13,21 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
+const fetchCacheKeyFuncName = "fetch_cache_key"
+
 // LuaDataSource executes a Lua script to fetch data.
 // The script has access to http, config, and json services.
+//
+// The Lua script is compiled once at construction time; each call to
+// [LuaDataSource.Fetch] loads the pre-compiled bytecode into a fresh
+// LState, avoiding repeated parsing and compilation.
 type LuaDataSource struct {
-	name         string
-	script       string
-	configSource luaservices.ConfigSource
-	httpOpts     []luaservices.HTTPServiceOption
-	observer     LuaObserver
+	name           string
+	proto          *lua.FunctionProto
+	configSource   luaservices.ConfigSource
+	httpClient     *http.Client
+	requestOptions luaservices.RequestOptions
+	observer       LuaObserver
 }
 
 // LuaDataSourceConfig configures a Lua data source
@@ -46,15 +53,22 @@ type LuaDataSourceConfig struct {
 	// If nil, an empty MapConfigSource will be used
 	ConfigSource luaservices.ConfigSource
 
-	// HTTPOptions provides HTTP service options including timeout, transport, etc.
-	// If nil, default HTTP settings (30s timeout) will be used.
-	HTTPOptions []luaservices.HTTPServiceOption
+	// HTTPClient is the pre-configured HTTP client for the Lua http service.
+	// If nil, http.DefaultClient will be used.
+	HTTPClient *http.Client
+
+	// RequestOptions is a programmatic hook that augments outgoing HTTP requests
+	// (e.g. injecting headers or query params from Go context). Optional.
+	RequestOptions luaservices.RequestOptions
 
 	// Observer for Lua-specific execution events. If nil, defaults to NoOpObserver.
 	Observer LuaObserver
 }
 
-// NewLuaDataSource creates a new Lua data source
+// NewLuaDataSource creates a new Lua data source.
+//
+// The script is compiled once during construction; see [LuaDataSource] for
+// the runtime lifecycle.
 func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 	if config.Name == "" {
 		return nil, fmt.Errorf("data source name is required")
@@ -67,17 +81,12 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		config.ConfigSource = luaservices.NewMapConfigSource(nil)
 	}
 
-	// Validate that the script has a fetch function
-	L := lua.NewState()
-	defer L.Close()
-
-	if err := L.DoString(config.Script); err != nil {
-		return nil, fmt.Errorf("failed to load script: %w", err)
+	proto, err := luaservices.CompileScript(config.Script, config.Name)
+	if err != nil {
+		return nil, err
 	}
-
-	fetchFunc := L.GetGlobal("fetch")
-	if fetchFunc.Type() != lua.LTFunction {
-		return nil, fmt.Errorf("script must define a 'fetch' function")
+	if err := luaservices.ValidateFunction(proto, "fetch"); err != nil {
+		return nil, err
 	}
 
 	obs := config.Observer
@@ -85,12 +94,18 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		obs = NoOpDataSourceObserver{}
 	}
 
+	httpClient := config.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
 	return &LuaDataSource{
-		name:         config.Name,
-		script:       config.Script,
-		configSource: config.ConfigSource,
-		httpOpts:     config.HTTPOptions,
-		observer:     obs,
+		name:           config.Name,
+		proto:          proto,
+		configSource:   config.ConfigSource,
+		httpClient:     httpClient,
+		requestOptions: config.RequestOptions,
+		observer:       obs,
 	}, nil
 }
 
@@ -104,10 +119,22 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	ctx, p := ds.observer.LuaFetchStarted(ctx, ds.name)
 	defer p.End()
 
+	if input == nil {
+		return nil, fmt.Errorf("nil input")
+	}
+
 	L := lua.NewState()
 	defer L.Close()
 
-	httpService := luaservices.NewHTTPService(ctx, ds.httpOpts...)
+	var httpOpts []luaservices.HTTPServiceOption
+	if ds.requestOptions != nil {
+		httpOpts = append(httpOpts, luaservices.WithRequestOptions(ds.requestOptions))
+	}
+	httpService, err := luaservices.NewHTTPService(ctx, ds.httpClient, httpOpts...)
+	if err != nil {
+		p.ScriptExecutionFailed(err)
+		return nil, fmt.Errorf("failed to create http service: %w", err)
+	}
 	httpService.Register(L)
 
 	configService := luaservices.NewConfigService(ds.configSource)
@@ -116,7 +143,7 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	jsonService := luaservices.NewJSONService()
 	jsonService.Register(L)
 
-	if err := L.DoString(ds.script); err != nil {
+	if err := luaservices.LoadProto(L, ds.proto); err != nil {
 		p.ScriptLoadFailed(err)
 		return nil, fmt.Errorf("failed to load script: %w", err)
 	}
@@ -158,6 +185,10 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 // inputToLuaTable converts a DataSourceInput to a Lua table
 func (ds *LuaDataSource) inputToLuaTable(L *lua.LState, input *service.DataSourceInput) *lua.LTable {
 	tbl := L.NewTable()
+
+	if input == nil {
+		return tbl
+	}
 
 	if input.Subject != nil {
 		L.SetField(tbl, "subject", ds.trustResultToLuaTable(L, input.Subject))
@@ -317,11 +348,9 @@ func luaTableToMap(tbl *lua.LTable) map[string]interface{} {
 	return result
 }
 
-// CacheableLuaDataSource is a Lua data source that implements the Cacheable interface
+// CacheableLuaDataSource is a Lua data source that implements the Cacheable interface.
 type CacheableLuaDataSource struct {
 	*LuaDataSource
-	cacheKeyFunc string
-	cacheTTL     time.Duration
 }
 
 // CacheableLuaDataSourceConfig configures a cacheable Lua data source
@@ -330,96 +359,73 @@ type CacheableLuaDataSourceConfig struct {
 	Name string
 
 	// Script is the Lua script to execute
+	//
 	// The script should define a function called 'fetch' that takes an input table
 	// and returns a result table with 'data' and 'content_type' fields
+	//
+	// The script must define fetch_cache_key(input), which returns a modified input
+	// table with only the fields relevant for caching.
+	//
+	// Example:
+	//   function fetch_cache_key(input)
+	//     return {subject = {subject = input.subject.subject}}
+	//   end
 	Script string
 
 	// ConfigSource provides configuration values available to the script via config.get()
 	// If nil, an empty MapConfigSource will be used
 	ConfigSource luaservices.ConfigSource
 
-	// HTTPOptions provides HTTP service options including timeout, transport, etc.
-	// If nil, default HTTP settings (30s timeout) will be used.
-	HTTPOptions []luaservices.HTTPServiceOption
+	// HTTPClient is the pre-configured HTTP client for the Lua http service.
+	// If nil, http.DefaultClient will be used.
+	HTTPClient *http.Client
+
+	// RequestOptions is a programmatic hook that augments outgoing HTTP requests. Optional.
+	RequestOptions luaservices.RequestOptions
 
 	// Observer for Lua-specific execution events on the inner Lua data source.
 	// If nil, NewLuaDataSource substitutes NoOpDataSourceObserver{}.
 	Observer LuaObserver
-
-	// CacheKeyFunc is the name of the Lua function that generates cache keys
-	// REQUIRED - the function should take an input table and return a modified input table
-	// with only the fields relevant for caching
-	//
-	// Example:
-	//   function cache_key(input)
-	//     return {subject = {subject = input.subject.subject}}
-	//   end
-	CacheKeyFunc string
-
-	// CacheTTL is the cache time-to-live
-	// Default: 5 minutes
-	CacheTTL time.Duration
 }
 
-// NewCacheableLuaDataSource creates a new cacheable Lua data source
+// NewCacheableLuaDataSource creates a new cacheable Lua data source.
 func NewCacheableLuaDataSource(config CacheableLuaDataSourceConfig) (*CacheableLuaDataSource, error) {
-	if config.CacheKeyFunc == "" {
-		return nil, fmt.Errorf("cache_key function is required for cacheable data source")
-	}
-
-	if config.CacheTTL == 0 {
-		config.CacheTTL = 5 * time.Minute
-	}
-
-	// Create the base data source
-	baseDS, err := NewLuaDataSource(LuaDataSourceConfig{
-		Name:         config.Name,
-		Script:       config.Script,
-		ConfigSource: config.ConfigSource,
-		HTTPOptions:  config.HTTPOptions,
-		Observer:     config.Observer,
-	})
+	baseDS, err := NewLuaDataSource(LuaDataSourceConfig(config))
 	if err != nil {
 		return nil, err
 	}
 
-	// Validate that the cache_key function exists
-	L := lua.NewState()
-	defer L.Close()
-
-	if err := L.DoString(config.Script); err != nil {
-		return nil, fmt.Errorf("failed to load script: %w", err)
-	}
-
-	cacheKeyFunc := L.GetGlobal(config.CacheKeyFunc)
-	if cacheKeyFunc.Type() != lua.LTFunction {
-		return nil, fmt.Errorf("script must define a '%s' function", config.CacheKeyFunc)
+	if err := luaservices.ValidateFunction(baseDS.proto, fetchCacheKeyFuncName); err != nil {
+		return nil, err
 	}
 
 	return &CacheableLuaDataSource{
 		LuaDataSource: baseDS,
-		cacheKeyFunc:  config.CacheKeyFunc,
-		cacheTTL:      config.CacheTTL,
 	}, nil
 }
 
 // CacheKey implements the Cacheable interface
 func (ds *CacheableLuaDataSource) CacheKey(input *service.DataSourceInput) service.DataSourceInput {
-	// Create a new Lua state
+	if input == nil {
+		return service.DataSourceInput{}
+	}
+
 	L := lua.NewState()
 	defer L.Close()
 
-	// Load the script
-	if err := L.DoString(ds.script); err != nil {
-		// On error, return full input
+	configService := luaservices.NewConfigService(ds.configSource)
+	configService.Register(L)
+
+	jsonService := luaservices.NewJSONService()
+	jsonService.Register(L)
+
+	if err := luaservices.LoadProto(L, ds.proto); err != nil {
 		return *input
 	}
 
-	// Convert input to Lua table
 	inputTable := ds.inputToLuaTable(L, input)
 
-	// Call the cache key function
-	cacheKeyFunc := L.GetGlobal(ds.cacheKeyFunc)
+	cacheKeyFunc := L.GetGlobal(fetchCacheKeyFuncName)
 	if err := L.CallByParam(lua.P{
 		Fn:      cacheKeyFunc,
 		NRet:    1,
@@ -441,9 +447,4 @@ func (ds *CacheableLuaDataSource) CacheKey(input *service.DataSourceInput) servi
 	// Convert result back to DataSourceInput
 	maskedInput := ds.luaTableToInput(ret.(*lua.LTable))
 	return maskedInput
-}
-
-// CacheTTL implements the Cacheable interface
-func (ds *CacheableLuaDataSource) CacheTTL() time.Duration {
-	return ds.cacheTTL
 }

@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/request"
@@ -53,7 +52,7 @@ func TestNewLuaDataSource(t *testing.T) {
 				Script: "invalid lua syntax {{{",
 			},
 			wantErr: true,
-			errMsg:  "failed to load script",
+			errMsg:  "failed to parse script",
 		},
 		{
 			name: "missing fetch function",
@@ -406,30 +405,19 @@ func TestCacheableLuaDataSource_New(t *testing.T) {
 		{
 			name: "valid config",
 			config: CacheableLuaDataSourceConfig{
-				Name:         "test",
-				Script:       "function fetch(input) return {} end\nfunction cache_key(input) return input end",
-				CacheKeyFunc: "cache_key",
+				Name:   "test",
+				Script: "function fetch(input) return {} end\nfunction fetch_cache_key(input) return input end",
 			},
 			wantErr: false,
 		},
 		{
-			name: "missing cache key function name",
-			config: CacheableLuaDataSourceConfig{
-				Name:   "test",
-				Script: "function fetch(input) return {} end\nfunction cache_key(input) return input end",
-			},
-			wantErr: true,
-			errMsg:  "cache_key function is required",
-		},
-		{
 			name: "cache key function not defined in script",
 			config: CacheableLuaDataSourceConfig{
-				Name:         "test",
-				Script:       "function fetch(input) return {} end",
-				CacheKeyFunc: "missing_func",
+				Name:   "test",
+				Script: "function fetch(input) return {} end",
 			},
 			wantErr: true,
-			errMsg:  "must define a 'missing_func' function",
+			errMsg:  "must define a 'fetch_cache_key' function",
 		},
 	}
 
@@ -460,7 +448,7 @@ function fetch(input)
 	return {data = '{}', content_type = 'application/json'}
 end
 
-function cache_key(input)
+function fetch_cache_key(input)
 	return {
 		subject = {
 			subject = input.subject.subject
@@ -470,9 +458,8 @@ end
 `
 
 	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
-		Name:         "test",
-		Script:       script,
-		CacheKeyFunc: "cache_key",
+		Name:   "test",
+		Script: script,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -500,7 +487,7 @@ end
 		t.Errorf("subject.subject = %q, want %q", maskedInput.Subject.Subject, "user@example.com")
 	}
 
-	// Issuer should be zeroed out by the cache_key function
+	// Issuer should be zeroed out by the fetch_cache_key function
 	if maskedInput.Subject.Issuer != "" {
 		t.Errorf("subject.issuer should be empty, got %q", maskedInput.Subject.Issuer)
 	}
@@ -508,48 +495,6 @@ end
 	// Request attributes should be zeroed out
 	if maskedInput.RequestAttributes != nil {
 		t.Errorf("request_attributes should be nil, got %+v", maskedInput.RequestAttributes)
-	}
-}
-
-func TestCacheableLuaDataSource_CacheTTL(t *testing.T) {
-	script := `
-function fetch(input) return {} end
-function cache_key(input) return input end
-`
-
-	tests := []struct {
-		name string
-		ttl  time.Duration
-		want time.Duration
-	}{
-		{
-			name: "custom TTL",
-			ttl:  10 * time.Minute,
-			want: 10 * time.Minute,
-		},
-		{
-			name: "default TTL",
-			ttl:  0,
-			want: 5 * time.Minute,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
-				Name:         "test",
-				Script:       script,
-				CacheKeyFunc: "cache_key",
-				CacheTTL:     tt.ttl,
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if got := ds.CacheTTL(); got != tt.want {
-				t.Errorf("CacheTTL() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -665,7 +610,7 @@ function fetch(input)
 	end
 end
 
-function cache_key(input)
+function fetch_cache_key(input)
 	-- Only cache based on subject
 	return {
 		subject = {
@@ -681,8 +626,6 @@ end
 		ConfigSource: luaservices.NewMapConfigSource(map[string]interface{}{
 			"api_key": "test-key-123",
 		}),
-		CacheKeyFunc: "cache_key",
-		CacheTTL:     10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -736,9 +679,66 @@ end
 	if maskedInput.RequestAttributes != nil {
 		t.Errorf("masked request_attributes should be nil")
 	}
+}
 
-	// Test CacheTTL
-	if ds.CacheTTL() != 10*time.Minute {
-		t.Errorf("CacheTTL() = %v, want %v", ds.CacheTTL(), 10*time.Minute)
+func TestCacheableLuaDataSource_CacheKey_NilInput(t *testing.T) {
+	script := `
+function fetch(input)
+	return {data = '{}', content_type = 'application/json'}
+end
+
+function fetch_cache_key(input)
+	return {subject = {subject = input.subject.subject}}
+end
+`
+
+	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
+		Name:   "test",
+		Script: script,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result := ds.CacheKey(nil)
+
+	// Nil input should return a zero-value DataSourceInput, not panic
+	if result.Subject != nil {
+		t.Errorf("expected nil subject, got %+v", result.Subject)
+	}
+	if result.Actor != nil {
+		t.Errorf("expected nil actor, got %+v", result.Actor)
+	}
+	if result.RequestAttributes != nil {
+		t.Errorf("expected nil request_attributes, got %+v", result.RequestAttributes)
+	}
+}
+
+func TestLuaDataSource_Fetch_NilInput(t *testing.T) {
+	script := `
+function fetch(input)
+	return {data = '{}', content_type = 'application/json'}
+end
+`
+
+	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+		Name:   "test",
+		Script: script,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result, err := ds.Fetch(context.Background(), nil)
+
+	// Nil input should return an error, not panic
+	if err == nil {
+		t.Fatal("expected error for nil input, got nil")
+	}
+	if result != nil {
+		t.Errorf("expected nil result, got %+v", result)
+	}
+	if !strings.Contains(err.Error(), "nil input") {
+		t.Errorf("error should mention nil input, got: %v", err)
 	}
 }

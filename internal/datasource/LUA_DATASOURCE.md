@@ -78,7 +78,7 @@ function fetch(input)
   return nil
 end
 
-function cache_key(input)
+function fetch_cache_key(input)
   -- Only cache based on subject
   return {
     subject = {
@@ -103,12 +103,12 @@ ds, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourc
         req.Header.Set("Authorization", "Bearer " + apiKey.(string))
         return nil
     },
-    CacheKeyFunc: "cache_key",  // REQUIRED for cacheable data source
-    CacheTTL:     5 * time.Minute,
 })
 
 // Wrap with caching layer
-cachedDS := datasource.NewInMemoryCachingDataSource(ds)
+cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
+    datasource.WithCacheTTL(5 * time.Minute),
+)
 ```
 
 ## Configuration
@@ -132,8 +132,6 @@ cachedDS := datasource.NewInMemoryCachingDataSource(ds)
 | `ConfigSource` | `lua.ConfigSource` | No | Configuration source for the script |
 | `HTTPTimeout` | `time.Duration` | No | HTTP request timeout (default: 30s) |
 | `HTTPRequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests |
-| `CacheKeyFunc` | `string` | **Yes** | Name of Lua function for cache key generation |
-| `CacheTTL` | `time.Duration` | No | Cache TTL (default: 5m) |
 
 ## Script Requirements
 
@@ -188,12 +186,12 @@ input = {
 - Return `nil` if the data source has nothing to contribute
 - Throw an error for fatal errors that should fail token issuance
 
-### Optional Function: cache_key
+### Optional Function: fetch_cache_key
 
-For cacheable data sources, you can define a `cache_key` function:
+For cacheable data sources, define a `fetch_cache_key` function:
 
 ```lua
-function cache_key(input)
+function fetch_cache_key(input)
   -- Return modified input with only relevant fields
   return {
     subject = {
@@ -368,7 +366,7 @@ function fetch(input)
   return nil
 end
 
-function cache_key(input)
+function fetch_cache_key(input)
   -- Cache based on subject and region
   return {
     subject = {
@@ -414,7 +412,7 @@ end
 
 1. **Error Handling**: Use `error()` for fatal errors, return `nil` for non-fatal cases
 2. **Timeouts**: Configure appropriate HTTP timeouts for your APIs
-3. **Caching**: Implement `cache_key` for data that can be cached
+3. **Caching**: Implement `fetch_cache_key` for data that can be cached
 4. **Validation**: Validate input data before making external calls
 5. **Logging**: Use print() for debugging (output goes to stdout)
 6. **Performance**: Minimize the number of HTTP calls per fetch
@@ -428,19 +426,20 @@ Only `CacheableLuaDataSource` implements the `Cacheable` interface and can be wr
 ```go
 // Create cacheable data source
 cacheableDS, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourceConfig{
-    Name:         "user-data",
-    Script:       script,
-    CacheKeyFunc: "cache_key",  // Required
-    CacheTTL:     5 * time.Minute,
+    Name:   "user-data",
+    Script: script,
 })
 
-// Wrap with in-memory caching
-cachedDS := datasource.NewInMemoryCachingDataSource(cacheableDS)
+// Wrap with in-memory caching (TTL is configured on the wrapper)
+cachedDS := datasource.NewInMemoryCachingDataSource(cacheableDS, obs,
+    datasource.WithCacheTTL(5 * time.Minute),
+)
 
 // Or distributed caching
 cachedDS := datasource.NewDistributedCachingDataSource(cacheableDS, datasource.DistributedCachingConfig{
     GroupName:      "lua-datasource",
     CacheSizeBytes: 64 << 20,  // 64MB
+    CacheTTL:       5 * time.Minute,
 })
 ```
 
@@ -502,4 +501,3 @@ if data == nil then
   return nil
 end
 ```
-

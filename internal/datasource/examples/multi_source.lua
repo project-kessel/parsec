@@ -106,7 +106,7 @@ function fetch_json(url, api_key)
 end
 
 -- Cache based on subject and user type
-function cache_key(input)
+function fetch_cache_key(input)
   return {
     subject = {
       subject = input.subject.subject,

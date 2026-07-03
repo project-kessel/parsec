@@ -13,9 +13,13 @@ type BearerCredentialSource struct {
 	SourceName string
 }
 
-// NewBearerCredentialSource returns a BearerCredentialSource with the given name.
-func NewBearerCredentialSource(name string) *BearerCredentialSource {
-	return &BearerCredentialSource{SourceName: name}
+// NewBearerCredentialSource returns a BearerCredentialSource with the given
+// name. The name is required.
+func NewBearerCredentialSource(name string) (*BearerCredentialSource, error) {
+	if name == "" {
+		return nil, fmt.Errorf("bearer credential source: name is required")
+	}
+	return &BearerCredentialSource{SourceName: name}, nil
 }
 
 func (s *BearerCredentialSource) Extract(_ context.Context, cc CredentialContext) (*CredentialExtraction, error) {
@@ -34,15 +38,8 @@ func (s *BearerCredentialSource) Extract(_ context.Context, cc CredentialContext
 	}
 
 	return &CredentialExtraction{
-		Credential:      &trust.BearerCredential{Token: token},
-		HeadersToRemove: []string{"authorization"},
-		SourceName:      s.sourceName(),
+		Credential:  &trust.BearerCredential{Token: token},
+		HeadersUsed: []string{"authorization"},
+		SourceName:  s.SourceName,
 	}, nil
-}
-
-func (s *BearerCredentialSource) sourceName() string {
-	if s.SourceName != "" {
-		return s.SourceName
-	}
-	return CredentialSourceTypeBearer
 }

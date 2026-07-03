@@ -142,18 +142,23 @@ trust_domain: "parsec.example.com"  # Audience for issued tokens
 
 ### Authorization Server (ext_authz)
 
-Configure the Envoy ext_authz server behavior (optional):
+Configure the Envoy ext_authz server behavior (optional). The `policy` section
+controls how the authz check policy decides whether to issue tokens, pass
+through, or deny each request:
 
 ```yaml
 authz_server:
-  token_types:
-    - type: "urn:ietf:params:oauth:token-type:txn_token"
-      header_name: "Transaction-Token"
-    - type: "urn:ietf:params:oauth:token-type:access_token"
-      header_name: "Authorization"
+  policy:
+    type: static_authenticated    # denies anonymous, issues configured token types
+    token_types:
+      - type: "urn:ietf:params:oauth:token-type:txn_token"
+        header_name: "Transaction-Token"
+      - type: "urn:ietf:params:oauth:token-type:access_token"
+        header_name: "Authorization"
 ```
 
-If not specified, defaults to issuing a transaction token in the `Transaction-Token` header.
+If not specified, defaults to `static_authenticated` issuing a transaction
+token in the `Transaction-Token` header.
 
 ### Exchange Server
 
@@ -176,7 +181,7 @@ trust_store:
   type: stub_store  # or "filtered_store"
   validators:
     - name: my-validator  # Required for filtered_store
-      type: jwt_validator  # jwt_validator, json_validator, stub_validator
+      type: jwt_validator  # jwt_validator, json_validator, lua_validator, stub_validator
       issuer: "https://idp.example.com"
       jwks_url: "https://idp.example.com/.well-known/jwks.json"
       trust_domain: "example.com"
@@ -187,7 +192,65 @@ trust_store:
 
 - `jwt_validator` - Validates JWT tokens with JWKS
 - `json_validator` - Validates unsigned JSON credentials
+- `lua_validator` - Validates credentials with a Lua `validate(input)` script
 - `stub_validator` - Testing validator (accepts any non-empty token)
+
+**Lua Validator Example:**
+
+```yaml
+trust_store:
+  type: filtered_store
+  validators:
+    - name: introspection-validator
+      type: lua_validator
+      credential_types: ["bearer"]
+      script: |
+        function validate(input)
+          local resp = http.post(
+            config.get("introspection_url"),
+            json.encode({token = input.credential.token}),
+            {["Content-Type"] = "application/json"}
+          )
+          if resp.status ~= 200 then
+            return nil
+          end
+          local body = json.decode(resp.body)
+          if not body.active then
+            return nil
+          end
+          return {
+            subject = body.sub,
+            issuer = config.get("issuer"),
+            trust_domain = config.get("trust_domain"),
+            claims = body,
+            expires_at = body.exp,
+            audience = body.aud,
+            scope = body.scope
+          }
+        end
+
+        function validate_cache_key(input)
+          return {
+            credential = {
+              type = input.credential.type,
+              token = input.credential.token
+            }
+          }
+        end
+      config:
+        introspection_url: "https://idp.example.com/introspect"
+        issuer: "https://idp.example.com"
+        trust_domain: "example.com"
+      http:
+        timeout: 5s
+      caching:
+        type: in_memory
+        ttl: 5m
+```
+
+Lua validators with caching must define `validate_cache_key(input)`. For
+distributed caching, the returned table must include enough credential material
+to rerun `validate(input)` on a peer cache miss.
 
 **Filtered Store** (optional):
 
@@ -230,6 +293,50 @@ trust_store:
         script: validator_name == "dev-validator"
 ```
 
+### HTTP Clients
+
+Named HTTP clients are defined once at the top level and referenced by consumers
+(data sources, validators, etc.). A client named `"default"` is always available;
+if not explicitly defined, one is auto-created with a 30s timeout.
+
+```yaml
+http_clients:
+  # Override the stock default (all consumers get this unless they specify otherwise)
+  - name: "default"
+    timeout: "15s"
+
+  # Named client with bearer token authentication
+  - name: "user-api"
+    timeout: "10s"
+    http_auth:
+      type: "bearer"
+      token: "my-static-token"
+
+  # Named client with mutual TLS (client certificates)
+  - name: "internal-service"
+    timeout: "5s"
+    client_cert_source:
+      type: "file"
+      cert: "/etc/parsec/certs/client.pem"
+      key: "/etc/parsec/certs/client-key.pem"
+```
+
+**Fields:**
+
+- `name` (required) - Unique name for this client
+- `timeout` - Default request timeout (e.g. `"30s"`, `"1m"`). Default: 30s
+- `http_auth` - HTTP-layer authentication (header-based)
+  - `type` - Auth mechanism: `"bearer"` (future: `"oauth2_client_credentials"`)
+  - `token` - Static bearer token value (bearer type)
+- `client_cert_source` - Client certificate source for mTLS
+  - `type` - Source type: `"file"` (future: `"vault"`, `"k8s_secret"`)
+  - `cert` - Path to client certificate PEM (file type)
+  - `key` - Path to client private key PEM (file type)
+
+**Consumer reference:** Data sources and validators can reference a client by name
+(`http_client: "user-api"`) or define one inline (`http: {timeout: "5s"}`).
+When neither is set, the `"default"` client is used.
+
 ### Data Sources
 
 Data sources enrich tokens with external data:
@@ -244,30 +351,38 @@ data_sources:
   - name: user_roles
     type: lua
     script_file: ./scripts/user_roles.lua  # Or use inline script
+    http_client: "user-api"  # Reference a named HTTP client
     config:  # Available to Lua script via config.get()
       api_url: "https://api.example.com"
       api_key: "secret-key"  # Inject via env: PARSEC_DATA_SOURCES__0__CONFIG__API_KEY
-    http:  # HTTP client configuration
-      timeout: 30s
-      # Optional: Use fixtures for testing (no real HTTP calls)
-      # fixtures_file: ./test/fixtures/user_api.yaml
-      # fixtures_dir: ./test/fixtures/
     caching:
       type: in_memory  # or "distributed", "none"
       ttl: 5m
+  - name: partner_data
+    type: lua
+    script_file: ./scripts/partner.lua
+    http:  # Inline client definition (same schema, no name)
+      timeout: "5s"
+      http_auth:
+        type: "bearer"
+        token: "partner-token"
 ```
 
-**HTTP Configuration:**
+**HTTP Client Configuration:**
 
-- `timeout` - Duration string for HTTP request timeout (default: 30s)
-- `fixtures_file` - Path to YAML/JSON fixtures file (for testing)
-- `fixtures_dir` - Path to directory containing fixtures (for testing)
+- `http_client` - Name of a client from the `http_clients` registry
+- `http` - Inline client definition (mutually exclusive with `http_client`)
+- When neither is set, the `"default"` client is used
 
 **Caching Types:**
 
 - `in_memory` - Local cache (single instance)
 - `distributed` - Groupcache-based distributed cache
 - `none` - No caching
+
+Lua data sources with caching must define `fetch_cache_key(input)`. The returned
+table is used as cache key material and must contain enough input to rerun
+`fetch(input)` on a distributed cache miss.
 
 ### Claim Mappers
 
@@ -511,4 +626,3 @@ Error: failed to parse config: ...
 - [Lua Data Sources](../internal/datasource/LUA_DATASOURCE.md)
 - [CEL Mappers](../internal/cel/README.md)
 - [Validator Filtering](../internal/trust/VALIDATOR_FILTERING.md)
-

@@ -7,10 +7,6 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-// ErrNoCredentials is returned when none of the configured sources found a
-// credential in the transport context.
-var ErrNoCredentials = errors.New("no credentials found in configured sources")
-
 // Credential source type strings used in config.
 const (
 	CredentialSourceTypeBearer = "authorization_bearer_opaque"
@@ -21,15 +17,20 @@ const (
 // Implementations handle specific credential presentation protocols (bearer
 // header, cookie, etc.).
 type CredentialSource interface {
+	// Returns (nil, nil) when no credential is found for this source.
 	Extract(ctx context.Context, cc CredentialContext) (*CredentialExtraction, error)
 }
 
 // CredentialExtraction is the result of extracting a credential from a request.
+// HeadersUsed lists whole headers that carried the credential (e.g.
+// "authorization"). CookiesUsed lists individual cookie names that carried the
+// credential. Callers decide what to do with this information (e.g. strip
+// the headers, rewrite the Cookie header, etc.).
 type CredentialExtraction struct {
-	Credential      trust.Credential
-	HeadersToRemove []string
-	HeadersToSet    map[string]string
-	SourceName      string
+	Credential  trust.Credential
+	HeadersUsed []string
+	CookiesUsed []string
+	SourceName  string
 }
 
 // CredentialSources is an ordered collection of CredentialSource instances.
@@ -48,12 +49,17 @@ func NewCredentialSources(sources ...CredentialSource) CredentialSources {
 // DefaultCredentialSources returns the default credential sources
 // (authorization bearer only).
 func DefaultCredentialSources() CredentialSources {
-	return NewCredentialSources(NewBearerCredentialSource(CredentialSourceTypeBearer))
+	src, err := NewBearerCredentialSource(CredentialSourceTypeBearer)
+	if err != nil {
+		panic("BUG: default bearer source name is invalid: " + err.Error())
+	}
+	return NewCredentialSources(src)
 }
 
 // Extract iterates the configured sources in order and returns the first
-// successful extraction. Errors from individual sources are collected and
-// returned as a joined error when no source succeeds.
+// successful extraction. Returns (nil, nil) when no source finds a
+// credential. Errors from individual sources are collected and returned
+// as a joined error when no source succeeds.
 func (cs CredentialSources) Extract(ctx context.Context, cc CredentialContext) (*CredentialExtraction, error) {
 	if len(cs.sources) == 0 {
 		return nil, errors.New("credential sources must not be empty")
@@ -74,11 +80,5 @@ func (cs CredentialSources) Extract(ctx context.Context, cc CredentialContext) (
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
-	return nil, ErrNoCredentials
-}
-
-// validateCredential validates a credential from a CredentialExtraction against
-// a trust.Store.
-func validateCredential(ctx context.Context, store trust.Store, ext *CredentialExtraction) (*trust.Result, error) {
-	return store.Validate(ctx, ext.Credential)
+	return nil, nil
 }

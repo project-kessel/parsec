@@ -99,9 +99,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create token service: %w", err)
 	}
 
-	authzTokenTypes, err := provider.AuthzServerTokenTypes()
+	authzCheckPolicy, err := provider.AuthzCheckPolicy()
 	if err != nil {
-		return fmt.Errorf("failed to get authz token types: %w", err)
+		return fmt.Errorf("failed to get authz check policy: %w", err)
 	}
 
 	credentialSources, err := provider.CredentialSources()
@@ -120,7 +120,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Create service handlers
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzTokenTypes, credentialSources, obs)
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, obs)
 
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{

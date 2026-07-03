@@ -217,8 +217,8 @@ At `End()`, all fields are combined into a single `attribute.NewSet` and passed 
 
 ```go
 func (p *jwtValidateProbe) End() {
-    attrs := metric.WithAttributeSet(attribute.NewSet(p.issuer, p.result, p.status))
-    p.obs.jwtValidateDuration.Record(p.ctx, time.Since(p.startTime).Seconds(), attrs)
+    attrs := metric.WithAttributeSet(attribute.NewSet(p.validatorType, p.validator, p.result, p.status))
+    p.obs.validateDuration.Record(p.ctx, time.Since(p.startTime).Seconds(), attrs)
 }
 ```
 

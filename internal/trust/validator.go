@@ -2,7 +2,9 @@ package trust
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/project-kessel/parsec/internal/claims"
@@ -25,8 +27,23 @@ type Validator interface {
 	CredentialTypes() []CredentialType
 }
 
-// Result contains the validated information about the subject
-// All fields are exported and JSON-serializable
+// CacheableValidator is an optional interface for validators whose successful
+// validation results can be cached. The cache TTL is configured on the
+// caching wrapper, not on the validator itself.
+type CacheableValidator interface {
+	// CacheKey returns a masked validator input containing only the fields that
+	// affect the validation result. For distributed caches, the returned input
+	// must be sufficient to reconstruct a Credential and call Validate on a
+	// cache miss.
+	CacheKey(credential Credential) (ValidatorInput, error)
+}
+
+// Result contains the validated information about the subject.
+// All fields are exported and JSON-serializable.
+//
+// Callers must treat Result and its reference-type fields (Claims, Audience)
+// as read-only. Results may be shared across goroutines and cached; mutating
+// a returned Result corrupts shared state.
 type Result struct {
 	// Subject is the unique identifier of the authenticated subject
 	Subject string `json:"subject"`
@@ -84,7 +101,7 @@ type Credential interface {
 // For opaque bearer tokens, the trust store determines which validator to use
 // based on its configuration (e.g., default validator, token introspection, etc.)
 type BearerCredential struct {
-	Token string
+	Token string `json:"token"`
 }
 
 func (c *BearerCredential) Type() CredentialType {
@@ -94,9 +111,9 @@ func (c *BearerCredential) Type() CredentialType {
 // JWTCredential represents a JWT token with parsed header and claims
 type JWTCredential struct {
 	BearerCredential
-	Algorithm      string
-	KeyID          string
-	IssuerIdentity string // Parsed from JWT "iss" claim
+	Algorithm      string `json:"algorithm,omitempty"`
+	KeyID          string `json:"key_id,omitempty"`
+	IssuerIdentity string `json:"issuer_identity,omitempty"`
 }
 
 func (c *JWTCredential) Type() CredentialType {
@@ -105,9 +122,9 @@ func (c *JWTCredential) Type() CredentialType {
 
 // OIDCCredential represents an OIDC token with additional context
 type OIDCCredential struct {
-	Token          string
-	IssuerIdentity string // Parsed from JWT "iss" claim
-	ClientID       string
+	Token          string `json:"token"`
+	IssuerIdentity string `json:"issuer_identity,omitempty"`
+	ClientID       string `json:"client_id,omitempty"`
 }
 
 func (c *OIDCCredential) Type() CredentialType {
@@ -119,16 +136,16 @@ type MTLSCredential struct {
 	// TODO: use strongly typed fields that go gives us rather than raw bytes
 
 	// Certificate is the client certificate (DER encoded)
-	Certificate []byte
+	Certificate []byte `json:"certificate,omitempty"`
 
 	// Chain is the certificate chain (DER encoded)
-	Chain [][]byte
+	Chain [][]byte `json:"chain,omitempty"`
 
 	// PeerCertificateHash for validation
-	PeerCertificateHash string
+	PeerCertificateHash string `json:"peer_certificate_hash,omitempty"`
 
 	// IssuerIdentity identifies the CA/trust domain
-	IssuerIdentity string
+	IssuerIdentity string `json:"issuer_identity,omitempty"`
 }
 
 func (c *MTLSCredential) Type() CredentialType {
@@ -145,4 +162,70 @@ type JSONCredential struct {
 
 func (c *JSONCredential) Type() CredentialType {
 	return CredentialTypeJSON
+}
+
+func (c *JSONCredential) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		RawJSON string `json:"raw_json"`
+	}{RawJSON: string(c.RawJSON)})
+}
+
+func (c *JSONCredential) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		RawJSON string `json:"raw_json"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.RawJSON = []byte(raw.RawJSON)
+	return nil
+}
+
+// MarshalCredentialJSON serializes a [Credential] to JSON with a "type"
+// discriminator field. The concrete credential struct must have json tags.
+func MarshalCredentialJSON(c Credential) ([]byte, error) {
+	if c == nil {
+		return nil, fmt.Errorf("credential cannot be nil")
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal credential: %w", err)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Errorf("credential must marshal to a JSON object: %w", err)
+	}
+	typeBytes, _ := json.Marshal(c.Type())
+	obj["type"] = typeBytes
+	return json.Marshal(obj)
+}
+
+// UnmarshalCredentialJSON deserializes a [Credential] from JSON using the
+// "type" discriminator field to select the concrete type.
+func UnmarshalCredentialJSON(data []byte) (Credential, error) {
+	var envelope struct {
+		Type CredentialType `json:"type"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("failed to read credential type: %w", err)
+	}
+	switch envelope.Type {
+	case CredentialTypeBearer:
+		var c BearerCredential
+		return &c, json.Unmarshal(data, &c)
+	case CredentialTypeJWT:
+		var c JWTCredential
+		return &c, json.Unmarshal(data, &c)
+	case CredentialTypeOIDC:
+		var c OIDCCredential
+		return &c, json.Unmarshal(data, &c)
+	case CredentialTypeMTLS:
+		var c MTLSCredential
+		return &c, json.Unmarshal(data, &c)
+	case CredentialTypeJSON:
+		var c JSONCredential
+		return &c, json.Unmarshal(data, &c)
+	default:
+		return nil, fmt.Errorf("unsupported credential type: %s", envelope.Type)
+	}
 }

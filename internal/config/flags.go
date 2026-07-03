@@ -90,7 +90,7 @@ func walkStruct(t reflect.Type, v reflect.Value, parentPath string, fields *[]fi
 			// Recursively walk nested structs
 			walkStruct(fieldType, fieldValue, configPath, fields)
 
-		case reflect.Ptr:
+		case reflect.Pointer:
 			// Handle pointer to struct
 			elemType := fieldType.Elem()
 			if elemType.Kind() == reflect.Struct {

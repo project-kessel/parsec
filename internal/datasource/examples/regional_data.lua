@@ -55,7 +55,7 @@ function fetch(input)
 end
 
 -- Cache based on subject AND region
-function cache_key(input)
+function fetch_cache_key(input)
   local region = "us-east-1"  -- default
   
   if input.request_attributes ~= nil and input.request_attributes.headers ~= nil then

@@ -60,7 +60,7 @@ end
 
 -- Optional: Define cache key function for caching support
 -- This tells the caching layer what parts of the input affect the result
-function cache_key(input)
+function fetch_cache_key(input)
   -- We only cache based on the subject identifier
   -- Changes to other fields (like request attributes) won't affect the result
   return {

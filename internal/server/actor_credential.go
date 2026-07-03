@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"fmt"
 
 	"github.com/project-kessel/parsec/internal/trust"
@@ -23,26 +22,34 @@ type actorProbe interface {
 // context, emitting probe events along the way. Returns an anonymous result
 // when no actor credential is present.
 func authenticateActor(ctx context.Context, sources CredentialSources, store trust.Store, p actorProbe) (*trust.Result, error) {
+	result, _, err := authenticateActorWithExtraction(ctx, sources, store, p)
+	return result, err
+}
+
+// authenticateActorWithExtraction works like authenticateActor but also returns
+// the CredentialExtraction (nil when the actor is anonymous). This allows
+// callers to build a Principal with credential metadata.
+func authenticateActorWithExtraction(ctx context.Context, sources CredentialSources, store trust.Store, p actorProbe) (*trust.Result, *CredentialExtraction, error) {
 	ext, err := extractActorCredential(ctx, sources)
 	if err != nil {
 		p.ActorCredentialExtractionFailed(err)
-		return nil, fmt.Errorf("failed to extract actor credential: %w", err)
+		return nil, nil, fmt.Errorf("failed to extract actor credential: %w", err)
 	}
 
 	if ext != nil {
-		p.ActorCredentialExtracted(ext.Credential, ext.HeadersToRemove)
-		actor, validationErr := validateCredential(ctx, store, ext)
+		p.ActorCredentialExtracted(ext.Credential, ext.HeadersUsed)
+		actor, validationErr := store.Validate(ctx, ext.Credential)
 		if validationErr != nil {
 			p.ActorValidationFailed(validationErr)
-			return nil, fmt.Errorf("actor validation failed: %w", validationErr)
+			return nil, nil, fmt.Errorf("actor validation failed: %w", validationErr)
 		}
 		p.ActorValidationSucceeded(actor)
-		return actor, nil
+		return actor, ext, nil
 	}
 
 	actor := trust.AnonymousResult()
 	p.ActorValidationSucceeded(actor)
-	return actor, nil
+	return actor, nil, nil
 }
 
 // extractActorCredential extracts an actor credential from the gRPC context.
@@ -54,7 +61,10 @@ func authenticateActor(ctx context.Context, sources CredentialSources, store tru
 //
 // Returns (nil, nil) if no actor authentication is present.
 func extractActorCredential(ctx context.Context, sources CredentialSources) (*CredentialExtraction, error) {
-	cc := CredentialContextFromGRPC(ctx)
+	cc, err := CredentialContextFromGRPC(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// mTLS takes priority. A future MTLSCredentialSource can replace this
 	// once the interface supports TLS peer info natively.
@@ -62,18 +72,7 @@ func extractActorCredential(ctx context.Context, sources CredentialSources) (*Cr
 		return mtlsExtractionFromPeer(cc.TLSPeer), nil
 	}
 
-	if cc.Headers == nil {
-		return nil, nil
-	}
-
-	ext, err := sources.Extract(ctx, cc)
-	if err != nil {
-		if errors.Is(err, ErrNoCredentials) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("actor credential extraction failed: %w", err)
-	}
-	return ext, nil
+	return sources.Extract(ctx, cc)
 }
 
 // mtlsExtractionFromPeer builds a CredentialExtraction from TLS peer info.

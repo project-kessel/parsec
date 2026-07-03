@@ -2,7 +2,8 @@ package server
 
 import (
 	"context"
-	"strings"
+	"fmt"
+	"net/http"
 
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -14,71 +15,49 @@ type CookieCredentialSource struct {
 }
 
 // NewCookieCredentialSource returns a CookieCredentialSource with the given
-// source name and cookie name.
-func NewCookieCredentialSource(name, cookieName string) *CookieCredentialSource {
-	return &CookieCredentialSource{SourceName: name, CookieName: cookieName}
+// source name and cookie name. Both are required.
+func NewCookieCredentialSource(name, cookieName string) (*CookieCredentialSource, error) {
+	if name == "" {
+		return nil, fmt.Errorf("cookie credential source: name is required")
+	}
+	if cookieName == "" {
+		return nil, fmt.Errorf("cookie credential source: cookie_name is required")
+	}
+	return &CookieCredentialSource{SourceName: name, CookieName: cookieName}, nil
 }
 
 func (s *CookieCredentialSource) Extract(_ context.Context, cc CredentialContext) (*CredentialExtraction, error) {
-	name := s.CookieName
-	if name == "" {
-		name = "cs_jwt"
+	token, ok, err := cookieValue(cc.Cookies, s.CookieName)
+	if err != nil {
+		return nil, err
 	}
-
-	cookieHeader := cc.Headers["cookie"]
-	if cookieHeader == "" {
+	if !ok {
 		return nil, nil
 	}
-
-	token, ok := cookieValue(cookieHeader, name)
-	if !ok || token == "" {
-		return nil, nil
+	if token == "" {
+		return nil, fmt.Errorf("cookie %q present but token is empty", s.CookieName)
 	}
 
-	ext := &CredentialExtraction{
-		Credential: &trust.BearerCredential{Token: token},
-		SourceName: s.sourceName(),
-	}
-	sanitized := sanitizeCookieHeader(cookieHeader, name)
-	if sanitized == "" {
-		ext.HeadersToRemove = []string{"cookie"}
-	} else {
-		ext.HeadersToSet = map[string]string{"cookie": sanitized}
-	}
-	return ext, nil
+	return &CredentialExtraction{
+		Credential:  &trust.BearerCredential{Token: token},
+		CookiesUsed: []string{s.CookieName},
+		SourceName:  s.SourceName,
+	}, nil
 }
 
-func (s *CookieCredentialSource) sourceName() string {
-	if s.SourceName != "" {
-		return s.SourceName
-	}
-	return CredentialSourceTypeCookie
-}
-
-func cookieValue(cookieHeader, name string) (string, bool) {
-	for part := range strings.SplitSeq(cookieHeader, ";") {
-		part = strings.TrimSpace(part)
-		key, value, ok := strings.Cut(part, "=")
-		if ok && key == name {
-			return strings.Trim(value, `"`), true
+// cookieValue returns the value of the uniquely named cookie. If multiple
+// cookies share the same name, it returns an error to reject the ambiguity.
+func cookieValue(cookies []*http.Cookie, name string) (string, bool, error) {
+	found := false
+	var value string
+	for _, c := range cookies {
+		if c.Name == name {
+			if found {
+				return "", false, fmt.Errorf("multiple cookies named %q: ambiguous credential", name)
+			}
+			value = c.Value
+			found = true
 		}
 	}
-	return "", false
-}
-
-// sanitizeCookieHeader rebuilds a Cookie header value without the named cookie.
-func sanitizeCookieHeader(cookieHeader, omitName string) string {
-	var remaining []string
-	for part := range strings.SplitSeq(cookieHeader, ";") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		key, _, ok := strings.Cut(part, "=")
-		if ok && key == omitName {
-			continue
-		}
-		remaining = append(remaining, part)
-	}
-	return strings.Join(remaining, "; ")
+	return value, found, nil
 }

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/trust"
@@ -27,7 +26,7 @@ type DataSource interface {
 }
 
 // Cacheable is an optional interface that data sources can implement
-// to enable caching of their results
+// to enable caching of their results.
 type Cacheable interface {
 	// CacheKey returns a masked copy of the input with only the fields that affect the result.
 	// This serves two purposes:
@@ -40,13 +39,6 @@ type Cacheable interface {
 	// The returned input MUST be sufficient to call Fetch() if there's a cache miss.
 	// Returned by value for clear semantics - it's a derived value, not a shared reference.
 	CacheKey(input *DataSourceInput) DataSourceInput
-
-	// CacheTTL returns the time-to-live for cached entries.
-	// The actual TTL may vary. This is a hint.
-	// In general, values should last for at _most_ the TTL.
-	//
-	// Return 0 to disable TTL-based expiration (cache indefinitely).
-	CacheTTL() time.Duration
 }
 
 // DataSourceContentType identifies the serialization format of data source results

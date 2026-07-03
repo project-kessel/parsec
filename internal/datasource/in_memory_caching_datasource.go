@@ -2,7 +2,6 @@ package datasource
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -12,11 +11,12 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
-// InMemoryCachingDataSource wraps a cacheable data source with simple in-memory caching
-// It implements issuer.DataSource but not Cacheable (it does the caching itself)
+// InMemoryCachingDataSource wraps a cacheable data source with simple in-memory caching.
+// It implements issuer.DataSource but not Cacheable (it does the caching itself).
 type InMemoryCachingDataSource struct {
 	source    service.DataSource
 	cacheable service.Cacheable
+	cacheTTL  time.Duration
 	clock     clock.Clock
 	observer  CacheObserver
 	mu        sync.RWMutex
@@ -32,10 +32,18 @@ type cacheEntry struct {
 // InMemoryCachingDataSourceOption is a functional option for configuring InMemoryCachingDataSource
 type InMemoryCachingDataSourceOption func(*InMemoryCachingDataSource)
 
-// WithClock sets the clock for the caching data source
+// WithClock sets the clock for the caching data source.
 func WithClock(clk clock.Clock) InMemoryCachingDataSourceOption {
 	return func(ds *InMemoryCachingDataSource) {
 		ds.clock = clk
+	}
+}
+
+// WithCacheTTL sets the time-to-live for cached entries.
+// 0 means no TTL-based expiration (cache indefinitely).
+func WithCacheTTL(ttl time.Duration) InMemoryCachingDataSourceOption {
+	return func(ds *InMemoryCachingDataSource) {
+		ds.cacheTTL = ttl
 	}
 }
 
@@ -102,9 +110,9 @@ func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.Da
 		c.mu.Lock()
 		delete(c.entries, cacheKeyStr)
 		c.mu.Unlock()
+	} else {
+		p.CacheMiss()
 	}
-
-	p.CacheMiss()
 
 	// Cache miss - fetch from source using the original (full) input
 	result, err := c.source.Fetch(ctx, input)
@@ -115,10 +123,9 @@ func (c *InMemoryCachingDataSource) Fetch(ctx context.Context, input *service.Da
 
 	// Store in cache if result is not nil
 	if result != nil {
-		ttl := c.cacheable.CacheTTL()
 		var expiresAt time.Time
-		if ttl > 0 {
-			expiresAt = c.clock.Now().Add(ttl)
+		if c.cacheTTL > 0 {
+			expiresAt = c.clock.Now().Add(c.cacheTTL)
 		}
 
 		c.mu.Lock()
@@ -153,16 +160,12 @@ func (c *InMemoryCachingDataSource) Size() int {
 	return len(c.entries)
 }
 
-// serializeInput serializes a masked DataSourceInput into a cache key string
-// This creates a deterministic string representation of the input
+// serializeInput serializes a masked DataSourceInput into a deterministic
+// string suitable for use as an in-memory cache map key.
 func serializeInput(input *service.DataSourceInput) (string, error) {
-	// Serialize to JSON for deterministic ordering
 	keyBytes, err := json.Marshal(input)
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize input: %w", err)
 	}
-
-	// Hash the serialized form to get a fixed-size key
-	hash := sha256.Sum256(keyBytes)
-	return fmt.Sprintf("%x", hash), nil
+	return string(keyBytes), nil
 }

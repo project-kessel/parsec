@@ -72,7 +72,9 @@ This works because each `CredentialSource` returns `nil` when the expected heade
 
 ### 1. Strongly Typed Credentials
 
-Each credential type has its own struct with type-specific fields:
+Each credential type has its own struct with type-specific fields and json struct tags
+for native serialization. The `MarshalCredentialJSON`/`UnmarshalCredentialJSON` pair handles
+discriminated-union serialization with a `"type"` field:
 
 ```go
 type Credential interface {
@@ -80,23 +82,27 @@ type Credential interface {
 }
 
 type BearerCredential struct {
-    Token string  // The bearer token; issuer determined by validator store
+    Token string `json:"token"`
 }
 
 type JWTCredential struct {
-    Token          string
-    Algorithm      string  // Parsed from JWT header
-    KeyID          string  // Parsed from JWT header
-    IssuerIdentity string  // Parsed from JWT "iss" claim (used by trust store)
+    BearerCredential
+    Algorithm      string `json:"algorithm,omitempty"`
+    KeyID          string `json:"key_id,omitempty"`
+    IssuerIdentity string `json:"issuer_identity,omitempty"`
 }
 
 type MTLSCredential struct {
-    Certificate         []byte
-    Chain               [][]byte
-    PeerCertificateHash string
-    IssuerIdentity      string  // CA identifier (used by trust store)
+    Certificate         []byte   `json:"certificate,omitempty"`
+    Chain               [][]byte `json:"chain,omitempty"`
+    PeerCertificateHash string   `json:"peer_certificate_hash,omitempty"`
+    IssuerIdentity      string   `json:"issuer_identity,omitempty"`
 }
 ```
+
+Adding a new credential type requires only:
+1. Define the struct with json tags + `Type()` method
+2. Add one case to `UnmarshalCredentialJSON`
 
 ### 2. Issuer Identification for Validator Store
 
@@ -123,25 +129,7 @@ Policy decisions (claim mappers, validator filtering, etc.) operate on the verif
 
 ### 5. Security Boundary in ext_authz
 
-The extraction layer tracks which headers were used, and ext_authz removes them from requests forwarded to backends:
-
-```go
-// 1. Build CredentialContext from transport
-cc, err := CredentialContextFromCheckRequest(req)
-
-// 2. Extract credential via CredentialSources chain
-ext, err := sources.Extract(ctx, cc)
-
-// 3. Validate
-result, err := validateCredential(ctx, store, ext)
-
-// 4. Remove external credential headers -- security boundary
-return &CheckResponse{
-    OkResponse: &OkHttpResponse{
-        HeadersToRemove: ext.RemoveHeaders,
-    },
-}
-```
+The extraction layer tracks which headers and cookies were used to present credentials. ext_authz strips them from requests forwarded to backends so that downstream services are decoupled from the actual credential presentation — they see only the issued tokens that parsec provides.
 
 ## Examples
 
@@ -154,7 +142,7 @@ cc, err := CredentialContextFromCheckRequest(req)
 // 2. Extract via configured source chain
 ext, err := subjectSources.Extract(ctx, cc)
 // ext.Credential is *trust.BearerCredential{Token: "..."}
-// ext.RemoveHeaders is []string{"authorization"}
+// ext.HeadersUsed is []string{"authorization"}
 
 // 3. Validate
 result, err := validateCredential(ctx, store, ext)
@@ -164,13 +152,13 @@ result, err := validateCredential(ctx, store, ext)
 
 ### Example 2: Cookie
 
-The cookie source extracts a JWT from a named cookie and sanitizes the `Cookie` header so other cookies remain intact:
+The cookie source extracts a JWT from a named cookie. It reports which cookies carried credentials; the response builder sanitizes the `Cookie` header so other cookies remain intact:
 
 ```go
 cc, err := CredentialContextFromCheckRequest(req)
 ext, err := subjectSources.Extract(ctx, cc)
 // ext.Credential is *trust.BearerCredential{Token: "..."}
-// ext.SetHeaders["cookie"] is "session=abc" (cs_jwt removed)
+// ext.CookiesUsed is []string{"cs_jwt"}
 
 result, err := validateCredential(ctx, store, ext)
 ```
@@ -180,7 +168,7 @@ result, err := validateCredential(ctx, store, ext)
 mTLS actor extraction reads TLS peer info from `CredentialContext` before falling through to the bearer source chain. A future `MTLSCredentialSource` will replace the inline check in `extractActorCredential`:
 
 ```go
-cc := CredentialContextFromGRPC(ctx)
+cc, err := CredentialContextFromGRPC(ctx)
 // cc.TLSPeer.Certificates populated from gRPC TLS state
 
 ext, err := extractActorCredential(ctx, actorSources)
@@ -288,7 +276,7 @@ type DPoPCredential struct {
 | **Issuer Identification** | Some credential types carry issuer info for trust store routing; bearer tokens rely on store configuration |
 | **Security Boundary** | ext_authz removes headers used for external credentials |
 | **Exchange Body Tokens** | Protocol-level concern, separate from `CredentialSource` |
-| **Extensibility** | Easy to add new credential types or sources without changing contracts |
+| **Extensibility** | New credential types need only a struct with json tags, a `Type()` method, and one `UnmarshalCredentialJSON` case |
 
 This design cleanly separates:
 1. **Normalization** (transport -> CredentialContext)
