@@ -122,11 +122,10 @@ type ValidatorConfig struct {
 	TrustDomain     string `koanf:"trust_domain"`
 	RefreshInterval string `koanf:"refresh_interval"` // Duration string like "15m"
 	// Audiences is an optional allowlist for JWT aud claims (jwt_validator only).
-	// Empty disables enforcement (backward compatible).
+	// Empty disables enforcement (backward compatible). Include an empty string
+	// ("") to permit tokens that omit the aud claim; when aud is present it must
+	// match another entry in the list.
 	Audiences []string `koanf:"audiences"`
-	// AllowMissingAudience permits tokens without an aud claim even when
-	// Audiences is configured. Tokens that carry an aud must still match.
-	AllowMissingAudience bool `koanf:"allow_missing_audience"`
 
 	// JSON Validator fields
 	// (TrustDomain is shared)

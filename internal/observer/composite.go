@@ -453,6 +453,11 @@ func (m *compositeJWTValidateProbe) ClaimsExtractionFailed(err error) {
 		p.ClaimsExtractionFailed(err)
 	}
 }
+func (m *compositeJWTValidateProbe) AudienceMissingAccepted() {
+	for _, p := range m.probes {
+		p.AudienceMissingAccepted()
+	}
+}
 func (m *compositeJWTValidateProbe) End() {
 	for _, p := range m.probes {
 		p.End()

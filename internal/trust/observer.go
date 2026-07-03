@@ -45,6 +45,9 @@ type JWTValidateProbe interface {
 	TokenExpired()
 	TokenInvalid(err error)
 	ClaimsExtractionFailed(err error)
+	// AudienceMissingAccepted is called when a token without an aud claim is
+	// accepted because the allowlist includes an empty string sentinel.
+	AudienceMissingAccepted()
 	End()
 }
 
@@ -81,6 +84,7 @@ func (NoOpJWTValidateProbe) JWKSLookupFailed(error)       {}
 func (NoOpJWTValidateProbe) TokenExpired()                {}
 func (NoOpJWTValidateProbe) TokenInvalid(error)           {}
 func (NoOpJWTValidateProbe) ClaimsExtractionFailed(error) {}
+func (NoOpJWTValidateProbe) AudienceMissingAccepted()     {}
 func (NoOpJWTValidateProbe) End()                         {}
 
 type NoOpStoreObserver struct {

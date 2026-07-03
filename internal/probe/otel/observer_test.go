@@ -471,6 +471,7 @@ func TestJWTValidateMetrics(t *testing.T) {
 			TokenExpired()
 			TokenInvalid(error)
 			ClaimsExtractionFailed(error)
+			AudienceMissingAccepted()
 		})
 		wantResult string
 		wantStatus string
@@ -483,6 +484,7 @@ func TestJWTValidateMetrics(t *testing.T) {
 				TokenExpired()
 				TokenInvalid(error)
 				ClaimsExtractionFailed(error)
+				AudienceMissingAccepted()
 			}) {
 			},
 			wantResult: `result="success"`,
@@ -496,6 +498,7 @@ func TestJWTValidateMetrics(t *testing.T) {
 				TokenExpired()
 				TokenInvalid(error)
 				ClaimsExtractionFailed(error)
+				AudienceMissingAccepted()
 			}) {
 				p.JWKSLookupFailed(errors.New("timeout"))
 			},
@@ -510,6 +513,7 @@ func TestJWTValidateMetrics(t *testing.T) {
 				TokenExpired()
 				TokenInvalid(error)
 				ClaimsExtractionFailed(error)
+				AudienceMissingAccepted()
 			}) {
 				p.TokenExpired()
 			},
@@ -524,6 +528,7 @@ func TestJWTValidateMetrics(t *testing.T) {
 				TokenExpired()
 				TokenInvalid(error)
 				ClaimsExtractionFailed(error)
+				AudienceMissingAccepted()
 			}) {
 				p.TokenInvalid(errors.New("bad sig"))
 			},
@@ -538,11 +543,27 @@ func TestJWTValidateMetrics(t *testing.T) {
 				TokenExpired()
 				TokenInvalid(error)
 				ClaimsExtractionFailed(error)
+				AudienceMissingAccepted()
 			}) {
 				p.ClaimsExtractionFailed(errors.New("missing iss"))
 			},
 			wantResult: `result="claims_extraction_failed"`,
 			wantStatus: `status="error"`,
+		},
+		{
+			name: "audience missing accepted",
+			action: func(p interface {
+				End()
+				JWKSLookupFailed(error)
+				TokenExpired()
+				TokenInvalid(error)
+				ClaimsExtractionFailed(error)
+				AudienceMissingAccepted()
+			}) {
+				p.AudienceMissingAccepted()
+			},
+			wantResult: `result="audience_missing_accepted"`,
+			wantStatus: `status="success"`,
 		},
 	}
 

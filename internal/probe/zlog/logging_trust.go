@@ -139,6 +139,11 @@ func (p *loggingJWTValidateProbe) ClaimsExtractionFailed(err error) {
 		Msg("claims extraction failed")
 }
 
+func (p *loggingJWTValidateProbe) AudienceMissingAccepted() {
+	p.logger.Info().
+		Msg("token accepted without audience claim")
+}
+
 func (p *loggingJWTValidateProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).

@@ -25,9 +25,8 @@ type JWTValidator struct {
 	cache                *jwkfetch.Cache
 	trustDomain          string
 	clock                clock.Clock
-	observer             JWTValidatorObserver
-	allowedAudiences     []string
-	allowMissingAudience bool
+	observer         JWTValidatorObserver
+	allowedAudiences []string
 }
 
 // JWTValidatorConfig contains configuration for JWT validation
@@ -59,13 +58,9 @@ type JWTValidatorConfig struct {
 	Observer JWTValidatorObserver
 
 	// AllowedAudiences restricts token aud claims. Empty disables enforcement.
+	// Include an empty string ("") to permit tokens that omit the aud claim;
+	// when aud is present it must match another entry in the list.
 	AllowedAudiences []string
-
-	// AllowMissingAudience, when true, permits tokens that carry no aud claim
-	// even when AllowedAudiences is configured. Tokens that do carry an aud
-	// must still match the allowlist. This is useful for issuers whose tokens
-	// legitimately omit audience (e.g. client_credentials grants).
-	AllowMissingAudience bool
 }
 
 // NewJWTValidator creates a new JWT validator with JWKS support
@@ -121,14 +116,13 @@ func NewJWTValidator(cfg JWTValidatorConfig) (*JWTValidator, error) {
 	}
 
 	return &JWTValidator{
-		issuer:               cfg.Issuer,
-		jwksURL:              jwksURL,
-		cache:                cache,
-		trustDomain:          cfg.TrustDomain,
-		clock:                clk,
-		observer:             obs,
-		allowedAudiences:     slices.Clone(cfg.AllowedAudiences),
-		allowMissingAudience: cfg.AllowMissingAudience,
+		issuer:           cfg.Issuer,
+		jwksURL:          jwksURL,
+		cache:            cache,
+		trustDomain:      cfg.TrustDomain,
+		clock:            clk,
+		observer:         obs,
+		allowedAudiences: slices.Clone(cfg.AllowedAudiences),
 	}, nil
 }
 
@@ -198,9 +192,13 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	maps.Copy(claimsMap, allClaims)
 
 	audiences, _ := token.Audience()
-	if err := v.validateAudience(audiences); err != nil {
+	missingAudienceAccepted, err := v.validateAudience(audiences)
+	if err != nil {
 		p.TokenInvalid(err)
 		return nil, err
+	}
+	if missingAudienceAccepted {
+		p.AudienceMissingAccepted()
 	}
 
 	scope := ""
@@ -225,22 +223,23 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	}, nil
 }
 
-func (v *JWTValidator) validateAudience(tokenAudiences []string) error {
+func (v *JWTValidator) validateAudience(tokenAudiences []string) (missingAudienceAccepted bool, err error) {
 	if len(v.allowedAudiences) == 0 {
-		return nil
+		return false, nil
 	}
+	allowMissing := slices.Contains(v.allowedAudiences, "")
 	if len(tokenAudiences) == 0 {
-		if v.allowMissingAudience {
-			return nil
+		if allowMissing {
+			return true, nil
 		}
-		return fmt.Errorf("%w: missing audience claim", ErrInvalidToken)
+		return false, fmt.Errorf("%w: missing audience claim", ErrInvalidToken)
 	}
 	for _, aud := range tokenAudiences {
 		if slices.Contains(v.allowedAudiences, aud) {
-			return nil
+			return false, nil
 		}
 	}
-	return fmt.Errorf("%w: audience not in allowlist", ErrInvalidToken)
+	return false, fmt.Errorf("%w: audience not in allowlist", ErrInvalidToken)
 }
 
 // Close cleans up resources (stops JWKS cache refresh)

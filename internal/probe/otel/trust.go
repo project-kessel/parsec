@@ -15,6 +15,7 @@ var (
 	jwtResultTokenExpired           = attribute.String("result", "token_expired")
 	jwtResultTokenInvalid           = attribute.String("result", "token_invalid")
 	jwtResultClaimsExtractionFailed = attribute.String("result", "claims_extraction_failed")
+	jwtResultAudienceMissingAccepted = attribute.String("result", "audience_missing_accepted")
 )
 
 type trustObserver struct {
@@ -119,6 +120,9 @@ func (p *jwtValidateProbe) TokenInvalid(_ error) {
 func (p *jwtValidateProbe) ClaimsExtractionFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = jwtResultClaimsExtractionFailed
+}
+func (p *jwtValidateProbe) AudienceMissingAccepted() {
+	p.result = jwtResultAudienceMissingAccepted
 }
 func (p *jwtValidateProbe) End() {
 	attrs := metric.WithAttributeSet(attribute.NewSet(p.issuer, p.result, p.status))
