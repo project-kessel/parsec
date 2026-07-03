@@ -99,6 +99,7 @@ func newJWTValidator(cfg ValidatorConfig, transport http.RoundTripper, trustObs 
 	if cfg.TrustDomain == "" {
 		return nil, fmt.Errorf("jwt_validator requires trust_domain")
 	}
+
 	validatorCfg := trust.JWTValidatorConfig{
 		Issuer:           cfg.Issuer,
 		JWKSURL:          cfg.JWKSURL,

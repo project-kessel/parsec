@@ -25,8 +25,8 @@ type JWTValidator struct {
 	cache                *jwkfetch.Cache
 	trustDomain          string
 	clock                clock.Clock
-	observer         JWTValidatorObserver
-	allowedAudiences []string
+	observer             JWTValidatorObserver
+	allowedAudiences     []string
 }
 
 // JWTValidatorConfig contains configuration for JWT validation
