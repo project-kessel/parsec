@@ -20,13 +20,13 @@ import (
 
 // JWTValidator validates JWT tokens using JWKS
 type JWTValidator struct {
-	issuer               string
-	jwksURL              string
-	cache                *jwkfetch.Cache
-	trustDomain          string
-	clock                clock.Clock
-	observer             JWTValidatorObserver
-	allowedAudiences     []string
+	issuer           string
+	jwksURL          string
+	cache            *jwkfetch.Cache
+	trustDomain      string
+	clock            clock.Clock
+	observer         JWTValidatorObserver
+	allowedAudiences []string
 }
 
 // JWTValidatorConfig contains configuration for JWT validation
