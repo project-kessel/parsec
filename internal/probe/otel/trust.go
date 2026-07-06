@@ -11,11 +11,10 @@ import (
 )
 
 var (
-	jwtResultJWKSLookupFailed        = attribute.String("result", "jwks_lookup_failed")
-	jwtResultTokenExpired            = attribute.String("result", "token_expired")
-	jwtResultTokenInvalid            = attribute.String("result", "token_invalid")
-	jwtResultClaimsExtractionFailed  = attribute.String("result", "claims_extraction_failed")
-	jwtResultAudienceMissingAccepted = attribute.String("result", "audience_missing_accepted")
+	jwtResultJWKSLookupFailed       = attribute.String("result", "jwks_lookup_failed")
+	jwtResultTokenExpired           = attribute.String("result", "token_expired")
+	jwtResultTokenInvalid           = attribute.String("result", "token_invalid")
+	jwtResultClaimsExtractionFailed = attribute.String("result", "claims_extraction_failed")
 
 	luaValidateResultRejected         = attribute.String("result", "rejected")
 	luaValidateResultScriptLoadFailed = attribute.String("result", "script_load_failed")
@@ -158,9 +157,6 @@ func (p *jwtValidateProbe) TokenInvalid(_ error) {
 func (p *jwtValidateProbe) ClaimsExtractionFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = jwtResultClaimsExtractionFailed
-}
-func (p *jwtValidateProbe) AudienceMissingAccepted() {
-	p.result = jwtResultAudienceMissingAccepted
 }
 func (p *jwtValidateProbe) End() {
 	attrs := metric.WithAttributeSet(attribute.NewSet(p.validatorType, p.validator, p.result, p.status))

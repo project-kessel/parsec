@@ -47,6 +47,8 @@ type JWTValidateProbe interface {
 	ClaimsExtractionFailed(err error)
 	// AudienceMissingAccepted is called when a token without an aud claim is
 	// accepted because the allowlist includes an empty string sentinel.
+	// Logging observers may emit an audit event; metrics observers treat this
+	// as a normal successful validation.
 	AudienceMissingAccepted()
 	End()
 }
