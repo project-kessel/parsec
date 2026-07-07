@@ -505,37 +505,6 @@ func TestJWTValidator_emptyAudienceSentinel(t *testing.T) {
 		}
 	})
 
-	t.Run("notifies observer when missing audience accepted", func(t *testing.T) {
-		recording := &recordingJWTValidateProbe{}
-		observedValidator, err := NewJWTValidator(JWTValidatorConfig{
-			Issuer:           fixture.Issuer(),
-			JWKSURL:          fixture.JWKSURL(),
-			TrustDomain:      "test-domain",
-			HTTPClient:       httpClient,
-			Clock:            fixture.Clock(),
-			AllowedAudiences: []string{"allowed-aud", ""},
-			Observer:         &recordingJWTValidatorObserver{probe: recording},
-		})
-		if err != nil {
-			t.Fatalf("failed to create validator: %v", err)
-		}
-
-		tokenString, err := fixture.CreateAndSignToken(map[string]interface{}{
-			"sub": "user@example.com",
-		})
-		if err != nil {
-			t.Fatalf("failed to create token: %v", err)
-		}
-
-		cred := &JWTCredential{BearerCredential: BearerCredential{Token: tokenString}}
-		if _, err := observedValidator.Validate(ctx, cred); err != nil {
-			t.Fatalf("expected validation success, got: %v", err)
-		}
-		if !recording.audienceMissingAccepted {
-			t.Fatal("expected AudienceMissingAccepted observer notification")
-		}
-	})
-
 	t.Run("empty string alone permits only missing aud", func(t *testing.T) {
 		missingOnlyValidator, err := NewJWTValidator(JWTValidatorConfig{
 			Issuer:           fixture.Issuer(),
@@ -575,24 +544,6 @@ func TestJWTValidator_emptyAudienceSentinel(t *testing.T) {
 			t.Fatalf("expected ErrInvalidToken for present audience with missing-only allowlist, got: %v", err)
 		}
 	})
-}
-
-type recordingJWTValidateProbe struct {
-	NoOpJWTValidateProbe
-	audienceMissingAccepted bool
-}
-
-func (p *recordingJWTValidateProbe) AudienceMissingAccepted() {
-	p.audienceMissingAccepted = true
-}
-
-type recordingJWTValidatorObserver struct {
-	NoOpJWTValidatorObserver
-	probe *recordingJWTValidateProbe
-}
-
-func (o *recordingJWTValidatorObserver) JWTValidateStarted(ctx context.Context, _ string) (context.Context, JWTValidateProbe) {
-	return ctx, o.probe
 }
 
 func TestJWTValidatorConfig(t *testing.T) {

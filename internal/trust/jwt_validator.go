@@ -192,13 +192,9 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	maps.Copy(claimsMap, allClaims)
 
 	audiences, _ := token.Audience()
-	missingAudienceAccepted, err := v.validateAudience(audiences)
-	if err != nil {
+	if err := v.validateAudience(audiences); err != nil {
 		p.TokenInvalid(err)
 		return nil, err
-	}
-	if missingAudienceAccepted {
-		p.AudienceMissingAccepted()
 	}
 
 	scope := ""
@@ -223,23 +219,23 @@ func (v *JWTValidator) Validate(ctx context.Context, credential Credential) (*Re
 	}, nil
 }
 
-func (v *JWTValidator) validateAudience(tokenAudiences []string) (missingAudienceAccepted bool, err error) {
+func (v *JWTValidator) validateAudience(tokenAudiences []string) error {
 	if len(v.allowedAudiences) == 0 {
-		return false, nil
+		return nil
 	}
 	allowMissing := slices.Contains(v.allowedAudiences, "")
 	if len(tokenAudiences) == 0 {
 		if allowMissing {
-			return true, nil
+			return nil
 		}
-		return false, fmt.Errorf("%w: missing audience claim", ErrInvalidToken)
+		return fmt.Errorf("%w: missing audience claim", ErrInvalidToken)
 	}
 	for _, aud := range tokenAudiences {
 		if slices.Contains(v.allowedAudiences, aud) {
-			return false, nil
+			return nil
 		}
 	}
-	return false, fmt.Errorf("%w: audience not in allowlist", ErrInvalidToken)
+	return fmt.Errorf("%w: audience not in allowlist", ErrInvalidToken)
 }
 
 // Close cleans up resources (stops JWKS cache refresh)
