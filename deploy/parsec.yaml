@@ -49,10 +49,20 @@ objects:
               - name: config-volume
                 mountPath: "/etc/parsec/scripts/redhat_identity.cel"
                 subPath: redhat_identity.cel
+              - name: config-volume
+                mountPath: "/etc/parsec/scripts/registry_auth.lua"
+                subPath: "registry_auth.lua"
+              - name: registry-certs
+                mountPath: "/etc/parsec/secrets/registry-certs"
+                readOnly: true
             volumes:
               - name: config-volume
                 secret:
                   secretName: ${PARSEC_CONFIG_SECRET}
+              - name: registry-certs
+                secret:
+                  secretName: ${REGISTRY_CERTS_SECRET}
+                  optional: true
           webServices:
             public:
               enabled: true
@@ -86,6 +96,9 @@ parameters:
   - description: Name of the K8s secret containing parsec config files (parsec.yaml, CEL scripts, etc.)
     name: PARSEC_CONFIG_SECRET
     value: parsec-config
+  - description: Name of the K8s secret containing registry mTLS client certs
+    name: REGISTRY_CERTS_SECRET
+    value: registry-certs
   - description: Memory request for Parsec service
     name: PARSEC_REQUESTS_MEMORY
     value: '256Mi'
