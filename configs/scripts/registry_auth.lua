@@ -58,9 +58,7 @@ function validate(input)
     return nil
   end
 
-  local claims = {
-    auth_type = "registry-auth"
-  }
+  local claims = {}
   if org_id ~= "" then
     claims.org_id = org_id
   end

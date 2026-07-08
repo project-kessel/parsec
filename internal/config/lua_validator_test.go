@@ -89,9 +89,7 @@ function validate(input)
   local org_id = string.sub(username, 1, pipe_pos - 1)
   local parsed_username = string.sub(username, pipe_pos + 1)
 
-  local claims = {
-    auth_type = "registry-auth"
-  }
+  local claims = {}
   if org_id ~= "" then
     claims.org_id = org_id
   end
@@ -155,10 +153,6 @@ end
 	if result.Claims.GetString("org_id") != "123" {
 		t.Fatalf("org_id=%v", result.Claims["org_id"])
 	}
-	if result.Claims.GetString("auth_type") != "registry-auth" {
-		t.Fatalf("auth_type=%v", result.Claims["auth_type"])
-	}
-
 	// Accepted: no org_id (pipe at start)
 	result, err = store.Validate(context.Background(), &trust.BasicAuthCredential{
 		Username: "|alice",
@@ -173,10 +167,6 @@ end
 	if result.Claims.Has("org_id") {
 		t.Fatalf("org_id should not be set, got %v", result.Claims["org_id"])
 	}
-	if result.Claims.GetString("auth_type") != "registry-auth" {
-		t.Fatalf("auth_type=%v", result.Claims["auth_type"])
-	}
-
 	// Rejected: missing pipe separator
 	_, err = store.Validate(context.Background(), &trust.BasicAuthCredential{
 		Username: "no-pipe",
