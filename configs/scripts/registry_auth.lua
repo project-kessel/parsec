@@ -30,7 +30,7 @@ function validate(input)
   local org_id = string.sub(username, 1, pipe_pos - 1)
   local parsed_username = string.sub(username, pipe_pos + 1)
 
-  if org_id == "" or parsed_username == "" then
+  if parsed_username == "" then
     return nil
   end
 
@@ -58,14 +58,18 @@ function validate(input)
     return nil
   end
 
+  local claims = {
+    auth_type = "registry-auth"
+  }
+  if org_id ~= "" then
+    claims.org_id = org_id
+  end
+
   return {
     subject = parsed_username,
     issuer = registry_url,
     trust_domain = trust_domain,
-    claims = {
-      org_id = org_id,
-      auth_type = "registry-auth"
-    }
+    claims = claims
   }
 end
 

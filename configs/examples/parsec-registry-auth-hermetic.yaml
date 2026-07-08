@@ -56,7 +56,7 @@ trust_store:
       config:
         registry_url: "https://example.container-registry-authorizer.stage.api.redhat.com/v1/authorization"
         trust_domain: "registry.example.com"
-        username_pattern: "^%d+|.+"
+        username_pattern: "^%d*|.+"
       caching:
         type: in_memory
         ttl: "5m"
