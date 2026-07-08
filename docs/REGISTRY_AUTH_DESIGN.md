@@ -28,7 +28,7 @@ Envoy CheckRequest (Authorization: Basic <base64>)
     - POSTs credentials to registry service via named HTTP client (mTLS)
     - Verifies access.pull == "granted"
     - Parses "org_id|username" format
-  - Returns trust.Result with org_id and auth_type claims
+  - Returns trust.Result with org_id claim (when present)
   |
   v
 [CEL Claim Mapper]
@@ -73,7 +73,7 @@ Validates `BasicAuthCredential` by calling an external registry authorization se
 1. Read `registry_url`, `trust_domain`, `username_pattern` from `config.get()`
 2. Reject empty username or password (return `nil`)
 3. Match username against Lua pattern if `username_pattern` is configured
-4. Parse username as `org_id|username` (split on first `|`); reject if pipe is missing, org_id is empty, or parsed username is empty (return `nil`)
+4. Parse username as `org_id|username` or `|username` (split on first `|`); reject if pipe is missing or parsed username is empty (return `nil`)
 5. POST `{"credentials":{"username":"...","password":"..."}}` to registry URL via `http.post()`
 6. Error if response is nil (raises Lua `error()`, propagates as a Go error)
 7. Reject non-200 status codes (return `nil`)
@@ -88,20 +88,20 @@ Validates `BasicAuthCredential` by calling an external registry authorization se
 
 | Claim | Value | Source |
 |-------|-------|--------|
-| `org_id` | Parsed from username prefix | `"123\|alice"` → `"123"` |
-| `auth_type` | `"registry-auth"` | Hardcoded |
+| `org_id` | Parsed from username prefix (only set when non-empty) | `"123\|alice"` → `"123"`, `"\|alice"` → not set |
 
 ### Username Format
 
-Usernames follow the pattern `org_id|username`:
+Usernames follow the pattern `org_id|username` or `|username` (without org ID):
 
 ```
 123|alice       → org_id="123", subject="alice"
 999|bob         → org_id="999", subject="bob"
 123|alice|extra → org_id="123", subject="alice|extra"  (split on first |)
+|alice          → org_id not set, subject="alice"
 ```
 
-The `username_pattern` config validates the raw username before parsing. The default pattern for Red Hat is `^%d+|.+` (numeric org ID, pipe, non-empty username) using Lua pattern syntax.
+The `username_pattern` config validates the raw username before parsing. The default pattern for Red Hat is `^%d*|.+` (zero or more digits before pipe, non-empty username) using Lua pattern syntax.
 
 ### Caching
 
@@ -164,7 +164,7 @@ trust_store:
       config:
         registry_url: "https://container-registry-authorizer.stage.api.redhat.com/v1/authorization"
         trust_domain: "registry.redhat.com"
-        username_pattern: "^%d+|.+"
+        username_pattern: "^%d*|.+"
       caching:
         type: in_memory
         ttl: "5m"
