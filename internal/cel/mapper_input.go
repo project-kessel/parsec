@@ -156,6 +156,10 @@ func UnwrapMappingError(err error) *service.ClaimMappingError {
 
 // ConvertCELValue converts a CEL ref.Val to a Go native value
 func ConvertCELValue(val ref.Val) any {
+	if val.Type() == types.NullType {
+		return nil
+	}
+
 	// First try the simple conversion
 	nativeVal := val.Value()
 

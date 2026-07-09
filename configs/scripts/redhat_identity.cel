@@ -16,13 +16,13 @@
 has(subject.issuer) && subject.issuer.contains("container-registry-authorizer.stage.api.redhat.com") ? {
   "identity": {
     "auth_type": "registry-auth",
-    "org_id": has(subject.claims) && has(subject.claims.org_id) ? subject.claims.org_id : "",
+    "org_id": has(subject.claims) && has(subject.claims.org_id) ? subject.claims.org_id : null,
     "type": "User",
     "user": {
       "username": has(subject.subject) ? subject.subject : ""
     },
     "internal": {
-      "org_id": has(subject.claims) && has(subject.claims.org_id) ? subject.claims.org_id : "",
+      "org_id": has(subject.claims) && has(subject.claims.org_id) ? subject.claims.org_id : null,
       "cross_access": false,
       "auth_time": now_ms()
     }

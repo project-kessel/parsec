@@ -56,8 +56,8 @@ func registryAuthSubtests(t *testing.T, authzServer *server.AuthzServer) {
 		if identity["auth_type"] != "registry-auth" {
 			t.Errorf("expected auth_type 'registry-auth', got %v", identity["auth_type"])
 		}
-		if identity["org_id"] != "" {
-			t.Errorf("expected org_id '', got %v", identity["org_id"])
+		if identity["org_id"] != nil {
+			t.Errorf("expected org_id nil, got %v", identity["org_id"])
 		}
 
 		user, ok := identity["user"].(map[string]any)
