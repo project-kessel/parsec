@@ -13,7 +13,7 @@ import (
 
 // IMPORTANT: registry auth flow is specific to Red Hat HCC deployment of parsec.
 // These tests could be ripped out at any time should we refactor e2e tests to keep things generic.
-// 
+//
 // registryAuthSubtests runs the registry auth test cases against the given
 // AuthzServer. Registry auth validates Basic Auth credentials of the form
 // "org_id|username:password" against an external registry authorization service.
