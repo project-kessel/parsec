@@ -136,6 +136,8 @@ has(subject.issuer) && subject.issuer.contains(<configured registry service url>
 
 The `issuer` is set to the `registry_url` config value by the Lua script on successful validation. The CEL script should use the appropriate URL substring for the target environment.
 
+When `org_id` is absent from claims, the identity envelope sets `org_id` to `null`.
+
 ## Configuration
 
 ```yaml
