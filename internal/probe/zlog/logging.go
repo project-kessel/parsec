@@ -148,6 +148,12 @@ func (p *loggingTokenIssuanceProbe) IssuerNotFound(tokenType service.TokenType, 
 		Msg("No issuer found for token type")
 }
 
+func (p *loggingTokenIssuanceProbe) IssuancePolicyDenied(err error) {
+	p.logger.Warn().
+		Err(err).
+		Msg("issuance denied by policy")
+}
+
 func (p *loggingTokenIssuanceProbe) End() {
 	p.logger.Debug().
 		Dur("duration", time.Since(p.startTime)).

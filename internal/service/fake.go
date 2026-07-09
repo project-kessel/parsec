@@ -187,6 +187,10 @@ func (p *FakeProbe) IssuerNotFound(tokenType TokenType, err error) {
 	p.recordCall("IssuerNotFound", tokenType, err)
 }
 
+func (p *FakeProbe) IssuancePolicyDenied(err error) {
+	p.recordCall("IssuancePolicyDenied", err)
+}
+
 // TokenExchangeProbe methods
 func (p *FakeProbe) ActorCredentialExtracted(cred trust.Credential, headersUsed []string) {
 	p.recordCall("ActorCredentialExtracted", cred, headersUsed)

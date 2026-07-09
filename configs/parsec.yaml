@@ -35,6 +35,20 @@ trust_store:
       refresh_interval: "15m"
       audiences: ["rhsm-api", "customer-portal", "api.console"]
 
+# Issuance policy — evaluated after credential validation, before token
+# issuance. Applies to both ext_authz and exchange flows.
+#
+# This is policy over trusted claims, not trust establishment. Validators
+# determine whether a credential is authentic; issuance policy determines
+# whether those claims are acceptable for token issuance.
+#
+# issuance_policy:
+#   type: claim_assertions
+#   rejected_claims:
+#     impersonated: true           # reject impersonated SSO sessions
+#   required_claims:
+#     - idp                        # require third-party IdP provenance
+
 # Data sources for token enrichment
 data_sources:
   - name: identity-policy

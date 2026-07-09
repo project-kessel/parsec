@@ -40,8 +40,27 @@ type Config struct {
 	// order. Shared by authz subject/actor extraction and exchange caller extraction.
 	CredentialSources []CredentialSourceConfig `koanf:"credential_sources"`
 
+	// IssuancePolicy configures a pre-issuance policy evaluated before any
+	// tokens are issued. Applies to both ext_authz and exchange flows.
+	IssuancePolicy *IssuancePolicyConfig `koanf:"issuance_policy"`
+
 	// Observability configuration (logging, metrics, tracing)
 	Observability *ObservabilityConfig `koanf:"observability"`
+}
+
+// IssuancePolicyConfig configures the pre-issuance policy on TokenService.
+type IssuancePolicyConfig struct {
+	// Type selects the policy implementation.
+	// Options: "claim_assertions"
+	Type string `koanf:"type"`
+
+	// RequiredClaims lists claim names that must be present in the subject's
+	// validated claims. If any are absent, issuance is denied.
+	RequiredClaims []string `koanf:"required_claims"`
+
+	// RejectedClaims maps claim names to values that cause issuance denial.
+	// If a subject's claim matches a rejected value, issuance is denied.
+	RejectedClaims map[string]any `koanf:"rejected_claims"`
 }
 
 // ServerConfig contains network-level server settings

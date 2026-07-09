@@ -289,15 +289,37 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 		return nil, err
 	}
 
+	var tsOpts []service.TokenServiceOption
+
+	if p.config.IssuancePolicy != nil {
+		policy, err := newIssuancePolicy(*p.config.IssuancePolicy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create issuance policy: %w", err)
+		}
+		tsOpts = append(tsOpts, service.WithIssuancePolicy(policy))
+	}
+
 	tokenService := service.NewTokenService(
 		p.config.TrustDomain,
 		dataSourceRegistry,
 		issuerRegistry,
 		obs,
+		tsOpts...,
 	)
 
 	p.tokenService = tokenService
 	return tokenService, nil
+}
+
+func newIssuancePolicy(cfg IssuancePolicyConfig) (service.IssuancePolicy, error) {
+	switch cfg.Type {
+	case "claim_assertions":
+		return service.NewClaimAssertionPolicy(cfg.RequiredClaims, cfg.RejectedClaims), nil
+	case "":
+		return nil, fmt.Errorf("issuance_policy.type is required")
+	default:
+		return nil, fmt.Errorf("unknown issuance_policy type: %q (supported: claim_assertions)", cfg.Type)
+	}
 }
 
 // metricsProvider returns the shared metrics provider, lazily created and

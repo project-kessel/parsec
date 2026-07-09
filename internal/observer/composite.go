@@ -653,6 +653,12 @@ func (m *compositeTokenIssuanceProbe) IssuerNotFound(tokenType service.TokenType
 	}
 }
 
+func (m *compositeTokenIssuanceProbe) IssuancePolicyDenied(err error) {
+	for _, p := range m.probes {
+		p.IssuancePolicyDenied(err)
+	}
+}
+
 func (m *compositeTokenIssuanceProbe) End() {
 	for _, p := range m.probes {
 		p.End()

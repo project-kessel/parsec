@@ -19,8 +19,9 @@ var (
 
 	resultSuccess = attribute.String("result", "success")
 
-	resultIssuanceFailed = attribute.String("result", "issuance_failed")
-	resultIssuerNotFound = attribute.String("result", "issuer_not_found")
+	resultIssuanceFailed       = attribute.String("result", "issuance_failed")
+	resultIssuerNotFound       = attribute.String("result", "issuer_not_found")
+	resultIssuancePolicyDenied = attribute.String("result", "issuance_policy_denied")
 
 	resultActorValidationFailed             = attribute.String("result", "actor_validation_failed")
 	resultRequestContextParseFailed         = attribute.String("result", "request_context_parse_failed")
@@ -130,6 +131,10 @@ func (p *tokenIssuanceProbe) TokenTypeIssuanceFailed(_ service.TokenType, _ erro
 func (p *tokenIssuanceProbe) IssuerNotFound(_ service.TokenType, _ error) {
 	p.status = errorStatusAttr
 	p.result = resultIssuerNotFound
+}
+func (p *tokenIssuanceProbe) IssuancePolicyDenied(_ error) {
+	p.status = errorStatusAttr
+	p.result = resultIssuancePolicyDenied
 }
 func (p *tokenIssuanceProbe) End() {
 	attrs := metric.WithAttributeSet(attribute.NewSet(p.result, p.status))

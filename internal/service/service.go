@@ -16,6 +16,19 @@ type TokenService struct {
 	dataSources    *DataSourceRegistry
 	issuerRegistry Registry
 	observer       TokenServiceObserver
+	issuancePolicy IssuancePolicy
+}
+
+// TokenServiceOption configures optional TokenService behavior.
+type TokenServiceOption func(*TokenService)
+
+// WithIssuancePolicy sets a policy that is evaluated before any tokens are
+// issued. The policy receives the validated subject and may reject issuance
+// based on the subject's claims.
+func WithIssuancePolicy(p IssuancePolicy) TokenServiceOption {
+	return func(ts *TokenService) {
+		ts.issuancePolicy = p
+	}
 }
 
 // NewTokenService creates a new token service
@@ -24,17 +37,21 @@ func NewTokenService(
 	dataSources *DataSourceRegistry,
 	issuerRegistry Registry,
 	observer TokenServiceObserver,
+	opts ...TokenServiceOption,
 ) *TokenService {
-	// Use null object pattern - default to no-op observer if none provided
 	if observer == nil {
 		observer = NoOpTokenServiceObserver{}
 	}
-	return &TokenService{
+	ts := &TokenService{
 		trustDomain:    trustDomain,
 		dataSources:    dataSources,
 		issuerRegistry: issuerRegistry,
 		observer:       observer,
 	}
+	for _, opt := range opts {
+		opt(ts)
+	}
+	return ts
 }
 
 // TrustDomain returns the trust domain for this token service
@@ -65,9 +82,15 @@ type IssueRequest struct {
 // IssueTokens orchestrates the complete token issuance process
 // Returns a map of token type to issued token
 func (ts *TokenService) IssueTokens(ctx context.Context, req *IssueRequest) (map[TokenType]*Token, error) {
-	// Create request-scoped probe that captures execution context
 	ctx, p := ts.observer.TokenIssuanceStarted(ctx, req.Subject, req.Actor, req.Scope, req.TokenTypes)
 	defer p.End()
+
+	if ts.issuancePolicy != nil {
+		if err := ts.issuancePolicy.Evaluate(ctx, req.Subject); err != nil {
+			p.IssuancePolicyDenied(err)
+			return nil, fmt.Errorf("issuance policy: %w", err)
+		}
+	}
 
 	// Build issue context with base information needed for all issuers
 	// Audience is always the trust domain per transaction token spec

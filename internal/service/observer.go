@@ -39,6 +39,10 @@ type TokenIssuanceProbe interface {
 	// IssuerNotFound is called when no issuer is registered for a requested token type.
 	IssuerNotFound(tokenType TokenType, err error)
 
+	// IssuancePolicyDenied is called when an IssuancePolicy rejects token issuance
+	// before any tokens are minted.
+	IssuancePolicyDenied(err error)
+
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	// The probe determines success/failure based on methods called before End().
 	End()
@@ -164,6 +168,7 @@ func (NoOpTokenIssuanceProbe) TokenTypeIssuanceStarted(TokenType)           {}
 func (NoOpTokenIssuanceProbe) TokenTypeIssuanceSucceeded(TokenType, *Token) {}
 func (NoOpTokenIssuanceProbe) TokenTypeIssuanceFailed(TokenType, error)     {}
 func (NoOpTokenIssuanceProbe) IssuerNotFound(TokenType, error)              {}
+func (NoOpTokenIssuanceProbe) IssuancePolicyDenied(error)                   {}
 func (NoOpTokenIssuanceProbe) End()                                         {}
 
 // NoOpTokenExchangeProbe is a no-op implementation of TokenExchangeProbe.
