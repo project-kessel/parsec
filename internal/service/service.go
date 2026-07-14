@@ -19,15 +19,19 @@ type TokenService struct {
 	issuancePolicy IssuancePolicy
 }
 
+type tokenServiceConfig struct {
+	issuancePolicy IssuancePolicy
+}
+
 // TokenServiceOption configures optional TokenService behavior.
-type TokenServiceOption func(*TokenService)
+type TokenServiceOption func(*tokenServiceConfig)
 
 // WithIssuancePolicy sets a policy that is evaluated before any tokens are
 // issued. The policy receives the validated subject and may reject issuance
 // based on the subject's claims.
 func WithIssuancePolicy(p IssuancePolicy) TokenServiceOption {
-	return func(ts *TokenService) {
-		ts.issuancePolicy = p
+	return func(c *tokenServiceConfig) {
+		c.issuancePolicy = p
 	}
 }
 
@@ -42,16 +46,17 @@ func NewTokenService(
 	if observer == nil {
 		observer = NoOpTokenServiceObserver{}
 	}
-	ts := &TokenService{
+	var cfg tokenServiceConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return &TokenService{
 		trustDomain:    trustDomain,
 		dataSources:    dataSources,
 		issuerRegistry: issuerRegistry,
 		observer:       observer,
+		issuancePolicy: cfg.issuancePolicy,
 	}
-	for _, opt := range opts {
-		opt(ts)
-	}
-	return ts
 }
 
 // TrustDomain returns the trust domain for this token service

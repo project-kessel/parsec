@@ -109,4 +109,11 @@ func TestNewIssuancePolicy(t *testing.T) {
 			t.Fatal("expected error for unknown type")
 		}
 	})
+
+	t.Run("claim_assertions with no constraints errors", func(t *testing.T) {
+		_, err := newIssuancePolicy(IssuancePolicyConfig{Type: "claim_assertions"})
+		if err == nil {
+			t.Fatal("expected error for claim_assertions with no required or rejected claims")
+		}
+	})
 }

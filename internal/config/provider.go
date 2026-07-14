@@ -314,6 +314,9 @@ func (p *Provider) TokenService() (*service.TokenService, error) {
 func newIssuancePolicy(cfg IssuancePolicyConfig) (service.IssuancePolicy, error) {
 	switch cfg.Type {
 	case "claim_assertions":
+		if len(cfg.RequiredClaims) == 0 && len(cfg.RejectedClaims) == 0 {
+			return nil, fmt.Errorf("issuance_policy: claim_assertions requires at least one of required_claims or rejected_claims")
+		}
 		return service.NewClaimAssertionPolicy(cfg.RequiredClaims, cfg.RejectedClaims), nil
 	case "":
 		return nil, fmt.Errorf("issuance_policy.type is required")
