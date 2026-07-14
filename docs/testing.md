@@ -79,4 +79,4 @@ When external dependencies are needed, leverage testcontainers to download and r
 
 E2E tests live in `test/e2e/` and have additional rules beyond general testing guidelines. See [test/e2e/README.md](../test/e2e/README.md) for the full specification.
 
-Key rule: e2e tests must only use the external gRPC API (`Check()` or `Exchange()`). They must not call internal component APIs directly.
+Key rule: test actions and assertions must go through the external gRPC API (`Check()` or `Exchange()`). Using internal packages to set up hermetic fixtures and wire the server is expected, but the system under test must only be exercised via its public API.
