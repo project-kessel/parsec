@@ -9,9 +9,12 @@ server:
 
 # Observability configuration
 observability:
-  type: logging
-  log_level: debug
+  type: composite
+  log_level: info
   log_format: json
+  observers:
+    - type: logging
+    - type: metrics
 
 # Trust domain for this parsec instance
 # Used as the audience (aud) claim in all issued tokens
