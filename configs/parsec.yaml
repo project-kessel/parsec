@@ -33,7 +33,7 @@ trust_store:
       jwks_url: "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/certs"
       trust_domain: "https://sso.redhat.com/auth/realms/redhat-external"
       refresh_interval: "15m"
-      audiences: ["rhsm-api", "customer-portal", "api.console"]
+      audiences: ["rhsm-api", "customer-portal", "api.console", ""]
 
 # Data sources for token enrichment
 data_sources:
