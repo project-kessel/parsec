@@ -1,4 +1,6 @@
-For how to...
+Before writing code in any directory that contains a README.md, read it first — READMEs document conventions specific to that area.
+
+For how to...
 - implement instrumentation (observability: tracing, logging, metrics, ...), see docs/observer-pattern.md
 - write tests, see docs/testing.md
 - run tests, don't be afraid to run the whole suite even if some tests require containers.

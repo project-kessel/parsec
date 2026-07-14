@@ -74,3 +74,9 @@ Stubs or dummies can be used judiciously when the interaction is completely triv
 ## Hermetic
 
 When external dependencies are needed, leverage testcontainers to download and run them locally. This should only be for when this is essential. For example, we can't test a PostgresStore without a Postgres. Writing a "fake" postgres is absurd 🙂. But, if you need to test business logic that involves a repository, using a real postgres is overkill. Just use the in memory fake (e.g. a custom in memory implementation, or sqlite with an in memory database, etc.).
+
+## E2E Tests
+
+E2E tests live in `test/e2e/` and have additional rules beyond general testing guidelines. See [test/e2e/README.md](../test/e2e/README.md) for the full specification.
+
+Key rule: e2e tests must only use the external gRPC API (`Check()` or `Exchange()`). They must not call internal component APIs directly.
