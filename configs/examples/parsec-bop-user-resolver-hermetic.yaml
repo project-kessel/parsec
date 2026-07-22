@@ -1,0 +1,94 @@
+# parsec Configuration - BOP User Resolver Hermetic Testing
+#
+# For testing BOP user resolution (bearer token with plain username)
+# without external dependencies. All HTTP calls are stubbed with fixtures.
+#
+# Usage:
+#   ./bin/parsec serve --config ./configs/examples/parsec-bop-user-resolver-hermetic.yaml
+#
+#   grpcurl -plaintext \
+#     -d '{
+#       "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+#       "audience": "parsec.example.com",
+#       "subject_token": "testuser",
+#       "subject_token_type": "urn:ietf:params:oauth:token-type:access_token"
+#     }' \
+#     localhost:9090 parsec.v1.TokenExchangeService/Exchange
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+observability:
+  type: logging
+  log_level: debug
+  log_format: json
+
+trust_domain: "parsec.example.com"
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+# Fixtures replace real HTTP calls with canned responses
+fixtures:
+  - type: http_rule
+    request:
+      method: POST
+      url: "https://example.bop.redhat.com/v1/users.*"
+      url_type: pattern
+    response:
+      status: 200
+      headers:
+        Content-Type: application/json
+      body: '[{"id":"12345","org_id":"67890","account_number":"11111","email":"testuser@example.com","first_name":"Test","last_name":"User","username":"testuser","is_org_admin":false,"is_internal":false,"is_active":true,"locale":"en_US"}]'
+
+credential_sources:
+  - name: authorization-bearer
+    type: authorization_bearer_opaque
+
+trust_store:
+  type: stub_store
+  validators:
+    - name: bop-user-resolver
+      type: lua_validator
+      credential_types: ["bearer"]
+      script_file: ./configs/scripts/bop_user_resolver.lua
+      config:
+        bop_url: "https://example.bop.redhat.com"
+        users_path: "/v1/users"
+        trust_domain: "bop.redhat.com"
+        api_token: "test-api-token"
+        client_id: "test-client-id"
+        environment: "test"
+      caching:
+        type: in_memory
+        ttl: "5m"
+
+data_sources: []
+
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.example.com"
+    ttl: 5m
+    transaction_context:
+      - type: cel
+        name: redhat-identity-mapper
+        script_file: ./configs/scripts/redhat_identity.cel
+    request_context:
+      - type: request_attributes
+
+  - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
+    type: unsigned
+    claim_mappers:
+      - type: cel
+        name: redhat-identity-mapper
+        script_file: ./configs/scripts/redhat_identity.cel
+
+authz_server:
+  token_types:
+    - type: "urn:ietf:params:oauth:token-type:txn_token"
+      header_name: "Transaction-Token"
+    - type: "urn:redhat:params:oauth:token-type:rh-identity"
+      header_name: "x-rh-identity"

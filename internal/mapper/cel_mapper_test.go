@@ -854,6 +854,239 @@ func TestCELMapper_Fail(t *testing.T) {
 	})
 }
 
+func TestCELMapper_BOPIdentityBranch(t *testing.T) {
+	ctx := context.Background()
+
+	// This is the BOP branch extracted from redhat_identity.cel.
+	// BOP-resolved tokens have identity_source == "bop" set by
+	// bop_user_resolver.lua; the envelope matches 3scale's
+	// user_to_identity output (no entitlements, no auth_time).
+	const bopBranchCEL = `
+has(subject.claims) && has(subject.claims.identity_source) && subject.claims.identity_source == "bop" ? {
+  "identity": {
+    "account_number": has(subject.claims.account_number) ? safeToString(subject.claims.account_number) : "",
+    "org_id": has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "",
+    "type": "User",
+    "auth_type": "jwt-auth",
+    "user": {
+      "username": has(subject.claims.username) ? subject.claims.username : "",
+      "email": has(subject.claims.email) ? subject.claims.email : "",
+      "first_name": has(subject.claims.first_name) ? subject.claims.first_name : "",
+      "last_name": has(subject.claims.last_name) ? subject.claims.last_name : "",
+      "is_active": has(subject.claims.is_active) ? subject.claims.is_active : true,
+      "is_org_admin": has(subject.claims.is_org_admin) ? subject.claims.is_org_admin : false,
+      "is_internal": has(subject.claims.is_internal) ? subject.claims.is_internal : false,
+      "locale": has(subject.claims.locale) ? subject.claims.locale : "",
+      "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : ""
+    },
+    "internal": {
+      "org_id": has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "",
+      "cross_access": false
+    }
+  }
+} : fail("unsupported_token_type")
+`
+
+	t.Run("produces correct identity envelope from BOP claims", func(t *testing.T) {
+		m, err := NewCELMapper(bopBranchCEL)
+		if err != nil {
+			t.Fatalf("failed to create mapper: %v", err)
+		}
+
+		result, err := m.Map(ctx, &service.MapperInput{
+			Subject: &trust.Result{
+				Subject:     "12345",
+				Issuer:      "https://example.bop.redhat.com",
+				TrustDomain: "bop.redhat.com",
+				Claims: claims.Claims{
+					"org_id":          "67890",
+					"account_number":  "11111",
+					"email":           "alice@example.com",
+					"first_name":      "Alice",
+					"last_name":       "Developer",
+					"username":        "alice",
+					"is_org_admin":    true,
+					"is_internal":     false,
+					"is_active":       true,
+					"locale":          "en_US",
+					"user_id":         "12345",
+					"identity_source": "bop",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Map: %v", err)
+		}
+
+		identity, ok := result["identity"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected identity to be a map, got %T", result["identity"])
+		}
+
+		if identity["auth_type"] != "jwt-auth" {
+			t.Errorf("auth_type=%v, want jwt-auth", identity["auth_type"])
+		}
+		if identity["org_id"] != "67890" {
+			t.Errorf("org_id=%v, want 67890", identity["org_id"])
+		}
+		if identity["account_number"] != "11111" {
+			t.Errorf("account_number=%v, want 11111", identity["account_number"])
+		}
+		if identity["type"] != "User" {
+			t.Errorf("type=%v, want User", identity["type"])
+		}
+
+		user, ok := identity["user"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected user to be a map, got %T", identity["user"])
+		}
+		if user["username"] != "alice" {
+			t.Errorf("username=%v, want alice", user["username"])
+		}
+		if user["email"] != "alice@example.com" {
+			t.Errorf("email=%v, want alice@example.com", user["email"])
+		}
+		if user["first_name"] != "Alice" {
+			t.Errorf("first_name=%v, want Alice", user["first_name"])
+		}
+		if user["last_name"] != "Developer" {
+			t.Errorf("last_name=%v, want Developer", user["last_name"])
+		}
+		if user["is_active"] != true {
+			t.Errorf("is_active=%v, want true", user["is_active"])
+		}
+		if user["is_org_admin"] != true {
+			t.Errorf("is_org_admin=%v, want true", user["is_org_admin"])
+		}
+		if user["is_internal"] != false {
+			t.Errorf("is_internal=%v, want false", user["is_internal"])
+		}
+		if user["locale"] != "en_US" {
+			t.Errorf("locale=%v, want en_US", user["locale"])
+		}
+		if user["user_id"] != "12345" {
+			t.Errorf("user_id=%v, want 12345", user["user_id"])
+		}
+
+		internal, ok := identity["internal"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected internal to be a map, got %T", identity["internal"])
+		}
+		if internal["org_id"] != "67890" {
+			t.Errorf("internal.org_id=%v, want 67890", internal["org_id"])
+		}
+		if internal["cross_access"] != false {
+			t.Errorf("internal.cross_access=%v, want false", internal["cross_access"])
+		}
+
+		if _, hasEntitlements := result["entitlements"]; hasEntitlements {
+			t.Error("BOP identity envelope must not contain entitlements key")
+		}
+	})
+
+	t.Run("does not match non-BOP tokens", func(t *testing.T) {
+		m, err := NewCELMapper(bopBranchCEL)
+		if err != nil {
+			t.Fatalf("failed to create mapper: %v", err)
+		}
+
+		_, mapErr := m.Map(ctx, &service.MapperInput{
+			Subject: &trust.Result{
+				Subject: "user@example.com",
+				Issuer:  "https://sso.redhat.com",
+				Claims: claims.Claims{
+					"preferred_username": "user@example.com",
+					"scope":              "openid",
+				},
+			},
+		})
+		if !errors.Is(mapErr, service.ErrClaimMapping) {
+			t.Fatalf("expected ErrClaimMapping for non-BOP token, got: %v", mapErr)
+		}
+	})
+
+	t.Run("coerces numeric org_id and user_id to strings", func(t *testing.T) {
+		m, err := NewCELMapper(bopBranchCEL)
+		if err != nil {
+			t.Fatalf("failed to create mapper: %v", err)
+		}
+
+		result, err := m.Map(ctx, &service.MapperInput{
+			Subject: &trust.Result{
+				Subject: "99",
+				Claims: claims.Claims{
+					"org_id":          int64(67890),
+					"account_number":  int64(11111),
+					"user_id":         int64(99),
+					"username":        "bob",
+					"identity_source": "bop",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Map: %v", err)
+		}
+
+		identity := result["identity"].(map[string]any)
+		if identity["org_id"] != "67890" {
+			t.Errorf("org_id=%v (type %T), want string 67890", identity["org_id"], identity["org_id"])
+		}
+		if identity["account_number"] != "11111" {
+			t.Errorf("account_number=%v, want string 11111", identity["account_number"])
+		}
+
+		user := identity["user"].(map[string]any)
+		if user["user_id"] != "99" {
+			t.Errorf("user_id=%v (type %T), want string 99", user["user_id"], user["user_id"])
+		}
+
+		internal := identity["internal"].(map[string]any)
+		if internal["org_id"] != "67890" {
+			t.Errorf("internal.org_id=%v, want string 67890", internal["org_id"])
+		}
+	})
+
+	t.Run("defaults missing optional fields", func(t *testing.T) {
+		m, err := NewCELMapper(bopBranchCEL)
+		if err != nil {
+			t.Fatalf("failed to create mapper: %v", err)
+		}
+
+		result, err := m.Map(ctx, &service.MapperInput{
+			Subject: &trust.Result{
+				Subject: "12345",
+				Claims: claims.Claims{
+					"org_id":          "67890",
+					"user_id":         "12345",
+					"identity_source": "bop",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Map: %v", err)
+		}
+
+		identity := result["identity"].(map[string]any)
+		user := identity["user"].(map[string]any)
+
+		if user["email"] != "" {
+			t.Errorf("email=%v, want empty string", user["email"])
+		}
+		if user["first_name"] != "" {
+			t.Errorf("first_name=%v, want empty string", user["first_name"])
+		}
+		if user["is_active"] != true {
+			t.Errorf("is_active=%v, want true (default)", user["is_active"])
+		}
+		if user["is_org_admin"] != false {
+			t.Errorf("is_org_admin=%v, want false (default)", user["is_org_admin"])
+		}
+		if user["is_internal"] != false {
+			t.Errorf("is_internal=%v, want false (default)", user["is_internal"])
+		}
+	})
+}
+
 func TestCELMapper_ErrorClaimAllowedInOutput(t *testing.T) {
 	ctx := context.Background()
 

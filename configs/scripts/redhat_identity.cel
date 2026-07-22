@@ -4,6 +4,7 @@
 //   { "identity": { ... }, "entitlements": {} }
 //
 // Supports:
+//   - BOP-resolved tokens (identity_source == "bop", from bop_user_resolver.lua)
 //   - Registry Auth tokens (issuer is "container-registry-authorizer(.stage).api.redhat.com")
 //   - Service Account tokens (preferred_username starts with "service-account-")
 //   - Console API tokens (scope contains "api.console")
@@ -15,6 +16,29 @@
 //
 // Based on: https://github.com/RedHatInsights/insights-3scale
 
+has(subject.claims) && has(subject.claims.identity_source) && subject.claims.identity_source == "bop" ? {
+  "identity": {
+    "account_number": has(subject.claims.account_number) ? safeToString(subject.claims.account_number) : "",
+    "org_id": has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "",
+    "type": "User",
+    "auth_type": "jwt-auth",
+    "user": {
+      "username": has(subject.claims.username) ? subject.claims.username : "",
+      "email": has(subject.claims.email) ? subject.claims.email : "",
+      "first_name": has(subject.claims.first_name) ? subject.claims.first_name : "",
+      "last_name": has(subject.claims.last_name) ? subject.claims.last_name : "",
+      "is_active": has(subject.claims.is_active) ? subject.claims.is_active : true,
+      "is_org_admin": has(subject.claims.is_org_admin) ? subject.claims.is_org_admin : false,
+      "is_internal": has(subject.claims.is_internal) ? subject.claims.is_internal : false,
+      "locale": has(subject.claims.locale) ? subject.claims.locale : "",
+      "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : ""
+    },
+    "internal": {
+      "org_id": has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "",
+      "cross_access": false
+    }
+  }
+} : (
 has(subject.issuer) && subject.issuer.contains("container-registry-authorizer") && subject.issuer.contains("api.redhat.com") ? {
   "identity": {
     "auth_type": "registry-auth",
@@ -168,5 +192,6 @@ isServiceAccountToken(subject.claims) ? {
       } : fail("unsupported_token_type")
     )
   )
+)
 )
 )

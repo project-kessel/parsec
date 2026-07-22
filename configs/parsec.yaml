@@ -38,6 +38,21 @@ trust_store:
       refresh_interval: "15m"
       audiences: ["rhsm-api", "customer-portal", "api.console", ""]
 
+    - name: bop-user-resolver
+      type: lua_validator
+      credential_types: ["bearer"]
+      script_file: ./configs/scripts/bop_user_resolver.lua
+      config:
+        bop_url: "${PARSEC_BOP_URL}"
+        users_path: "/v1/users"
+        trust_domain: "bop.redhat.com"
+        api_token: "${PARSEC_BOP_API_TOKEN}"
+        client_id: "${PARSEC_BOP_CLIENT_ID}"
+        environment: "${PARSEC_BOP_ENVIRONMENT}"
+      caching:
+        type: in_memory
+        ttl: "5m"
+
 # Data sources for token enrichment
 data_sources:
   - name: identity-policy
