@@ -78,7 +78,7 @@ sequenceDiagram
    - Gate: `has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"`
    - When gated on: `datasource("user_entitlements")` must be non-null or `fail("entitlements unavailable")`
    - When gated off or ineligible auth (`registry-auth`, `ServiceAccount`): `{}`
-4. **Caching:** `caching.type` + `fetch_cache_key` masking to `account_number` / `org_id` / `user_id`. Default TTL **5m** when `ttl` omitted.
+4. **Caching:** `caching.type` + `fetch_cache_key` masking to `account_number` / `org_id` / `user_id` / `preferred_username` (derived via `build_identity_envelope`). Default TTL **5m** when `ttl` omitted.
 5. **Config:** Wire DS fail-safe — absent extension / gate off → today’s `{}`.
 
 ### Alternatives Considered
@@ -157,7 +157,15 @@ Single PR (atomic: generic `Base64Service` + entitlements Lua/CEL/config/tests).
 - Single header: `x-rh-identity`
 - Fail-closed via `error(...)` on nil response, status ≠ 200, bad JSON
 - Return `{ data = response.body, content_type = "application/json" }` verbatim
-- `fetch_cache_key`: mask to account_number / org_id / user_id only
+- `fetch_cache_key`: delegates to `build_identity_envelope(input)` and masks to
+  `account_number` / `org_id` / `user_id` / `preferred_username`
+  - Each field varies independently — two users that differ on any one field must
+    not share a cache entry
+  - Absent or empty claims produce empty-string values (no error, no panic)
+  - `preferred_username` is resolved via the same fallback chain as `fetch` (i.e.
+    `preferred_username` → `username` → `subject.subject`), ensuring two users
+    with the same account/org but different usernames get distinct cache slots even
+    when `user_id` is absent
 
 #### Step 4: Update `redhat_identity.cel`
 
@@ -209,16 +217,40 @@ data_sources:
 - `configs/README.md` — entitlements DS + `enable_entitlements`
 - `internal/datasource/LUA_DATASOURCE.md` — pointer to `user_entitlements.lua`
 
-#### Step 8: Downstream app-interface (follow-up, separate repo)
+#### Step 8: Downstream app-interface synchronization (merge prerequisite)
 
-**Status**: Pending (follow-up)
+**Status**: Pending
+
+> **This step is a required merge prerequisite.** The PR must not be merged until
+> all app-interface artifacts listed below are coordinated, applied to stage, and
+> validated. Fail-safe gating (absent DS / gate off → `{}`) is preserved until
+> the full rollout is complete.
 
 Per [`.cursor/rules/deploy-config-sync.mdc`](../../.cursor/rules/deploy-config-sync.mdc):
 
-- Add `user_entitlements` DS + script mount/`stringData` for stage and prod
-- Set `entitlements_api` via secret/env
-- Configure Envoy `context_extensions.enable_entitlements: "true"` only where needed
-- Until updated: gate off / no DS → prior behavior (fail-safe)
+**Stage — validate before merging:**
+- [ ] Add `user_entitlements` data source entry to the app-interface stage secret
+      (`stringData` key for Lua script + `entitlements_api` pointing to the stage
+      entitlements service endpoint)
+- [ ] Add volumeMount / script reference for `user_entitlements.lua` in the stage
+      deployment manifest
+- [ ] Set `entitlements_api` to the correct stage endpoint via secret / env var
+- [ ] Configure Envoy `context_extensions.enable_entitlements: "true"` for eligible
+      stage gateways only
+- [ ] Validate (gate on): a real request with `enable_entitlements=true` reaches the
+      entitlements API and the returned `x-rh-identity` envelope contains a populated
+      `entitlements` map
+- [ ] Validate (fail-safe): a request without `enable_entitlements` (or set to `false`)
+      returns `"entitlements": {}` and does not contact the entitlements API
+
+**Production — after stage validation passes:**
+- [ ] Apply the same `stringData`, volumeMount, `entitlements_api`, and Envoy
+      configuration to the prod app-interface secret/manifest
+- [ ] Repeat the gate-on and fail-safe validation checks in prod
+
+**Completion criteria:** Step 8 is complete when stage validation passes and the
+app-interface prod PR is open and approved. The parsec PR may be merged once the
+stage validation is green; prod activation follows independently.
 
 ## Naming
 
@@ -245,11 +277,22 @@ Per [`docs/testing.md`](../testing.md): hermetic, fixtures not mocks.
 | Lua fixture: 200 + body | `internal/datasource` | Returns JSON; header only `x-rh-identity` |
 | Lua fixture: non-200 / transport error | same | `Fetch` error (fail-closed) |
 | Lua fixture: malformed body | same | `Fetch` error |
-| `fetch_cache_key` | same | Same account/org/user → same key |
+| `TestUserEntitlementsLua_CacheKey` | `internal/datasource` | Full-claims input produces correct masked key |
+| `TestUserEntitlementsLua_CacheKey_UsernameDistinguishes` | same | Same account/org, no user\_id, different usernames → different keys (regression) |
+| `TestUserEntitlementsLua_CacheKey_FieldIndependence` | same | account\_number / org\_id / user\_id / preferred\_username each vary independently |
+| `TestUserEntitlementsLua_CacheKey_MissingClaims` | same | All-empty claims → empty-string fields, no panic |
 | CEL / issuer: gate off | mapper / e2e | `entitlements: {}` |
 | CEL: gate on + fixture DS | e2e | Top-level entitlements populated |
 | CEL: gate on + missing DS / 5xx | e2e | Fail-closed |
 | Auth: ServiceAccount (and registry) | e2e | `{}` despite gate on |
+
+### Startup / Configuration
+
+| Test | What it verifies |
+|------|------------------|
+| `make run` wiring | `Makefile` invokes `parsec serve --config ./configs/parsec.yaml`; verify the flag is present and points at the committed config |
+| Startup config logging | Server logs the loaded configuration on startup; confirm the `user_entitlements` DS block appears in the startup log when the entry is present in `configs/parsec.yaml` |
+| Config parse smoke test | Load `configs/parsec.yaml` (as committed) via the config loader in a unit or integration test; assert no parse error and the `user_entitlements` data source entry is present |
 
 ### Contract Tests
 

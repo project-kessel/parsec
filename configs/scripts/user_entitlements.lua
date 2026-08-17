@@ -15,7 +15,7 @@
 --   - Non-200, transport errors, and malformed JSON all call error()
 --   - Response body is returned verbatim (no schema validation)
 --
--- Caching: fetch_cache_key masks to account_number / org_id / user_id.
+-- Caching: fetch_cache_key masks to account_number / org_id / user_id / preferred_username.
 -- Default TTL is 5m when caching.ttl is omitted in YAML.
 
 local function claim_str(claims, key)
@@ -140,17 +140,21 @@ function fetch(input)
 end
 
 function fetch_cache_key(input)
-  local claims = {}
-  if input.subject ~= nil and input.subject.claims ~= nil then
-    claims = input.subject.claims
+  local envelope = build_identity_envelope(input)
+  local identity = envelope.identity
+  local user_id = ""
+  local username = ""
+  if identity.user ~= nil then
+    user_id = identity.user.user_id or ""
+    username = identity.user.username or ""
   end
-  local account_number, org_id, user_id = identity_keys(claims)
   return {
     subject = {
       claims = {
-        account_number = account_number,
-        org_id = org_id,
-        user_id = user_id
+        account_number = identity.account_number,
+        org_id = identity.org_id,
+        user_id = user_id,
+        preferred_username = username
       }
     }
   }

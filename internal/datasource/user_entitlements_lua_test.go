@@ -182,7 +182,8 @@ func TestUserEntitlementsLua_FailClosed(t *testing.T) {
 	}
 }
 
-func TestUserEntitlementsLua_CacheKey(t *testing.T) {
+func newCacheOnlyDS(t *testing.T) *CacheableLuaDataSource {
+	t.Helper()
 	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
 		Name:         "user_entitlements",
 		Script:       loadUserEntitlementsScript(t),
@@ -192,6 +193,11 @@ func TestUserEntitlementsLua_CacheKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
 	}
+	return ds
+}
+
+func TestUserEntitlementsLua_CacheKey(t *testing.T) {
+	ds := newCacheOnlyDS(t)
 
 	masked := ds.CacheKey(consoleSubjectInput())
 	if masked.Subject == nil || masked.Subject.Claims == nil {
@@ -206,8 +212,127 @@ func TestUserEntitlementsLua_CacheKey(t *testing.T) {
 	if masked.Subject.Claims["user_id"] != "user-1" {
 		t.Errorf("user_id = %v", masked.Subject.Claims["user_id"])
 	}
+	if masked.Subject.Claims["preferred_username"] != "alice" {
+		t.Errorf("preferred_username = %v", masked.Subject.Claims["preferred_username"])
+	}
 	if masked.Subject.Subject != "" {
 		t.Errorf("cache key should not include subject id, got %q", masked.Subject.Subject)
+	}
+}
+
+// TestUserEntitlementsLua_CacheKey_UsernameDistinguishes is the regression test
+// for the case where two users share the same account and org but have different
+// usernames and no user_id — they must not share a cache entry.
+func TestUserEntitlementsLua_CacheKey_UsernameDistinguishes(t *testing.T) {
+	ds := newCacheOnlyDS(t)
+
+	makeInput := func(username string) *service.DataSourceInput {
+		return &service.DataSourceInput{
+			Subject: &trust.Result{
+				Claims: map[string]any{
+					"preferred_username": username,
+					"organization": map[string]any{
+						"id":             "org-1",
+						"account_number": "12345",
+					},
+				},
+			},
+		}
+	}
+
+	keyAlice := ds.CacheKey(makeInput("alice"))
+	keyBob := ds.CacheKey(makeInput("bob"))
+
+	if keyAlice.Subject == nil || keyBob.Subject == nil {
+		t.Fatal("expected non-nil subject in cache keys")
+	}
+	if keyAlice.Subject.Claims["preferred_username"] == keyBob.Subject.Claims["preferred_username"] {
+		t.Error("expected different preferred_username in cache keys for alice and bob")
+	}
+	// user_id must be empty when the claim is absent.
+	if keyAlice.Subject.Claims["user_id"] != "" {
+		t.Errorf("expected empty user_id when claim absent, got %q", keyAlice.Subject.Claims["user_id"])
+	}
+	// Shared fields are identical.
+	if keyAlice.Subject.Claims["account_number"] != "12345" {
+		t.Errorf("account_number = %v", keyAlice.Subject.Claims["account_number"])
+	}
+	if keyAlice.Subject.Claims["org_id"] != "org-1" {
+		t.Errorf("org_id = %v", keyAlice.Subject.Claims["org_id"])
+	}
+}
+
+// TestUserEntitlementsLua_CacheKey_FieldIndependence verifies that varying each
+// identity field independently produces a different cache key, so no two distinct
+// identities can share a cache entry.
+func TestUserEntitlementsLua_CacheKey_FieldIndependence(t *testing.T) {
+	ds := newCacheOnlyDS(t)
+
+	base := func() map[string]any {
+		return map[string]any{
+			"preferred_username": "alice",
+			"user_id":            "uid-1",
+			"organization": map[string]any{
+				"id":             "org-1",
+				"account_number": "acct-1",
+			},
+		}
+	}
+
+	withClaims := func(claims map[string]any) *service.DataSourceInput {
+		return &service.DataSourceInput{Subject: &trust.Result{Claims: claims}}
+	}
+
+	cacheKey := func(claims map[string]any) map[string]any {
+		k := ds.CacheKey(withClaims(claims))
+		if k.Subject == nil {
+			return nil
+		}
+		return k.Subject.Claims
+	}
+
+	baseKey := cacheKey(base())
+
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+		field  string
+	}{
+		{"different account_number", func(c map[string]any) { c["organization"].(map[string]any)["account_number"] = "acct-2" }, "account_number"},
+		{"different org_id", func(c map[string]any) { c["organization"].(map[string]any)["id"] = "org-2" }, "org_id"},
+		{"different user_id", func(c map[string]any) { c["user_id"] = "uid-2" }, "user_id"},
+		{"different preferred_username", func(c map[string]any) { c["preferred_username"] = "bob" }, "preferred_username"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := base()
+			tc.mutate(claims)
+			k := cacheKey(claims)
+			if k[tc.field] == baseKey[tc.field] {
+				t.Errorf("expected %s to differ from base key after mutation, but both = %v", tc.field, baseKey[tc.field])
+			}
+		})
+	}
+}
+
+// TestUserEntitlementsLua_CacheKey_MissingClaims verifies that absent or empty
+// identity fields produce empty-string values in the cache key rather than panicking.
+func TestUserEntitlementsLua_CacheKey_MissingClaims(t *testing.T) {
+	ds := newCacheOnlyDS(t)
+
+	empty := &service.DataSourceInput{
+		Subject: &trust.Result{Claims: map[string]any{}},
+	}
+
+	k := ds.CacheKey(empty)
+	if k.Subject == nil || k.Subject.Claims == nil {
+		t.Fatal("expected non-nil subject claims for empty input")
+	}
+	for _, field := range []string{"account_number", "org_id", "user_id", "preferred_username"} {
+		if k.Subject.Claims[field] != "" {
+			t.Errorf("expected empty %s for missing claims, got %q", field, k.Subject.Claims[field])
+		}
 	}
 }
 
