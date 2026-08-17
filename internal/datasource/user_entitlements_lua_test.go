@@ -44,7 +44,7 @@ func consoleSubjectInput() *service.DataSourceInput {
 }
 
 func TestUserEntitlementsLua_Success(t *testing.T) {
-	const apiURL = "https://entitlements.example.internal/api"
+	const apiURL = "https://entitlements.example.internal/api/entitlements/v1/services"
 
 	var gotIdentityHeader string
 	provider := httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
@@ -121,7 +121,7 @@ func TestUserEntitlementsLua_Success(t *testing.T) {
 }
 
 func TestUserEntitlementsLua_FailClosed(t *testing.T) {
-	const apiURL = "https://entitlements.example.internal/api"
+	const apiURL = "https://entitlements.example.internal/api/entitlements/v1/services"
 	script := loadUserEntitlementsScript(t)
 
 	cases := []struct {
@@ -186,7 +186,7 @@ func TestUserEntitlementsLua_CacheKey(t *testing.T) {
 	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
 		Name:         "user_entitlements",
 		Script:       loadUserEntitlementsScript(t),
-		ConfigSource: luaservices.NewMapConfigSource(map[string]any{"entitlements_api": "https://entitlements.example.internal"}),
+		ConfigSource: luaservices.NewMapConfigSource(map[string]any{"entitlements_api": "https://entitlements.example.internal/api/entitlements/v1/services"}),
 		HTTPClient:   http.DefaultClient,
 	})
 	if err != nil {

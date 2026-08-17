@@ -182,7 +182,7 @@ data_sources:
     type: lua
     script_file: ./configs/scripts/user_entitlements.lua
     config:
-      entitlements_api: "https://entitlements.example.internal"
+      entitlements_api: "https://entitlements.example.internal/api/entitlements/v1/services"
     http:
       timeout: 5s
     caching:

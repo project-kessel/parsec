@@ -422,11 +422,11 @@ end
 ## Production example: user entitlements
 
 See [`configs/scripts/user_entitlements.lua`](../../configs/scripts/user_entitlements.lua).
-It GETs an entitlements API with only `x-rh-identity` (base64-encoded identity
-JSON built from subject claims), fails closed on errors, and defines
-`fetch_cache_key` on account_number / org_id / user_id. Wire it from CEL with
-`datasource("user_entitlements")` gated on
-`request.additional.context_extensions.enable_entitlements`.
+It GETs the full entitlements-api-go URL (`…/api/entitlements/v1/services`) with
+only `x-rh-identity` (base64-encoded identity JSON built from subject claims),
+fails closed on errors, and defines `fetch_cache_key` on account_number /
+org_id / user_id. Wire it from CEL with `datasource("user_entitlements")` gated
+on `request.additional.context_extensions.enable_entitlements`.
 
 ## Integration with Caching
 

@@ -93,7 +93,7 @@ The base64 service provides standard base64 encoding and decoding.
 ```lua
 local encoded = base64.encode(json.encode({identity = {org_id = "org-1"}}))
 local headers = {["x-rh-identity"] = encoded}
-local response = http.get("https://entitlements.example.internal", headers)
+local response = http.get("https://entitlements.example.internal/api/entitlements/v1/services", headers)
 ```
 
 ### Config Service

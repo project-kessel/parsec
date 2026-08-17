@@ -6,7 +6,9 @@
 -- is "true" for eligible auth types (SSO User jwt-auth / cert-auth).
 --
 -- Config:
---   entitlements_api (required) — base URL for HTTP GET
+--   entitlements_api (required) — full GET URL, e.g.
+--     http://localhost:3000/api/entitlements/v1/services
+--     (entitlements-api-go GET /api/entitlements/v1/services)
 --
 -- Behavior (fail-closed):
 --   - Sends only the x-rh-identity header (base64-encoded identity JSON)
