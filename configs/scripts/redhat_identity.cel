@@ -1,7 +1,12 @@
 // Red Hat Identity Transformation
 //
 // Transforms JWT claims into a complete x-rh-identity envelope:
-//   { "identity": { ... }, "entitlements": {} }
+//   { "identity": { ... }, "entitlements": <map> }
+//
+// Entitlements (RHCLOUD-49315): for User jwt-auth branches, when
+// request.additional.context_extensions.enable_entitlements == "true",
+// fetch via datasource("user_entitlements") (fail-closed). Otherwise {}.
+// Registry-auth and ServiceAccount always keep {}.
 //
 // Policy guards (3scale parity) use Layer B CEL aborts:
 //   - impersonated tokens → invalidSubject() → OAuth invalid_request
@@ -98,7 +103,9 @@ isServiceAccountToken(subject.claims) ? {
         "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
       }
     },
-    "entitlements": {}
+    "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+      ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
+      : {}
   } : (
     has(subject.audience) && "rhsm-api" in subject.audience ? {
       "identity": {
@@ -137,7 +144,9 @@ isServiceAccountToken(subject.claims) ? {
           "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
         }
       },
-      "entitlements": {}
+      "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+        ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
+        : {}
     } : (
       has(subject.audience) && "customer-portal" in subject.audience ? {
         "identity": {
@@ -176,7 +185,9 @@ isServiceAccountToken(subject.claims) ? {
             "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
           }
         },
-        "entitlements": {}
+        "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+          ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
+          : {}
       } : unsupportedTokenType("unsupported_token_type")
     )
   )

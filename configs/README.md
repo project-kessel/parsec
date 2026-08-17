@@ -420,6 +420,30 @@ Lua data sources with caching must define `fetch_cache_key(input)`. The returned
 table is used as cache key material and must contain enough input to rerun
 `fetch(input)` on a distributed cache miss.
 
+**Entitlements example (RHCLOUD-49315):** fetch platform entitlements and place
+them on the `x-rh-identity` envelope via CEL. Enable per gateway with Envoy
+`context_extensions.enable_entitlements: "true"`. When the extension is absent,
+CEL keeps `"entitlements": {}` (fail-safe).
+
+```yaml
+data_sources:
+  - name: user_entitlements
+    type: lua
+    script_file: ./configs/scripts/user_entitlements.lua
+    config:
+      entitlements_api: "https://entitlements.example.internal"
+    http:
+      timeout: 5s
+    caching:
+      type: in_memory
+      # ttl omitted → default 5m
+      group_name: entitlements-cache
+```
+
+The Lua script sends only an `x-rh-identity` header (no API token). Failures
+are fail-closed (`error()`). See `configs/scripts/user_entitlements.lua` and
+`configs/scripts/redhat_identity.cel`.
+
 ### Claim Mappers
 
 Claim mappers build token claims from inputs:

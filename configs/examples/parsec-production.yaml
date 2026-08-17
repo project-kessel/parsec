@@ -44,18 +44,19 @@ trust_store:
 
 # Data sources with distributed caching
 data_sources:
-  # User entitlements from central authorization service
+  # User entitlements from central authorization service (RHCLOUD-49315).
+  # Fetched only when Envoy sets context_extensions.enable_entitlements=true
+  # for eligible auth types. No API token — only x-rh-identity is sent.
   - name: user_entitlements
     type: lua
     script_file: /etc/parsec/scripts/user_entitlements.lua
     config:
       entitlements_api: "https://entitlements.internal.example.com"
-      api_key: "inject-via-env-var"  # Use PARSEC_DATA_SOURCES__0__CONFIG__API_KEY
     http:
-      timeout: 30s
+      timeout: 5s
     caching:
       type: distributed
-      ttl: 5m
+      # ttl omitted → default 5m
       group_name: "entitlements-cache"
       cache_size: 268435456  # 256 MB
   
