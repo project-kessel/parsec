@@ -169,7 +169,9 @@ objects:
                 "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
               }
             },
-            "entitlements": {}
+            "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+              ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
+              : {}
           } : (
             has(subject.audience) && "rhsm-api" in subject.audience ? {
               "identity": {
@@ -208,7 +210,9 @@ objects:
                   "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
                 }
               },
-              "entitlements": {}
+              "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+                ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
+                : {}
             } : (
               has(subject.audience) && "customer-portal" in subject.audience ? {
                 "identity": {
@@ -247,7 +251,9 @@ objects:
                     "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
                   }
                 },
-                "entitlements": {}
+                "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+                  ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
+                  : {}
               } : unsupportedTokenType("unsupported_token_type")
             )
           )

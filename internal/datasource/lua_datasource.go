@@ -143,6 +143,9 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	jsonService := luaservices.NewJSONService()
 	jsonService.Register(L)
 
+	base64Service := luaservices.NewBase64Service()
+	base64Service.Register(L)
+
 	if err := luaservices.LoadProto(L, ds.proto); err != nil {
 		p.ScriptLoadFailed(err)
 		return nil, fmt.Errorf("failed to load script: %w", err)
@@ -418,6 +421,9 @@ func (ds *CacheableLuaDataSource) CacheKey(input *service.DataSourceInput) servi
 
 	jsonService := luaservices.NewJSONService()
 	jsonService.Register(L)
+
+	base64Service := luaservices.NewBase64Service()
+	base64Service.Register(L)
 
 	if err := luaservices.LoadProto(L, ds.proto); err != nil {
 		return *input
