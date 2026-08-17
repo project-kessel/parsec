@@ -152,7 +152,10 @@ Single PR (atomic: generic `Base64Service` + entitlements Lua/CEL/config/tests).
 **Status**: Pending
 
 - `config.get("entitlements_api")` (required)
-- Build identity from subject claims (User-shaped fields)
+- Build identity from subject claims (User-shaped fields) via `build_identity_envelope`
+- Validate before encoding: if both organisation (`account_number` / `org_id`) and
+  user (`username` / `user_id`) fields are all empty, call `error(...)` fail-closed
+  — no HTTP request is issued for an anonymous/empty identity
 - `base64.encode(json.encode(envelope))` — **no** inline encoder
 - Single header: `x-rh-identity`
 - Fail-closed via `error(...)` on nil response, status ≠ 200, bad JSON
@@ -161,11 +164,13 @@ Single PR (atomic: generic `Base64Service` + entitlements Lua/CEL/config/tests).
   `account_number` / `org_id` / `user_id` / `preferred_username`
   - Each field varies independently — two users that differ on any one field must
     not share a cache entry
-  - Absent or empty claims produce empty-string values (no error, no panic)
   - `preferred_username` is resolved via the same fallback chain as `fetch` (i.e.
     `preferred_username` → `username` → `subject.subject`), ensuring two users
     with the same account/org but different usernames get distinct cache slots even
     when `user_id` is absent
+  - When ALL four fields resolve to empty string, return `nil` — the Go caching
+    layer then uses the full `DataSourceInput` as the cache key, preventing every
+    anonymous request from sharing a single serialised blank-fields cache entry
 
 #### Step 4: Update `redhat_identity.cel`
 
@@ -280,7 +285,9 @@ Per [`docs/testing.md`](../testing.md): hermetic, fixtures not mocks.
 | `TestUserEntitlementsLua_CacheKey` | `internal/datasource` | Full-claims input produces correct masked key |
 | `TestUserEntitlementsLua_CacheKey_UsernameDistinguishes` | same | Same account/org, no user\_id, different usernames → different keys (regression) |
 | `TestUserEntitlementsLua_CacheKey_FieldIndependence` | same | account\_number / org\_id / user\_id / preferred\_username each vary independently |
-| `TestUserEntitlementsLua_CacheKey_MissingClaims` | same | All-empty claims → empty-string fields, no panic |
+| `TestUserEntitlementsLua_CacheKey_MissingClaims` | same | All-empty identity → nil return → full-input fallback, no blank-fields key |
+| `TestUserEntitlementsLua_Fetch_EmptyIdentityFails` | same | Fetch fail-closed when neither org nor user claims are present |
+| `TestUserEntitlementsLua_CacheKey_AllEmptyIdentityFallsBack` | same | Two distinct empty-identity inputs get distinct cache keys (no shared blank-fields entry) |
 | CEL / issuer: gate off | mapper / e2e | `entitlements: {}` |
 | CEL: gate on + fixture DS | e2e | Top-level entitlements populated |
 | CEL: gate on + missing DS / 5xx | e2e | Fail-closed |

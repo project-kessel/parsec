@@ -316,8 +316,10 @@ func TestUserEntitlementsLua_CacheKey_FieldIndependence(t *testing.T) {
 	}
 }
 
-// TestUserEntitlementsLua_CacheKey_MissingClaims verifies that absent or empty
-// identity fields produce empty-string values in the cache key rather than panicking.
+// TestUserEntitlementsLua_CacheKey_MissingClaims verifies that when all identity
+// fields are absent (empty input), fetch_cache_key returns nil and the caching
+// layer falls back to the full input as the key. The fallback key must not be
+// the blank-fields masked structure (which would collapse all anonymous requests).
 func TestUserEntitlementsLua_CacheKey_MissingClaims(t *testing.T) {
 	ds := newCacheOnlyDS(t)
 
@@ -326,12 +328,89 @@ func TestUserEntitlementsLua_CacheKey_MissingClaims(t *testing.T) {
 	}
 
 	k := ds.CacheKey(empty)
-	if k.Subject == nil || k.Subject.Claims == nil {
-		t.Fatal("expected non-nil subject claims for empty input")
+	// Go falls back to *input when Lua returns nil — Subject must be non-nil.
+	if k.Subject == nil {
+		t.Fatal("expected non-nil Subject in fallback cache key")
 	}
-	for _, field := range []string{"account_number", "org_id", "user_id", "preferred_username"} {
-		if k.Subject.Claims[field] != "" {
-			t.Errorf("expected empty %s for missing claims, got %q", field, k.Subject.Claims[field])
+	// The fallback key is the original input; identity keys must NOT be present
+	// (no blank-fields structure that would cause anonymous requests to collide).
+	if k.Subject.Claims != nil {
+		for _, field := range []string{"account_number", "org_id", "user_id", "preferred_username"} {
+			if _, present := k.Subject.Claims[field]; present {
+				t.Errorf("unexpected identity key %q in fallback cache key; blank-fields structure must not appear", field)
+			}
+		}
+	}
+}
+
+// TestUserEntitlementsLua_Fetch_EmptyIdentityFails verifies that fetch is rejected
+// fail-closed when neither organisation nor user identity material is present,
+// rather than issuing an HTTP request with a blank identity envelope.
+func TestUserEntitlementsLua_Fetch_EmptyIdentityFails(t *testing.T) {
+	const apiURL = "https://entitlements.example.internal/api/entitlements/v1/services"
+
+	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+		Name:   "user_entitlements",
+		Script: loadUserEntitlementsScript(t),
+		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
+			"entitlements_api": apiURL,
+		}),
+		HTTPClient: http.DefaultClient,
+	})
+	if err != nil {
+		t.Fatalf("NewLuaDataSource: %v", err)
+	}
+
+	empty := &service.DataSourceInput{
+		Subject: &trust.Result{Claims: map[string]any{}},
+	}
+	_, err = ds.Fetch(context.Background(), empty)
+	if err == nil {
+		t.Fatal("expected error for empty-identity fetch")
+	}
+	if !strings.Contains(err.Error(), "organization or user") {
+		t.Errorf("error %q, want substring %q", err.Error(), "organization or user")
+	}
+}
+
+// TestUserEntitlementsLua_CacheKey_AllEmptyIdentityFallsBack is the regression test
+// for the case where all four identity fields resolve to empty strings. The script
+// must return nil so the caching layer falls back to the full input as the key,
+// preventing every anonymous request from sharing a single serialised blank-fields entry.
+func TestUserEntitlementsLua_CacheKey_AllEmptyIdentityFallsBack(t *testing.T) {
+	ds := newCacheOnlyDS(t)
+
+	// Two inputs with no organisation or user claims, distinguished by issuer.
+	// Subject.Subject is "" in both, so the username fallback also resolves to "".
+	// All four identity fields → "" → Lua returns nil → Go uses full *input.
+	anon1 := &service.DataSourceInput{
+		Subject: &trust.Result{
+			Issuer: "https://idp1.example.com",
+			Claims: map[string]any{},
+		},
+	}
+	anon2 := &service.DataSourceInput{
+		Subject: &trust.Result{
+			Issuer: "https://idp2.example.com",
+			Claims: map[string]any{},
+		},
+	}
+
+	k1 := ds.CacheKey(anon1)
+	k2 := ds.CacheKey(anon2)
+
+	if k1.Subject == nil || k2.Subject == nil {
+		t.Fatal("expected non-nil Subject in fallback cache keys")
+	}
+	// Distinct inputs must produce distinct cache keys, not both collapse to the shared blank key.
+	if k1.Subject.Issuer == k2.Subject.Issuer {
+		t.Errorf("expected distinct cache keys for distinct empty-identity inputs; both have Issuer=%q", k1.Subject.Issuer)
+	}
+	// The fallback key must not be the blank-fields masked structure (all four keys present with empty values).
+	// When Go falls back to *input, the Claims map is the original empty map with no identity keys at all.
+	if k1.Subject.Claims != nil {
+		if _, hasAcct := k1.Subject.Claims["account_number"]; hasAcct {
+			t.Error("got blank-fields cache key for empty-identity input; expected full-input fallback without account_number key")
 		}
 	}
 }

@@ -109,6 +109,14 @@ function fetch(input)
   end
 
   local envelope = build_identity_envelope(input)
+  local identity = envelope.identity
+  local has_org = identity.account_number ~= "" or identity.org_id ~= ""
+  local has_user = identity.user ~= nil and
+    (identity.user.username ~= "" or identity.user.user_id ~= "")
+  if not has_org and not has_user then
+    error("cannot fetch entitlements: identity has no organization or user claims")
+  end
+
   local encoded, enc_err = json.encode(envelope)
   if encoded == nil then
     error("failed to encode identity for entitlements request: " .. (enc_err or "unknown"))
@@ -147,6 +155,12 @@ function fetch_cache_key(input)
   if identity.user ~= nil then
     user_id = identity.user.user_id or ""
     username = identity.user.username or ""
+  end
+  -- When no identity material is present at all, return nil so the caching
+  -- layer uses the full input as the cache key. This prevents all anonymous
+  -- requests from sharing a single serialised blank-fields cache entry.
+  if identity.account_number == "" and identity.org_id == "" and user_id == "" and username == "" then
+    return nil
   end
   return {
     subject = {
