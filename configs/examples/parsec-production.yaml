@@ -51,7 +51,8 @@ data_sources:
     type: lua
     script_file: /etc/parsec/scripts/user_entitlements.lua
     config:
-      entitlements_api: "https://entitlements.internal.example.com"
+      # Full GET URL — see entitlements-api-go GET /api/entitlements/v1/services
+      entitlements_api: "https://entitlements.internal.example.com/api/entitlements/v1/services"
     http:
       timeout: 5s
     caching:

@@ -120,7 +120,7 @@ pr-check:
 .PHONY: run
 # run parsec locally
 run: build
-	./bin/parsec serve
+	./bin/parsec serve --config ./configs/parsec.yaml
 
 run-help: build
 	./bin/parsec serve --help

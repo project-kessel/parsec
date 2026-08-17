@@ -431,7 +431,9 @@ data_sources:
     type: lua
     script_file: ./configs/scripts/user_entitlements.lua
     config:
-      entitlements_api: "https://entitlements.example.internal"
+      # Full GET URL (not host-only). Local entitlements-api-go default:
+      #   http://localhost:3000/api/entitlements/v1/services
+      entitlements_api: "https://entitlements.example.internal/api/entitlements/v1/services"
     http:
       timeout: 5s
     caching:
@@ -440,9 +442,17 @@ data_sources:
       group_name: entitlements-cache
 ```
 
-The Lua script sends only an `x-rh-identity` header (no API token). Failures
-are fail-closed (`error()`). See `configs/scripts/user_entitlements.lua` and
-`configs/scripts/redhat_identity.cel`.
+The Lua script GETs that URL with only an `x-rh-identity` header (no API token).
+Failures are fail-closed (`error()`). See `configs/scripts/user_entitlements.lua`
+and `configs/scripts/redhat_identity.cel`.
+
+**Local smoke (mock or real entitlements-api-go):**
+
+1. Point Parsec at the services endpoint:
+   `PARSEC_DATA_SOURCES__1__CONFIG__ENTITLEMENTS_API=http://localhost:3000/api/entitlements/v1/services`
+2. Either run [entitlements-api-go](https://github.com/RedHatInsights/entitlements-api-go) (`make run` on :3000, needs enterprise certs) or a stub that returns 200 JSON for `GET /api/entitlements/v1/services` when `x-rh-identity` is present.
+3. Call ext_authz Check with a User JWT and `context_extensions.enable_entitlements=true`.
+4. Confirm Parsec logs an outbound GET and the decoded `x-rh-identity` has a non-empty `entitlements` map.
 
 ### Claim Mappers
 

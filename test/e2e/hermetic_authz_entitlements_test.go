@@ -22,7 +22,7 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-const entitlementsAPIURL = "https://entitlements.example.internal/api"
+const entitlementsAPIURL = "https://entitlements.example.internal/api/entitlements/v1/services"
 
 // TestHermeticAuthzEntitlements covers RHCLOUD-49315: gated entitlements injection
 // via Lua data source + redhat_identity.cel.

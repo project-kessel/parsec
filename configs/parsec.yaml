@@ -49,11 +49,12 @@ data_sources:
   # context_extensions.enable_entitlements=true on eligible User jwt-auth paths.
   # Absent extension → entitlements remain {}. Override URL via env:
   #   PARSEC_DATA_SOURCES__1__CONFIG__ENTITLEMENTS_API
+  # Full GET URL (entitlements-api-go: /api/entitlements/v1/services).
   - name: user_entitlements
     type: lua
     script_file: ./configs/scripts/user_entitlements.lua
     config:
-      entitlements_api: "https://entitlements.example.internal"
+      entitlements_api: "https://entitlements.example.internal/api/entitlements/v1/services"
     http:
       timeout: 5s
     caching:
