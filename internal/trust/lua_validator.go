@@ -211,6 +211,9 @@ func (v *LuaValidator) Validate(ctx context.Context, credential Credential) (*Re
 	jsonService := luaservices.NewJSONService()
 	jsonService.Register(L)
 
+	base64Service := luaservices.NewBase64Service()
+	base64Service.Register(L)
+
 	if err := luaservices.LoadProto(L, v.proto); err != nil {
 		p.ScriptLoadFailed(err)
 		return nil, fmt.Errorf("failed to load script: %w", err)
@@ -292,6 +295,9 @@ func (v *CacheableLuaValidator) CacheKey(credential Credential) (ValidatorInput,
 
 	jsonService := luaservices.NewJSONService()
 	jsonService.Register(L)
+
+	base64Service := luaservices.NewBase64Service()
+	base64Service.Register(L)
 
 	if err := luaservices.LoadProto(L, v.proto); err != nil {
 		return ValidatorInput{}, fmt.Errorf("failed to load script: %w", err)

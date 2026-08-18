@@ -76,6 +76,26 @@ local encoded = json.encode(original)
 local decoded = json.decode(encoded)
 ```
 
+### Base64 Service
+
+The base64 service provides standard base64 encoding and decoding.
+
+#### Functions
+
+- `base64.encode(string)` - Encode a string with standard base64
+  - Returns: `encoded_string`
+  
+- `base64.decode(string)` - Decode a standard base64 string
+  - Returns: `decoded_string` or `(nil, error)`
+
+#### Example
+
+```lua
+local encoded = base64.encode(json.encode({identity = {org_id = "org-1"}}))
+local headers = {["x-rh-identity"] = encoded}
+local response = http.get("https://entitlements.example.internal/api/entitlements/v1/services", headers)
+```
+
 ### Config Service
 
 The Config service provides access to configuration values passed to the LuaDataSource.

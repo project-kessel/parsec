@@ -45,6 +45,21 @@ data_sources:
     data:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
+  # Entitlements (RHCLOUD-49315): only called when Envoy sets
+  # context_extensions.enable_entitlements=true on eligible User jwt-auth paths.
+  # Absent extension → entitlements remain {}. Override URL via env:
+  #   PARSEC_DATA_SOURCES__1__CONFIG__ENTITLEMENTS_API
+  # Full GET URL (entitlements-api-go: /api/entitlements/v1/services).
+  - name: user_entitlements
+    type: lua
+    script_file: ./configs/scripts/user_entitlements.lua
+    config:
+      entitlements_api: "https://entitlements.example.internal/api/entitlements/v1/services"
+    http:
+      timeout: 5s
+    caching:
+      type: in_memory
+      group_name: entitlements-cache
 
 # Token issuers
 #
