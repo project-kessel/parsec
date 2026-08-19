@@ -23,6 +23,8 @@ func oauthDenialStatuses(code service.OAuthErrorCode) (codes.Code, typev3.Status
 	switch code {
 	case service.OAuthInvalidClient, service.OAuthUnauthorizedClient:
 		return codes.Unauthenticated, typev3.StatusCode_Unauthorized
+	case service.OAuthAccessDenied:
+		return codes.PermissionDenied, typev3.StatusCode_Forbidden
 	default:
 		return codes.InvalidArgument, typev3.StatusCode_BadRequest
 	}

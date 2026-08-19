@@ -159,6 +159,14 @@ func TestExchangeErrToAuthzDenial(t *testing.T) {
 			wantMsg:  "not authorized",
 		},
 		{
+			name:     "access_denied_is_forbidden",
+			oauth:    service.OAuthAccessDenied,
+			message:  "export compliance check failed",
+			wantGRPC: codes.PermissionDenied,
+			wantHTTP: typev3.StatusCode_Forbidden,
+			wantMsg:  "export compliance check failed",
+		},
+		{
 			name:     "empty_message_falls_back_to_code",
 			oauth:    service.OAuthInvalidRequest,
 			message:  "",

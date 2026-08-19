@@ -103,6 +103,10 @@ func oauthAbortFunctions() []cel.EnvOption {
 		{"invalidClient", func(m string) service.MappingResult { return service.DenyOAuth(service.OAuthInvalidClient, m) }},
 		{"unsupportedGrantType", func(m string) service.MappingResult { return service.DenyOAuth(service.OAuthUnsupportedGrantType, m) }},
 		{"invalidScope", func(m string) service.MappingResult { return service.DenyOAuth(service.OAuthInvalidScope, m) }},
+		// accessDenied: policy-level denial (RFC 6749 §4.1.2.1) → HTTP 403 in
+		// ext_authz. Use for access-control policies (e.g. export compliance)
+		// that are not OAuth protocol errors.
+		{"accessDenied", func(m string) service.MappingResult { return service.DenyOAuth(service.OAuthAccessDenied, m) }},
 		// Layer B — reason helpers (reason→code mapping lives in service)
 		{"invalidSubject", func(m string) service.MappingResult { return service.DenyReason(service.AbortReasonInvalidSubject, m) }},
 		{"invalidActor", func(m string) service.MappingResult { return service.DenyReason(service.AbortReasonInvalidActor, m) }},

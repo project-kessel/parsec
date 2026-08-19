@@ -26,6 +26,11 @@ func TestAbortDecision_MatchesDenyConstructors(t *testing.T) {
 			err:  &abortError{decision: service.DenyReason(service.AbortReasonInvalidAudience, "bad aud").Decision},
 			want: service.DenyReason(service.AbortReasonInvalidAudience, "bad aud").Decision,
 		},
+		{
+			name: "layer_a_access_denied",
+			err:  &abortError{decision: service.DenyOAuth(service.OAuthAccessDenied, "export compliance check failed").Decision},
+			want: service.DenyOAuth(service.OAuthAccessDenied, "export compliance check failed").Decision,
+		},
 	}
 
 	for _, tc := range cases {

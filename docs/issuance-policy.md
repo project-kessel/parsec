@@ -66,15 +66,21 @@ not HTTP status names.
 
 ### Layer A — direct OAuth error codes
 
-| CEL function | Wire `error` |
-|--------------|--------------|
-| `invalidRequest(message)` | `invalid_request` |
-| `invalidTarget(message)` | `invalid_target` |
-| `invalidGrant(message)` | `invalid_grant` |
-| `unauthorizedClient(message)` | `unauthorized_client` |
-| `invalidClient(message)` | `invalid_client` |
-| `unsupportedGrantType(message)` | `unsupported_grant_type` |
-| `invalidScope(message)` | `invalid_scope` |
+| CEL function | Wire `error` | HTTP (ext_authz) |
+|--------------|--------------|------------------|
+| `invalidRequest(message)` | `invalid_request` | **400** |
+| `invalidTarget(message)` | `invalid_target` | **400** |
+| `invalidGrant(message)` | `invalid_grant` | **400** |
+| `unauthorizedClient(message)` | `unauthorized_client` | **401** |
+| `invalidClient(message)` | `invalid_client` | **401** |
+| `unsupportedGrantType(message)` | `unsupported_grant_type` | **400** |
+| `invalidScope(message)` | `invalid_scope` | **400** |
+| `accessDenied(message)` | `access_denied` | **403** |
+
+`accessDenied` is RFC 6749 §4.1.2.1 — "the resource owner or authorization
+server denied the request." Use it for policy-level denials (e.g. export
+compliance) where the credentials are valid but access is disallowed.
+It is the only Layer A function that produces HTTP 403 (all others → 400 or 401).
 
 ### Layer B — reason helpers (preferred for guards)
 
@@ -121,6 +127,7 @@ CEL fail() / unexpected failure
 |----------|-----------|--------------------------------------------|
 | OAuth `invalid_request` / `invalid_target` / `invalid_grant` / `invalid_scope` / `unsupported_grant_type` | `InvalidArgument` | **400** |
 | OAuth `invalid_client` / `unauthorized_client` | `Unauthenticated` | **401** |
+| OAuth `access_denied` (`accessDenied()`) | `PermissionDenied` | **403** |
 | Credential / subject validation failed | `Unauthenticated` | **401** |
 | `AuthzCheckDeny` / trust-store filter failure | `PermissionDenied` | **403** |
 | Unexpected `error` / `fail()` / nil token | `Internal` | **500** |

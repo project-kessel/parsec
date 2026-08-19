@@ -8,6 +8,15 @@
 // fetch via datasource("user_entitlements") (fail-closed). Otherwise {}.
 // Registry-auth and ServiceAccount always keep {}.
 //
+// Export Compliance (RHCLOUD-49359): for User jwt-auth branches, when
+// request.additional.context_extensions.enable_compliance == "true",
+// call datasource("export_compliance") and deny with HTTP 403 if result_code
+// matches a configured error code (fail-open: any error allows through).
+// The compliance check runs BEFORE any cross-account identity swap (AC9).
+//
+// Compliance error codes (AC10):
+//   "ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"
+//
 // Policy guards (3scale parity) use Layer B CEL aborts:
 //   - impersonated tokens → invalidSubject() → OAuth invalid_request
 //   - console API tokens missing idp → invalidSubject() → OAuth invalid_request
@@ -73,7 +82,12 @@ isServiceAccountToken(subject.claims) ? {
   // Policy: require IdP claim for console API tokens (3scale APICAST_ENFORCE_IDP_AUTH)
   datasource("identity-policy").enforce_idp_auth && has(subject.claims) && isConsoleApiToken(subject.claims) && !has(subject.claims.idp)
     ? invalidSubject("claim 'idp' is required")
-  : has(subject.claims) && isConsoleApiToken(subject.claims) ? {
+  : has(subject.claims) && isConsoleApiToken(subject.claims) ? (
+    // Export compliance check (AC1, AC5, AC9): runs before cross-account logic.
+    has(request.additional.context_extensions) && "enable_compliance" in request.additional.context_extensions && request.additional.context_extensions.enable_compliance == "true"
+    && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
+      ? accessDenied("export compliance check failed")
+      : {
     "identity": {
       "auth_type": "jwt-auth",
       "account_number": has(subject.claims.organization) && has(subject.claims.organization.account_number) ?
@@ -102,11 +116,16 @@ isServiceAccountToken(subject.claims) ? {
         "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
       }
     },
-    "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+    "entitlements": has(request.additional.context_extensions) && "enable_entitlements" in request.additional.context_extensions && request.additional.context_extensions.enable_entitlements == "true"
       ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
       : {}
-  } : (
-    has(subject.audience) && "rhsm-api" in subject.audience ? {
+  }) : (
+    has(subject.audience) && "rhsm-api" in subject.audience ? (
+      // Export compliance check (AC1, AC5, AC9): runs before cross-account logic.
+      has(request.additional.context_extensions) && "enable_compliance" in request.additional.context_extensions && request.additional.context_extensions.enable_compliance == "true"
+      && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
+        ? accessDenied("export compliance check failed")
+        : {
       "identity": {
         "auth_type": "jwt-auth",
         "account_number": has(subject.claims.account_id) ? safeToString(subject.claims.account_id) : "",
@@ -143,11 +162,16 @@ isServiceAccountToken(subject.claims) ? {
           "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
         }
       },
-      "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+      "entitlements": has(request.additional.context_extensions) && "enable_entitlements" in request.additional.context_extensions && request.additional.context_extensions.enable_entitlements == "true"
         ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
         : {}
-    } : (
-      has(subject.audience) && "customer-portal" in subject.audience ? {
+    }) : (
+      has(subject.audience) && "customer-portal" in subject.audience ? (
+        // Export compliance check (AC1, AC5, AC9): runs before cross-account logic.
+        has(request.additional.context_extensions) && "enable_compliance" in request.additional.context_extensions && request.additional.context_extensions.enable_compliance == "true"
+        && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
+          ? accessDenied("export compliance check failed")
+          : {
         "identity": {
           "auth_type": "jwt-auth",
           "account_number": has(subject.claims.account_number) ? safeToString(subject.claims.account_number) :
@@ -184,10 +208,10 @@ isServiceAccountToken(subject.claims) ? {
             "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
           }
         },
-        "entitlements": has(request.additional.context_extensions) && request.additional.context_extensions.enable_entitlements == "true"
+        "entitlements": has(request.additional.context_extensions) && "enable_entitlements" in request.additional.context_extensions && request.additional.context_extensions.enable_entitlements == "true"
           ? (datasource("user_entitlements") != null ? datasource("user_entitlements") : fail("entitlements unavailable"))
           : {}
-      } : unsupportedTokenType("unsupported_token_type")
+      }) : unsupportedTokenType("unsupported_token_type")
     )
   )
 )

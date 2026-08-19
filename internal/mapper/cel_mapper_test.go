@@ -902,6 +902,11 @@ func TestCELMapper_LayerA(t *testing.T) {
 			script:     `false ? {"ok": true} : invalidGrant("bad grant")`,
 			oauthError: service.OAuthInvalidGrant,
 		},
+		{
+			name:       "access_denied",
+			script:     `false ? {"ok": true} : accessDenied("export compliance check failed")`,
+			oauthError: service.OAuthAccessDenied,
+		},
 	}
 
 	for _, tt := range tests {

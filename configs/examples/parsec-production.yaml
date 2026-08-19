@@ -60,6 +60,25 @@ data_sources:
       # ttl omitted → default 5m
       group_name: "entitlements-cache"
       cache_size: 268435456  # 256 MB
+
+  # Export compliance check (RHCLOUD-49359).
+  # Fetched only when Envoy sets context_extensions.enable_compliance=true
+  # for eligible User jwt-auth paths. Fail-open: any error allows through.
+  # Enable per-gateway in app-interface after stage validation.
+  - name: export_compliance
+    type: lua
+    script_file: /etc/parsec/scripts/export_compliance.lua
+    config:
+      # Full GET URL for the compliance service.
+      # Override via env: PARSEC_DATA_SOURCES__1__CONFIG__COMPLIANCE_API
+      compliance_api: "inject-via-env-var"  # Use PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API
+    http:
+      timeout: 5s
+    caching:
+      type: distributed
+      ttl: 24h
+      group_name: "compliance-cache"
+      cache_size: 134217728  # 128 MB
   
   # Organization metadata
   - name: org_metadata

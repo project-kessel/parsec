@@ -428,6 +428,17 @@ fails closed on errors, and defines `fetch_cache_key` on account_number /
 org_id / user_id. Wire it from CEL with `datasource("user_entitlements")` gated
 on `request.additional.context_extensions.enable_entitlements`.
 
+## Production example: export compliance
+
+See [`configs/scripts/export_compliance.lua`](../../configs/scripts/export_compliance.lua).
+It GETs the compliance service URL with `x-rh-identity` and `Accept` headers (no
+API token), fails open on errors (returns `{result_code: "", synthetic: true}`),
+and defines `fetch_cache_key` using the resolved username (24h TTL). Returns
+`nil` from `fetch_cache_key` for synthetic/bypass results — the Go layer falls
+back to the full input as the key, preventing synthetic results from sharing a
+username-based cache slot. Wire it from CEL with `datasource("export_compliance")`
+gated on `request.additional.context_extensions.enable_compliance`.
+
 ## Integration with Caching
 
 Only `CacheableLuaDataSource` implements the `Cacheable` interface and can be wrapped with caching layers:

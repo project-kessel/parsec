@@ -20,6 +20,11 @@ const (
 	OAuthInvalidClient        OAuthErrorCode = "invalid_client"
 	OAuthUnsupportedGrantType OAuthErrorCode = "unsupported_grant_type"
 	OAuthInvalidScope         OAuthErrorCode = "invalid_scope"
+	// OAuthAccessDenied is used for policy-level denials (RFC 6749 §4.1.2.1:
+	// "the resource owner or authorization server denied the request"). Maps to
+	// HTTP 403 in ext_authz — appropriate for export compliance and similar
+	// access-control policies that are not protocol errors.
+	OAuthAccessDenied OAuthErrorCode = "access_denied"
 )
 
 // AbortReason is a machine-readable reason for Layer B deny helpers.

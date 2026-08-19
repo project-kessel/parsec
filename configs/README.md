@@ -454,6 +454,35 @@ and `configs/scripts/redhat_identity.cel`.
 3. Call ext_authz Check with a User JWT and `context_extensions.enable_entitlements=true`.
 4. Confirm Parsec logs an outbound GET and the decoded `x-rh-identity` has a non-empty `entitlements` map.
 
+**Export compliance check (RHCLOUD-49359):** enforce U.S. export restrictions
+before issuing tokens for User jwt-auth. Enable per gateway with Envoy
+`context_extensions.enable_compliance: "true"`. When the extension is absent,
+the compliance check is skipped entirely (fail-safe). Failures are fail-open —
+any error, non-200, or missing username allows the request through.
+
+```yaml
+data_sources:
+  - name: export_compliance
+    type: lua
+    script_file: ./configs/scripts/export_compliance.lua
+    config:
+      # Full GET URL for the compliance service.
+      compliance_api: "https://export-compliance.example.internal/v1/compliance"
+    http:
+      timeout: 5s
+    caching:
+      type: in_memory
+      ttl: 24h
+      group_name: compliance-cache
+```
+
+The Lua script GETs the compliance URL with `x-rh-identity` and `Accept` headers
+only (no API token). Result codes `ERROR_T5`, `ERROR_EXPORT_CONTROL`, and
+`ERROR_OFAC` produce a 403 response via `accessDenied()`. Cache key is username-based
+(per-user, 24h TTL). Cache bypass via request header
+`x-rh-insights-gateway-use-compliance-cache: 0`. See
+`configs/scripts/export_compliance.lua` and `configs/scripts/redhat_identity.cel`.
+
 ### Claim Mappers
 
 Claim mappers build token claims from inputs:
