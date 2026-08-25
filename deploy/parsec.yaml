@@ -70,7 +70,7 @@ objects:
               - name: config-volume
                 mountPath: "/etc/parsec/scripts/registry_auth.lua"
                 subPath: "registry_auth.lua"
-              - name: forwarded-client-cert-auth
+              - name: config-volume
                 mountPath: "/etc/parsec/scripts/forwarded_client_cert_auth.lua"
                 subPath: forwarded_client_cert_auth.lua
               - name: registry-certs
@@ -90,10 +90,6 @@ objects:
               - name: it-ca-bundle
                 secret:
                   secretName: ${IT_CA_BUNDLE_SECRET}
-                  optional: true
-              - name: forwarded-client-cert-auth
-                secret:
-                  secretName: ${FORWARDED_CLIENT_CERT_AUTH_SECRET}
                   optional: true
           webServices:
             public:
@@ -140,9 +136,6 @@ parameters:
   - description: Name of the K8s secret containing the Red Hat IT CA bundle
     name: IT_CA_BUNDLE_SECRET
     value: it-ca-bundle
-  - description: Name of the K8s secret containing the forwarded client cert auth Lua script
-    name: FORWARDED_CLIENT_CERT_AUTH_SECRET
-    value: forwarded-client-cert-auth
   - description: Memory request for Parsec service
     name: PARSEC_REQUESTS_MEMORY
     value: '256Mi'
