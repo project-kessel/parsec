@@ -162,11 +162,24 @@ func TestHermeticAuthzCheckCertAuth(t *testing.T) {
 				Method:  "GET",
 				URL:     bopURL,
 				URLType: "exact",
+				Headers: map[string]string{"x-rh-certauth-cn": "/CN=no-user-field"},
 			},
 			Response: httpfixture.Fixture{
 				StatusCode: 200,
 				Headers:    map[string]string{"Content-Type": "application/json"},
-				Body:       `{"account_number":"12345","org_id":"org-abc","type":"satellite"}`,
+				Body:       `{}`,
+			},
+		},
+		{
+			Request: httpfixture.FixtureRequest{
+				Method:  "GET",
+				URL:     bopURL,
+				URLType: "exact",
+			},
+			Response: httpfixture.Fixture{
+				StatusCode: 200,
+				Headers:    map[string]string{"Content-Type": "application/json"},
+				Body:       `{"user":{"account_number":"12345","org_id":"org-abc","type":"satellite"}}`,
 			},
 		},
 	})

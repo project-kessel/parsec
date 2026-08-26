@@ -64,6 +64,16 @@ func certAuthSubtests(t *testing.T, authzServer *server.AuthzServer) {
 		}
 	})
 
+	t.Run("rejects BOP response without user object", func(t *testing.T) {
+		resp, err := authzServer.Check(context.Background(),
+			checkRequestWithCertAuth("/CN=no-user-field", "CN=Red Hat CA"))
+		if err != nil {
+			t.Fatalf("Check RPC failed: %v", err)
+		}
+
+		assertDeniedResponse(t, resp)
+	})
+
 	t.Run("rejects missing cn header", func(t *testing.T) {
 		resp, err := authzServer.Check(context.Background(),
 			checkRequestWithHeaders(map[string]string{
