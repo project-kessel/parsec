@@ -56,15 +56,20 @@ function validate(input)
     return nil
   end
 
+  if auth_resp.user == nil then
+    return nil
+  end
+
+  local user = auth_resp.user
   local claims = {}
-  if auth_resp.account_number ~= nil then
-    claims.account_number = auth_resp.account_number
+  if user.account_number ~= nil then
+    claims.account_number = user.account_number
   end
-  if auth_resp.org_id ~= nil then
-    claims.org_id = auth_resp.org_id
+  if user.org_id ~= nil then
+    claims.org_id = user.org_id
   end
-  if auth_resp.type ~= nil then
-    claims.cert_type = auth_resp.type
+  if user.type ~= nil then
+    claims.cert_type = user.type
   end
   claims.cn = cn_value
 
