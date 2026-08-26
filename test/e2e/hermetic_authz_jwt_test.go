@@ -110,10 +110,10 @@ func TestHermeticAuthzCheckJWT(t *testing.T) {
 	// 3. Test Cases
 	// ============================================================
 
-	jwtIdentitySubtests(t, authzServer, jwksFixture)
+	jwtIdentityTests(t, authzServer, jwksFixture)
 }
 
-func jwtIdentitySubtests(t *testing.T, authzServer *server.AuthzServer, jwks *httpfixture.JWKSFixture) {
+func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpfixture.JWKSFixture) {
 	t.Run("service account valid", func(t *testing.T) {
 		token := mustSignToken(t, jwks, map[string]interface{}{
 			"preferred_username": "service-account-myapp",
@@ -562,13 +562,4 @@ func checkRequestWithBearer(token string) *authv3.CheckRequest {
 			},
 		},
 	}
-}
-
-func assertNestedMap(t *testing.T, parent map[string]any, key string) map[string]any {
-	t.Helper()
-	child, ok := parent[key].(map[string]any)
-	if !ok {
-		t.Fatalf("expected %s to be a map, got %T", key, parent[key])
-	}
-	return child
 }
