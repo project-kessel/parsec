@@ -378,8 +378,10 @@ func newClaimMapper(cfg ClaimMapperConfig) (service.ClaimMapper, error) {
 		return service.NewRequestAttributesMapper(), nil
 	case "stub":
 		return newStubMapper(cfg)
+	case "redhat_identity":
+		return mapper.NewRedHatIdentityMapper(), nil
 	default:
-		return nil, fmt.Errorf("unknown claim mapper type: %s (supported: cel, passthrough, request_attributes, stub)", cfg.Type)
+		return nil, fmt.Errorf("unknown claim mapper type: %s (supported: cel, passthrough, request_attributes, stub, redhat_identity)", cfg.Type)
 	}
 }
 
