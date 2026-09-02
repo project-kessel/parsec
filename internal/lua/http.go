@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -17,6 +18,7 @@ type RequestOptions func(*http.Request) error
 // httpServiceConfig collects option values during construction.
 type httpServiceConfig struct {
 	requestOptions RequestOptions
+	baseURL        string
 }
 
 // HTTPServiceOption configures optional settings for NewHTTPService.
@@ -27,11 +29,19 @@ func WithRequestOptions(ro RequestOptions) HTTPServiceOption {
 	return func(c *httpServiceConfig) { c.requestOptions = ro }
 }
 
+// WithBaseURL sets an origin (scheme + host) that relative Lua URLs resolve
+// against. Empty or omitted preserves absolute-URL-only behavior. When set,
+// the value must include a scheme and host.
+func WithBaseURL(base string) HTTPServiceOption {
+	return func(c *httpServiceConfig) { c.baseURL = base }
+}
+
 // HTTPService provides HTTP client functionality to Lua scripts.
 type HTTPService struct {
 	ctx            context.Context
 	client         *http.Client
 	requestOptions RequestOptions
+	baseURL        *url.URL // nil = absolute Lua URLs only
 }
 
 // NewHTTPService creates a new HTTP service. ctx is required and propagated
@@ -49,11 +59,47 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		opt(&cfg)
 	}
 
+	base, err := parseBaseURL(cfg.baseURL)
+	if err != nil {
+		return nil, err
+	}
+
 	return &HTTPService{
 		ctx:            ctx,
 		client:         client,
 		requestOptions: cfg.requestOptions,
+		baseURL:        base,
 	}, nil
+}
+
+func parseBaseURL(raw string) (*url.URL, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base_url %q: %w", raw, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid base_url %q: must include scheme and host", raw)
+	}
+	return parsed, nil
+}
+
+// resolveRequestURL returns an absolute URL for http.NewRequest. Lua URLs
+// with a scheme are used as-is. Relative URLs resolve against baseURL.
+func (s *HTTPService) resolveRequestURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid url %q: %w", raw, err)
+	}
+	if parsed.Scheme != "" {
+		return raw, nil
+	}
+	if s.baseURL == nil {
+		return "", fmt.Errorf("relative url %q requires a configured base_url", raw)
+	}
+	return s.baseURL.ResolveReference(parsed).String(), nil
 }
 
 // Register adds the HTTP service to the Lua state
@@ -78,10 +124,17 @@ func (s *HTTPService) Register(L *lua.LState) {
 // Args: url (string), [headers (table)]
 // Returns: response table {status=int, body=string, headers=table} or (nil, error)
 func (s *HTTPService) luaHTTPGet(L *lua.LState) int {
-	url := L.CheckString(1)
+	rawURL := L.CheckString(1)
 	headers := s.parseHeaders(L, 2)
 
-	req, err := http.NewRequestWithContext(s.ctx, "GET", url, nil)
+	resolved, err := s.resolveRequestURL(rawURL)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	req, err := http.NewRequestWithContext(s.ctx, "GET", resolved, nil)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
@@ -117,11 +170,18 @@ func (s *HTTPService) luaHTTPGet(L *lua.LState) int {
 // Args: url (string), body (string), [headers (table)]
 // Returns: response table {status=int, body=string, headers=table} or (nil, error)
 func (s *HTTPService) luaHTTPPost(L *lua.LState) int {
-	url := L.CheckString(1)
+	rawURL := L.CheckString(1)
 	body := L.CheckString(2)
 	headers := s.parseHeaders(L, 3)
 
-	req, err := http.NewRequestWithContext(s.ctx, "POST", url, bytes.NewBufferString(body))
+	resolved, err := s.resolveRequestURL(rawURL)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	req, err := http.NewRequestWithContext(s.ctx, "POST", resolved, bytes.NewBufferString(body))
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
@@ -158,7 +218,7 @@ func (s *HTTPService) luaHTTPPost(L *lua.LState) int {
 // Returns: response table {status=int, body=string, headers=table} or (nil, error)
 func (s *HTTPService) luaHTTPRequest(L *lua.LState) int {
 	method := L.CheckString(1)
-	url := L.CheckString(2)
+	rawURL := L.CheckString(2)
 
 	var body io.Reader
 	bodyStr := L.OptString(3, "")
@@ -168,7 +228,14 @@ func (s *HTTPService) luaHTTPRequest(L *lua.LState) int {
 
 	headers := s.parseHeaders(L, 4)
 
-	req, err := http.NewRequestWithContext(s.ctx, method, url, body)
+	resolved, err := s.resolveRequestURL(rawURL)
+	if err != nil {
+		L.Push(lua.LNil)
+		L.Push(lua.LString(err.Error()))
+		return 2
+	}
+
+	req, err := http.NewRequestWithContext(s.ctx, method, resolved, body)
 	if err != nil {
 		L.Push(lua.LNil)
 		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))

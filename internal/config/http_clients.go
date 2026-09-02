@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -48,6 +49,12 @@ func NewHTTPClientRegistry(cfgs []HTTPClientConfig, fixtureTransport http.RoundT
 	return registry, nil
 }
 
+// resolvedHTTPClient is a registry client plus its optional Lua base URL.
+type resolvedHTTPClient struct {
+	Client  *http.Client
+	BaseURL string
+}
+
 // resolveHTTPClient resolves a consumer's HTTP client from the registry.
 // Resolution order:
 //  1. If httpClientSpec is set, build an inline (anonymous) client via the registry.
@@ -57,28 +64,40 @@ func NewHTTPClientRegistry(cfgs []HTTPClientConfig, fixtureTransport http.RoundT
 // httpClientName and httpClientSpec are mutually exclusive: since it's
 // ambiguous which the caller intended, that's rejected as a config error
 // rather than silently picking one.
-func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, registry *httpclient.Registry) (*http.Client, error) {
+func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, registry *httpclient.Registry) (resolvedHTTPClient, error) {
 	if registry == nil {
-		return nil, fmt.Errorf("http client registry is required but was not configured")
+		return resolvedHTTPClient{}, fmt.Errorf("http client registry is required but was not configured")
 	}
 
 	if httpClientName != "" && httpClientSpec != nil {
-		return nil, fmt.Errorf("http_client and http are mutually exclusive; use http for an inline client")
+		return resolvedHTTPClient{}, fmt.Errorf("http_client and http are mutually exclusive; use http for an inline client")
 	}
 
 	if httpClientSpec != nil {
 		spec, err := resolveClientSpec(*httpClientSpec)
 		if err != nil {
-			return nil, fmt.Errorf("inline http client spec: %w", err)
+			return resolvedHTTPClient{}, fmt.Errorf("inline http client spec: %w", err)
 		}
-		return registry.Build(spec)
+		client, err := registry.Build(spec)
+		if err != nil {
+			return resolvedHTTPClient{}, err
+		}
+		return resolvedHTTPClient{Client: client, BaseURL: spec.BaseURL}, nil
 	}
 
 	name := httpclient.ClientName(httpClientName)
 	if name == "" {
 		name = "default"
 	}
-	return registry.Get(name)
+	client, err := registry.Get(name)
+	if err != nil {
+		return resolvedHTTPClient{}, err
+	}
+	baseURL, err := registry.BaseURL(name)
+	if err != nil {
+		return resolvedHTTPClient{}, err
+	}
+	return resolvedHTTPClient{Client: client, BaseURL: baseURL}, nil
 }
 
 // resolveClientSpec converts an HTTPClientSpec (config layer) into an
@@ -86,6 +105,17 @@ func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, re
 // and constructs TransportMiddleware from auth config.
 func resolveClientSpec(cfg HTTPClientSpec) (httpclient.ClientSpec, error) {
 	var spec httpclient.ClientSpec
+
+	if cfg.BaseURL != "" {
+		parsed, err := url.Parse(cfg.BaseURL)
+		if err != nil {
+			return spec, fmt.Errorf("invalid base_url %q: %w", cfg.BaseURL, err)
+		}
+		if parsed.Scheme == "" || parsed.Host == "" {
+			return spec, fmt.Errorf("invalid base_url %q: must include scheme and host", cfg.BaseURL)
+		}
+		spec.BaseURL = cfg.BaseURL
+	}
 
 	// Parse timeout
 	if cfg.Timeout != "" {

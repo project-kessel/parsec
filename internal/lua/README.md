@@ -19,6 +19,13 @@ The HTTP service provides HTTP client functionality to Lua scripts.
 - `http.request(method, url, [body], [headers])` - Make a generic HTTP request
   - Returns: `{status=int, body=string, headers=table}` or `(nil, error)`
 
+URLs may be absolute (`https://host/path`) or relative (`/v1/compliance`).
+Relative URLs resolve against the HTTP client's optional `base_url`
+(`WithBaseURL`). Prefer an origin-form base (`https://host.example`, no path)
+and Lua paths that start with `/`. If the Lua URL has a scheme, it is used as-is
+even when `base_url` is set. A relative URL with no `base_url` returns
+`(nil, error)` and does not hit the network.
+
 #### Example
 
 ```lua
@@ -162,6 +169,11 @@ Each service instance can be registered to multiple Lua states. However, Lua sta
 // Simple usage with a pre-configured HTTP client (must not be nil)
 client := &http.Client{Timeout: 30 * time.Second}
 httpService, err := lua.NewHTTPService(ctx, client)
+
+// Relative Lua URLs resolve against base_url (optional)
+httpService, err := lua.NewHTTPService(ctx, client,
+    lua.WithBaseURL("https://entitlements.internal.example.com"),
+)
 
 // With request options (per-request hooks applied before sending)
 httpService, err := lua.NewHTTPService(ctx, client,

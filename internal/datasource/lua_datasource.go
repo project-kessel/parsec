@@ -28,6 +28,7 @@ type LuaDataSource struct {
 	httpClient     *http.Client
 	requestOptions luaservices.RequestOptions
 	observer       LuaObserver
+	httpBaseURL    string
 }
 
 // LuaDataSourceConfig configures a Lua data source
@@ -56,6 +57,10 @@ type LuaDataSourceConfig struct {
 	// HTTPClient is the pre-configured HTTP client for the Lua http service.
 	// If nil, http.DefaultClient will be used.
 	HTTPClient *http.Client
+
+	// HTTPBaseURL is an optional origin that relative Lua URLs resolve against.
+	// Empty preserves absolute-URL-only behavior.
+	HTTPBaseURL string
 
 	// RequestOptions is a programmatic hook that augments outgoing HTTP requests
 	// (e.g. injecting headers or query params from Go context). Optional.
@@ -106,6 +111,7 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		httpClient:     httpClient,
 		requestOptions: config.RequestOptions,
 		observer:       obs,
+		httpBaseURL:    config.HTTPBaseURL,
 	}, nil
 }
 
@@ -129,6 +135,9 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	var httpOpts []luaservices.HTTPServiceOption
 	if ds.requestOptions != nil {
 		httpOpts = append(httpOpts, luaservices.WithRequestOptions(ds.requestOptions))
+	}
+	if ds.httpBaseURL != "" {
+		httpOpts = append(httpOpts, luaservices.WithBaseURL(ds.httpBaseURL))
 	}
 	httpService, err := luaservices.NewHTTPService(ctx, ds.httpClient, httpOpts...)
 	if err != nil {
@@ -386,6 +395,10 @@ type CacheableLuaDataSourceConfig struct {
 	// HTTPClient is the pre-configured HTTP client for the Lua http service.
 	// If nil, http.DefaultClient will be used.
 	HTTPClient *http.Client
+
+	// HTTPBaseURL is an optional origin that relative Lua URLs resolve against.
+	// Empty preserves absolute-URL-only behavior.
+	HTTPBaseURL string
 
 	// RequestOptions is a programmatic hook that augments outgoing HTTP requests. Optional.
 	RequestOptions luaservices.RequestOptions

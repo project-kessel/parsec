@@ -70,6 +70,7 @@ type LuaValidator struct {
 	httpClient      *http.Client
 	requestOptions  luaservices.RequestOptions
 	observer        LuaValidatorObserver
+	httpBaseURL     string
 }
 
 type luaValidatorConfig struct {
@@ -77,6 +78,7 @@ type luaValidatorConfig struct {
 	httpClient     *http.Client
 	requestOptions luaservices.RequestOptions
 	observer       LuaValidatorObserver
+	httpBaseURL    string
 }
 
 // LuaValidatorOption configures optional settings for Lua validators.
@@ -93,6 +95,14 @@ func WithLuaConfigSource(source luaservices.ConfigSource) LuaValidatorOption {
 func WithLuaHTTPClient(client *http.Client) LuaValidatorOption {
 	return func(cfg *luaValidatorConfig) {
 		cfg.httpClient = client
+	}
+}
+
+// WithLuaHTTPBaseURL sets an origin that relative Lua URLs resolve against.
+// Empty or omitted preserves absolute-URL-only behavior.
+func WithLuaHTTPBaseURL(base string) LuaValidatorOption {
+	return func(cfg *luaValidatorConfig) {
+		cfg.httpBaseURL = base
 	}
 }
 
@@ -145,6 +155,7 @@ func NewLuaValidator(name ScriptName, script string, credentialTypes []Credentia
 		httpClient:      cfg.httpClient,
 		requestOptions:  cfg.requestOptions,
 		observer:        cfg.observer,
+		httpBaseURL:     cfg.httpBaseURL,
 	}, nil
 }
 
@@ -197,6 +208,9 @@ func (v *LuaValidator) Validate(ctx context.Context, credential Credential) (*Re
 	var httpOpts []luaservices.HTTPServiceOption
 	if v.requestOptions != nil {
 		httpOpts = append(httpOpts, luaservices.WithRequestOptions(v.requestOptions))
+	}
+	if v.httpBaseURL != "" {
+		httpOpts = append(httpOpts, luaservices.WithBaseURL(v.httpBaseURL))
 	}
 	httpService, err := luaservices.NewHTTPService(ctx, v.httpClient, httpOpts...)
 	if err != nil {

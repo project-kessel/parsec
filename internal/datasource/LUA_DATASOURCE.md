@@ -120,6 +120,8 @@ cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
 | `Name` | `string` | Yes | Unique name for this data source |
 | `Script` | `string` | Yes | Lua script with `fetch` function |
 | `ConfigSource` | `lua.ConfigSource` | No | Configuration source for the script |
+| `HTTPClient` | `*http.Client` | No | Pre-configured HTTP client (`http.DefaultClient` if nil) |
+| `HTTPBaseURL` | `string` | No | Origin for relative Lua URLs; empty = absolute URLs only |
 | `HTTPTimeout` | `time.Duration` | No | HTTP request timeout (default: 30s) |
 | `HTTPRequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests |
 
@@ -130,6 +132,8 @@ cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
 | `Name` | `string` | Yes | Unique name for this data source |
 | `Script` | `string` | Yes | Lua script with `fetch` and cache key functions |
 | `ConfigSource` | `lua.ConfigSource` | No | Configuration source for the script |
+| `HTTPClient` | `*http.Client` | No | Pre-configured HTTP client (`http.DefaultClient` if nil) |
+| `HTTPBaseURL` | `string` | No | Origin for relative Lua URLs; empty = absolute URLs only |
 | `HTTPTimeout` | `time.Duration` | No | HTTP request timeout (default: 30s) |
 | `HTTPRequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests |
 
@@ -423,8 +427,11 @@ end
 ## Shipped scripts
 
 [`configs/scripts/export_compliance.lua`](../../configs/scripts/export_compliance.lua)
-builds a minimal `x-rh-identity` and GETs a configured compliance URL. Wire it
-from CEL with `datasource("export_compliance")`, gated on
+builds a minimal `x-rh-identity` and GETs the compliance endpoint. Prefer
+`compliance_path` (e.g. `/v1/compliance`) resolved against the HTTP client's
+`base_url`. `compliance_api` remains a full-URL alias (used when the value
+contains `://`, including `PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API`).
+Wire it from CEL with `datasource("export_compliance")`, gated on
 `request.additional.context_extensions.export_compliance` (opt-out: skip only
 when the value is `"false"`; absent key means on). `datasource()` is null when
 the source is not registered, so missing config is fail-safe.

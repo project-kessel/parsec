@@ -116,6 +116,39 @@ func TestNewHTTPClientRegistry_InvalidTimeoutErrors(t *testing.T) {
 	}
 }
 
+func TestNewHTTPClientRegistry_InvalidBaseURL(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{Name: "bad", HTTPClientSpec: HTTPClientSpec{BaseURL: "not a url"}},
+	}
+
+	_, err := NewHTTPClientRegistry(cfgs, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid base_url")
+	}
+}
+
+func TestNewHTTPClientRegistry_StoresBaseURL(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{Name: "entitlements", HTTPClientSpec: HTTPClientSpec{
+			Timeout: "5s",
+			BaseURL: "https://entitlements.example",
+		}},
+	}
+
+	registry, err := NewHTTPClientRegistry(cfgs, nil)
+	if err != nil {
+		t.Fatalf("NewHTTPClientRegistry() error: %v", err)
+	}
+
+	got, err := registry.BaseURL("entitlements")
+	if err != nil {
+		t.Fatalf("BaseURL: %v", err)
+	}
+	if got != "https://entitlements.example" {
+		t.Errorf("BaseURL = %q, want %q", got, "https://entitlements.example")
+	}
+}
+
 func TestNewHTTPClientRegistry_HeadersAuth(t *testing.T) {
 	t.Setenv("TEST_BOP_CLIENT_ID", "my-client-id")
 
@@ -358,12 +391,15 @@ func TestResolveHTTPClient_ByName(t *testing.T) {
 		{Name: "named", HTTPClientSpec: HTTPClientSpec{Timeout: "3s"}},
 	}, nil)
 
-	client, err := resolveHTTPClient("named", nil, registry)
+	resolved, err := resolveHTTPClient("named", nil, registry)
 	if err != nil {
 		t.Fatalf("resolveHTTPClient error: %v", err)
 	}
-	if client.Timeout != 3*time.Second {
-		t.Errorf("timeout = %v, want 3s", client.Timeout)
+	if resolved.Client.Timeout != 3*time.Second {
+		t.Errorf("timeout = %v, want 3s", resolved.Client.Timeout)
+	}
+	if resolved.BaseURL != "" {
+		t.Errorf("BaseURL = %q, want empty", resolved.BaseURL)
 	}
 }
 
@@ -371,24 +407,24 @@ func TestResolveHTTPClient_Inline(t *testing.T) {
 	registry, _ := NewHTTPClientRegistry(nil, nil)
 
 	spec := &HTTPClientSpec{Timeout: "7s"}
-	client, err := resolveHTTPClient("", spec, registry)
+	resolved, err := resolveHTTPClient("", spec, registry)
 	if err != nil {
 		t.Fatalf("resolveHTTPClient error: %v", err)
 	}
-	if client.Timeout != 7*time.Second {
-		t.Errorf("timeout = %v, want 7s", client.Timeout)
+	if resolved.Client.Timeout != 7*time.Second {
+		t.Errorf("timeout = %v, want 7s", resolved.Client.Timeout)
 	}
 }
 
 func TestResolveHTTPClient_DefaultFallback(t *testing.T) {
 	registry, _ := NewHTTPClientRegistry(nil, nil)
 
-	client, err := resolveHTTPClient("", nil, registry)
+	resolved, err := resolveHTTPClient("", nil, registry)
 	if err != nil {
 		t.Fatalf("resolveHTTPClient error: %v", err)
 	}
-	if client.Timeout != defaultHTTPClientTimeout {
-		t.Errorf("timeout = %v, want %v", client.Timeout, defaultHTTPClientTimeout)
+	if resolved.Client.Timeout != defaultHTTPClientTimeout {
+		t.Errorf("timeout = %v, want %v", resolved.Client.Timeout, defaultHTTPClientTimeout)
 	}
 }
 
@@ -425,13 +461,13 @@ func TestResolveHTTPClient_InlineGetsFixtureTransport(t *testing.T) {
 	registry, _ := NewHTTPClientRegistry(nil, fixture)
 
 	spec := &HTTPClientSpec{Timeout: "5s"}
-	client, err := resolveHTTPClient("", spec, registry)
+	resolved, err := resolveHTTPClient("", spec, registry)
 	if err != nil {
 		t.Fatalf("resolveHTTPClient error: %v", err)
 	}
 
 	req, _ := http.NewRequest("GET", "http://example.com", nil)
-	resp, err := client.Transport.RoundTrip(req)
+	resp, err := resolved.Client.Transport.RoundTrip(req)
 	if err != nil {
 		t.Fatalf("RoundTrip failed: %v", err)
 	}
@@ -439,6 +475,42 @@ func TestResolveHTTPClient_InlineGetsFixtureTransport(t *testing.T) {
 
 	if !called {
 		t.Error("fixture transport should be applied to inline clients")
+	}
+}
+
+func TestResolveHTTPClient_NamedBaseURL(t *testing.T) {
+	registry, err := NewHTTPClientRegistry([]HTTPClientConfig{
+		{Name: "entitlements", HTTPClientSpec: HTTPClientSpec{
+			Timeout: "5s",
+			BaseURL: "https://entitlements.example",
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewHTTPClientRegistry: %v", err)
+	}
+
+	resolved, err := resolveHTTPClient("entitlements", nil, registry)
+	if err != nil {
+		t.Fatalf("resolveHTTPClient error: %v", err)
+	}
+	if resolved.BaseURL != "https://entitlements.example" {
+		t.Errorf("BaseURL = %q, want %q", resolved.BaseURL, "https://entitlements.example")
+	}
+}
+
+func TestResolveHTTPClient_InlineBaseURL(t *testing.T) {
+	registry, err := NewHTTPClientRegistry(nil, nil)
+	if err != nil {
+		t.Fatalf("NewHTTPClientRegistry: %v", err)
+	}
+
+	spec := &HTTPClientSpec{Timeout: "5s", BaseURL: "https://inline.example"}
+	resolved, err := resolveHTTPClient("", spec, registry)
+	if err != nil {
+		t.Fatalf("resolveHTTPClient error: %v", err)
+	}
+	if resolved.BaseURL != "https://inline.example" {
+		t.Errorf("BaseURL = %q, want %q", resolved.BaseURL, "https://inline.example")
 	}
 }
 
