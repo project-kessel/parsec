@@ -74,6 +74,9 @@ objects:
                 mountPath: "/etc/parsec/scripts/bop_user.lua"
                 subPath: bop_user.lua
               - name: config-volume
+                mountPath: "/etc/parsec/scripts/cross_account.lua"
+                subPath: cross_account.lua
+              - name: config-volume
                 mountPath: "/etc/parsec/scripts/forwarded_client_cert_auth.lua"
                 subPath: forwarded_client_cert_auth.lua
               - name: registry-certs

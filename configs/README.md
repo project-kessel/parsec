@@ -466,6 +466,60 @@ PARSEC_DATA_SOURCES__1__CONFIG__COMPLIANCE_API=http://127.0.0.1:9099/v1/complian
 second `data_sources` entry. Reorder the list → update the index; there is
 no runtime check that the name still sits at that slot.)
 
+### Cross-account access (RHCLOUD-47320)
+
+Fail-closed Lua data source. CEL calls it on User jwt-auth branches **after**
+export compliance. Browser cookies `cross_access_account_number` and/or
+`cross_access_org_id` activate the check; without cookies (or without the DS)
+identity is unchanged (fail-safe). JWT-auth only — cert, registry, and service
+accounts never call it.
+
+Lua owns employee validation (`@redhat.com` suffix, `is_internal` unless
+`bypass_is_internal`) and the RBAC GET. CEL maps `status`:
+
+| Lua `status` | CEL |
+|--------------|-----|
+| `allowed` | Swap account/org to the cookie targets; set `cross_access=true`, `is_org_admin=false`; keep employee originals on `employee_account_number` / `employee_org_id` |
+| `forbidden` | `accessDenied("Cross account access is forbidden.")` → 403 |
+| `denied` | `accessDenied("Access denied from RBAC on cross-access check.")` → 403 |
+| `error()` (RBAC 5xx) | CEL eval error → 500 |
+
+`fetch_cache_key` is employee subject/email/`is_internal` plus the Cookie
+header (and `query_by`). Align `internal_idp_target` / `role_fallback_enabled`
+with the `identity-policy` static source.
+
+```yaml
+  - name: cross_account
+    type: lua
+    script_file: ./configs/scripts/cross_account.lua
+    config:
+      rbac_api: "https://rbac.example.internal"
+      requests_path: "/api/rbac/v1/cross-account-requests/"
+      query_by: "account"          # or "org_id"
+      bypass_is_internal: false
+      internal_email_suffix: "@redhat.com"
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+    http:
+      timeout: 5s
+    caching:
+      type: in_memory
+      ttl: 5m
+      group_name: cross-account-cache
+```
+
+Override the URL without replacing the list:
+
+```bash
+PARSEC_DATA_SOURCES__2__CONFIG__RBAC_API=https://rbac.example.internal
+```
+
+(Index `2` matches `configs/parsec.yaml`. Reorder the list → update the index.)
+
+Stage/prod: add `cross_account.lua` to the app-interface secret, register the
+DS with a real `rbac_api`, and ship the updated CEL in the same rollout as the
+new volumeMount in `deploy/parsec.yaml`.
+
 ### Claim Mappers
 
 Claim mappers build token claims from inputs:

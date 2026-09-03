@@ -357,6 +357,15 @@ func TestLuaFetchMetrics(t *testing.T) {
 			wantResult: `result="unknown"`,
 			wantStatus: `status="success"`,
 		},
+		{
+			name: "script status overrides completed",
+			action: func(p datasource.LuaFetchProbe) {
+				p.FetchCompleted()
+				p.Outcome("denied")
+			},
+			wantResult: `result="denied"`,
+			wantStatus: `status="success"`,
+		},
 	}
 
 	for _, tt := range tests {

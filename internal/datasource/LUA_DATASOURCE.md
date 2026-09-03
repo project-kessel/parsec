@@ -185,6 +185,7 @@ input = {
 - Return a table with `data` (string) and `content_type` (string) fields
 - Return `nil` if the data source has nothing to contribute
 - Throw an error for fatal errors that should fail token issuance
+- If `content_type` is JSON and `data` is an object with a string `status` field, `LuaFetchProbe.Outcome(status)` is called (audit hook; any script can use it)
 
 ### Optional Function: fetch_cache_key
 
@@ -427,7 +428,18 @@ builds a minimal `x-rh-identity` and GETs a configured compliance URL. Wire it
 from CEL with `datasource("export_compliance")`, gated on
 `request.additional.context_extensions.export_compliance` (opt-out: skip only
 when the value is `"false"`; absent key means on). `datasource()` is null when
-the source is not registered, so missing config is fail-safe.
+the source is not registered, so missing config is fail-safe. Fail-open: HTTP
+errors do not block issuance.
+
+[`configs/scripts/cross_account.lua`](../../configs/scripts/cross_account.lua)
+validates browser cross-account cookies and GETs RBAC. Wire it from CEL with
+`datasource("cross_account")` **after** export compliance on User jwt-auth
+branches. Return JSON `status` of `allowed`, `forbidden`, or `denied` (CEL maps
+those to identity mutation or `accessDenied`); `error()` on RBAC 5xx (fail-closed
+→ HTTP 500). No cookies → `nil` (CEL no-op, cache skipped). Missing DS is
+fail-safe. Cache key is employee identity + target cookies. Keep
+`internal_idp_target` / `role_fallback_enabled` aligned with the
+`identity-policy` static source.
 
 ## Integration with Caching
 

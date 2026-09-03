@@ -10,7 +10,13 @@
 // Schema default is true (same as auth_sso_jwt). Absent key → check on.
 // Missing DS → datasource() is null → skip (fail-safe until app-interface
 // registers the source). The check runs BEFORE any cross-account identity
-// swap (AC9). cert-auth, registry-auth, and ServiceAccount are exempt (AC1).
+// swap (RHCLOUD-49359 AC9). cert-auth, registry-auth, and ServiceAccount
+// are exempt (AC1).
+//
+// Cross-account (RHCLOUD-47320): after compliance, datasource("cross_account")
+// on User jwt-auth branches (console, rhsm, portal, unsigned-json BOP).
+// Lua returns status allowed|forbidden|denied, or errors (CEL → 500).
+// Missing DS / no cookies → null → skip (fail-safe). JWT-auth only.
 //
 // Compliance error codes (AC10):
 //   "ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"
@@ -60,8 +66,47 @@ has(subject.issuer) && subject.issuer.startsWith("x509://") ? {
 // Result.Subject keeps the namespaced id; BOP strips the prefix for lookup.
 has(subject.issuer) && subject.issuer == "urn:ietf:params:oauth:token-type:unsigned_json" ? (
   has(subject.subject) && subject.subject.startsWith("redhat:user:sso:") ? (
-    datasource("bop-user") != null && !has(datasource("bop-user").error) ?
-    {
+    datasource("bop-user") != null && !has(datasource("bop-user").error) ? (
+      datasource("cross_account") != null && datasource("cross_account").status == "forbidden"
+        ? accessDenied("Cross account access is forbidden.")
+      : datasource("cross_account") != null && datasource("cross_account").status == "denied"
+        ? accessDenied("Access denied from RBAC on cross-access check.")
+      : datasource("cross_account") != null && datasource("cross_account").status == "allowed"
+        ? {
+      "identity": {
+        "account_number": has(datasource("cross_account").target_account_number) && datasource("cross_account").target_account_number != ""
+                          ? datasource("cross_account").target_account_number
+                          : (has(datasource("bop-user").account_number) ? datasource("bop-user").account_number : ""),
+        "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                  ? datasource("cross_account").target_org_id
+                  : safeToString(datasource("bop-user").org_id),
+        "employee_account_number": has(datasource("cross_account").employee_account_number) ? datasource("cross_account").employee_account_number : (has(datasource("bop-user").account_number) ? datasource("bop-user").account_number : ""),
+        "employee_org_id": has(datasource("cross_account").employee_org_id) ? datasource("cross_account").employee_org_id : safeToString(datasource("bop-user").org_id),
+        "type": "User",
+        "auth_type": "jwt-auth",
+        "user": {
+          "username": has(datasource("bop-user").username) ? datasource("bop-user").username : "",
+          "email": has(datasource("bop-user").email) ? datasource("bop-user").email : "",
+          "first_name": has(datasource("bop-user").first_name) ? datasource("bop-user").first_name : "",
+          "last_name": has(datasource("bop-user").last_name) ? datasource("bop-user").last_name : "",
+          "is_active": has(datasource("bop-user").is_active) ? datasource("bop-user").is_active : false,
+          "is_org_admin": false,
+          "is_internal": has(datasource("bop-user").is_internal) ? datasource("bop-user").is_internal : false,
+          "locale": has(datasource("bop-user").locale) ? datasource("bop-user").locale : "",
+          "user_id": safeToString(datasource("bop-user").user_id)
+        },
+        "internal": {
+          "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                    ? datasource("cross_account").target_org_id
+                    : safeToString(datasource("bop-user").org_id),
+          "cross_access": true
+        }
+      },
+      "entitlements": {}
+    }
+      : datasource("cross_account") != null
+        ? fail("cross-account check failed")
+      : {
       "identity": {
         "account_number": has(datasource("bop-user").account_number) ? datasource("bop-user").account_number : "",
         "org_id": safeToString(datasource("bop-user").org_id),
@@ -85,6 +130,7 @@ has(subject.issuer) && subject.issuer == "urn:ietf:params:oauth:token-type:unsig
       },
       "entitlements": {}
     }
+    )
     : (datasource("bop-user") != null && has(datasource("bop-user").error)
        ? invalidSubject(datasource("bop-user").error)
        : fail("bop_enrichment_failed"))
@@ -140,6 +186,52 @@ isServiceAccountToken(subject.claims) ? {
     && datasource("export_compliance") != null
     && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
       ? accessDenied("export compliance check failed")
+      : datasource("cross_account") != null && datasource("cross_account").status == "forbidden"
+        ? accessDenied("Cross account access is forbidden.")
+      : datasource("cross_account") != null && datasource("cross_account").status == "denied"
+        ? accessDenied("Access denied from RBAC on cross-access check.")
+      : datasource("cross_account") != null && datasource("cross_account").status == "allowed"
+        ? {
+    "identity": {
+      "auth_type": "jwt-auth",
+      "account_number": has(datasource("cross_account").target_account_number) && datasource("cross_account").target_account_number != ""
+                        ? datasource("cross_account").target_account_number
+                        : (has(subject.claims.organization) && has(subject.claims.organization.account_number) ?
+                           subject.claims.organization.account_number : ""),
+      "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                ? datasource("cross_account").target_org_id
+                : (has(subject.claims.organization) && has(subject.claims.organization.id) ?
+                   subject.claims.organization.id : ""),
+      "employee_account_number": has(datasource("cross_account").employee_account_number) ? datasource("cross_account").employee_account_number : "",
+      "employee_org_id": has(datasource("cross_account").employee_org_id) ? datasource("cross_account").employee_org_id : "",
+      "type": "User",
+      "user": {
+        "username": has(subject.claims.preferred_username) ? subject.claims.preferred_username : "",
+        "email": has(subject.claims.email) ? subject.claims.email : "",
+        "first_name": has(subject.claims.given_name) ? subject.claims.given_name : "",
+        "last_name": has(subject.claims.family_name) ? subject.claims.family_name : "",
+        "is_active": true,
+        "is_org_admin": false,
+        "is_internal": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) :
+                       has(subject.claims.is_internal) ? subject.claims.is_internal :
+                       datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
+                       false,
+        "locale": has(subject.claims.locale) ? subject.claims.locale : "",
+        "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : ""
+      },
+      "internal": {
+        "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                  ? datasource("cross_account").target_org_id
+                  : (has(subject.claims.organization) && has(subject.claims.organization.id) ?
+                     subject.claims.organization.id : ""),
+        "cross_access": true,
+        "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
+      }
+    },
+    "entitlements": {}
+  }
+      : datasource("cross_account") != null
+        ? fail("cross-account check failed")
       : {
     "identity": {
       "auth_type": "jwt-auth",
@@ -177,6 +269,60 @@ isServiceAccountToken(subject.claims) ? {
       && datasource("export_compliance") != null
       && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
         ? accessDenied("export compliance check failed")
+        : datasource("cross_account") != null && datasource("cross_account").status == "forbidden"
+          ? accessDenied("Cross account access is forbidden.")
+        : datasource("cross_account") != null && datasource("cross_account").status == "denied"
+          ? accessDenied("Access denied from RBAC on cross-access check.")
+        : datasource("cross_account") != null && datasource("cross_account").status == "allowed"
+          ? {
+      "identity": {
+        "auth_type": "jwt-auth",
+        "account_number": has(datasource("cross_account").target_account_number) && datasource("cross_account").target_account_number != ""
+                          ? datasource("cross_account").target_account_number
+                          : (has(subject.claims.account_id) ? safeToString(subject.claims.account_id) : ""),
+        "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                  ? datasource("cross_account").target_org_id
+                  : (has(subject.claims.organization) && has(subject.claims.organization.id) ?
+                     subject.claims.organization.id :
+                     (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) :
+                      (has(subject.claims.account_id) ? safeToString(subject.claims.account_id) : ""))),
+        "employee_account_number": has(datasource("cross_account").employee_account_number) ? datasource("cross_account").employee_account_number : "",
+        "employee_org_id": has(datasource("cross_account").employee_org_id) ? datasource("cross_account").employee_org_id : "",
+        "type": "User",
+        "user": {
+          "username": has(subject.claims.preferred_username) ? subject.claims.preferred_username :
+                      (has(subject.claims.username) ? subject.claims.username : ""),
+          "email": has(subject.claims.email) ? subject.claims.email : "",
+          "first_name": has(subject.claims.given_name) ? subject.claims.given_name :
+                        (has(subject.claims.firstName) ? subject.claims.firstName : ""),
+          "last_name": has(subject.claims.family_name) ? subject.claims.family_name :
+                       (has(subject.claims.lastName) ? subject.claims.lastName : ""),
+          "is_active": true,
+          "is_org_admin": false,
+          "is_internal": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) :
+                         has(subject.claims.is_internal) ? subject.claims.is_internal :
+                         datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
+                         false,
+          "locale": has(subject.claims.locale) ? subject.claims.locale :
+                    (has(subject.claims.lang) ? subject.claims.lang : ""),
+          "user_id": has(subject.claims.sub) ? safeToString(subject.claims.sub) :
+                     (has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : "")
+        },
+        "internal": {
+          "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                    ? datasource("cross_account").target_org_id
+                    : (has(subject.claims.organization) && has(subject.claims.organization.id) ?
+                       subject.claims.organization.id :
+                       (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) :
+                        (has(subject.claims.account_id) ? safeToString(subject.claims.account_id) : ""))),
+          "cross_access": true,
+          "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
+        }
+      },
+      "entitlements": {}
+    }
+        : datasource("cross_account") != null
+          ? fail("cross-account check failed")
         : {
       "identity": {
         "auth_type": "jwt-auth",
@@ -222,6 +368,60 @@ isServiceAccountToken(subject.claims) ? {
         && datasource("export_compliance") != null
         && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
           ? accessDenied("export compliance check failed")
+          : datasource("cross_account") != null && datasource("cross_account").status == "forbidden"
+            ? accessDenied("Cross account access is forbidden.")
+          : datasource("cross_account") != null && datasource("cross_account").status == "denied"
+            ? accessDenied("Access denied from RBAC on cross-access check.")
+          : datasource("cross_account") != null && datasource("cross_account").status == "allowed"
+            ? {
+        "identity": {
+          "auth_type": "jwt-auth",
+          "account_number": has(datasource("cross_account").target_account_number) && datasource("cross_account").target_account_number != ""
+                            ? datasource("cross_account").target_account_number
+                            : (has(subject.claims.account_number) ? safeToString(subject.claims.account_number) :
+                               (has(subject.claims.organization) && has(subject.claims.organization.account_number) ?
+                                subject.claims.organization.account_number : "")),
+          "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                    ? datasource("cross_account").target_org_id
+                    : (has(subject.claims.organization) && has(subject.claims.organization.id) ?
+                       subject.claims.organization.id :
+                       (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "")),
+          "employee_account_number": has(datasource("cross_account").employee_account_number) ? datasource("cross_account").employee_account_number : "",
+          "employee_org_id": has(datasource("cross_account").employee_org_id) ? datasource("cross_account").employee_org_id : "",
+          "type": "User",
+          "user": {
+            "username": has(subject.claims.username) ? subject.claims.username :
+                        (has(subject.claims.preferred_username) ? subject.claims.preferred_username : ""),
+            "email": has(subject.claims.email) ? subject.claims.email : "",
+            "first_name": has(subject.claims.firstName) ? subject.claims.firstName :
+                          (has(subject.claims.given_name) ? subject.claims.given_name : ""),
+            "last_name": has(subject.claims.lastName) ? subject.claims.lastName :
+                         (has(subject.claims.family_name) ? subject.claims.family_name : ""),
+            "is_active": true,
+            "is_org_admin": false,
+            "is_internal": has(subject.claims.idp) ? (subject.claims.idp == datasource("identity-policy").internal_idp_target) :
+                           has(subject.claims.is_internal) ? subject.claims.is_internal :
+                           datasource("identity-policy").role_fallback_enabled ? hasRole(subject.claims, "redhat:employees") :
+                           false,
+            "locale": has(subject.claims.lang) ? subject.claims.lang :
+                      (has(subject.claims.locale) ? subject.claims.locale : ""),
+            "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) :
+                       (has(subject.claims.sub) ? safeToString(subject.claims.sub) : "")
+          },
+          "internal": {
+            "org_id": has(datasource("cross_account").target_org_id) && datasource("cross_account").target_org_id != ""
+                      ? datasource("cross_account").target_org_id
+                      : (has(subject.claims.organization) && has(subject.claims.organization.id) ?
+                         subject.claims.organization.id :
+                         (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "")),
+            "cross_access": true,
+            "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
+          }
+        },
+        "entitlements": {}
+      }
+          : datasource("cross_account") != null
+            ? fail("cross-account check failed")
           : {
         "identity": {
           "auth_type": "jwt-auth",

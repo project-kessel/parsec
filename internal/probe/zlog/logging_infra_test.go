@@ -103,6 +103,14 @@ func TestLoggingLuaDataSourceObserver_FetchCompletedNil(t *testing.T) {
 	assertLog(t, buf.String(), "debug", "lua fetch completed with nil result", `"datasource":"my_lua_ds"`)
 }
 
+func TestLoggingLuaDataSourceObserver_Outcome(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewLoggingLuaDataSourceObserver(testLogger(&buf), WithClock(testClock()))
+	_, p := obs.LuaFetchStarted(context.Background(), "my_lua_ds")
+	p.Outcome("denied")
+	assertLog(t, buf.String(), "info", "lua fetch outcome", `"datasource":"my_lua_ds"`, `"status":"denied"`)
+}
+
 // --- KeyRotation ---
 
 func TestLoggingKeyRotationObserver_RotationCheckFailed(t *testing.T) {

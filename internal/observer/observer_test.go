@@ -67,6 +67,7 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 		p.FetchCompleted()
 		p.FetchCompletedNil()
 		p.ResultConversionFailed(errors.New("x"))
+		p.Outcome("denied")
 	}
 	{
 		_, p := obs.RotationCheckStarted(ctx)

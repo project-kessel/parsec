@@ -87,6 +87,26 @@ data_sources:
       ttl: 24h
       group_name: compliance-cache
 
+  # Cross-account RBAC check (RHCLOUD-47320). Missing DS → CEL skips (fail-safe).
+  # Override URL via env: PARSEC_DATA_SOURCES__2__CONFIG__RBAC_API
+  - name: cross_account
+    type: lua
+    script_file: ./configs/scripts/cross_account.lua
+    config:
+      rbac_api: "https://rbac.example.internal"
+      requests_path: "/api/rbac/v1/cross-account-requests/"
+      query_by: "account"
+      bypass_is_internal: false
+      internal_email_suffix: "@redhat.com"
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+    http:
+      timeout: 5s
+    caching:
+      type: in_memory
+      ttl: 5m
+      group_name: cross-account-cache
+
   - name: bop-user
     type: lua
     script_file: ./configs/scripts/bop_user.lua

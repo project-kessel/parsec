@@ -2,6 +2,10 @@
 
 This package provides Lua services for use with the LuaDataSource. These services expose Go functionality to Lua scripts in a safe and controlled manner.
 
+Shipped scripts live in [`configs/scripts/`](../../configs/scripts/). See
+[`internal/datasource/LUA_DATASOURCE.md`](../datasource/LUA_DATASOURCE.md) for
+`export_compliance.lua` (fail-open) and `cross_account.lua` (fail-closed RBAC).
+
 ## Available Services
 
 ### HTTP Service

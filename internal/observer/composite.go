@@ -307,6 +307,11 @@ func (m *compositeLuaFetchProbe) ResultConversionFailed(err error) {
 		p.ResultConversionFailed(err)
 	}
 }
+func (m *compositeLuaFetchProbe) Outcome(status string) {
+	for _, p := range m.probes {
+		p.Outcome(status)
+	}
+}
 func (m *compositeLuaFetchProbe) End() {
 	for _, p := range m.probes {
 		p.End()

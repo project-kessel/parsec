@@ -39,6 +39,9 @@ type LuaFetchProbe interface {
 	FetchCompleted()
 	FetchCompletedNil()
 	ResultConversionFailed(err error)
+	// Outcome records a script-defined result string from returned JSON
+	// (e.g. "allowed", "denied"). Call after a successful table return.
+	Outcome(status string)
 	End()
 }
 
@@ -70,6 +73,7 @@ func (NoOpLuaFetchProbe) InvalidReturnType(string)     {}
 func (NoOpLuaFetchProbe) FetchCompleted()              {}
 func (NoOpLuaFetchProbe) FetchCompletedNil()           {}
 func (NoOpLuaFetchProbe) ResultConversionFailed(error) {}
+func (NoOpLuaFetchProbe) Outcome(string)               {}
 func (NoOpLuaFetchProbe) End()                         {}
 
 // NoOpCacheObserver is a no-op implementation of CacheObserver.

@@ -62,6 +62,10 @@ func (p *loggingLuaFetchProbe) ResultConversionFailed(err error) {
 	p.logger.Error().Err(err).Msg("lua result table conversion failed")
 }
 
+func (p *loggingLuaFetchProbe) Outcome(status string) {
+	p.logger.Info().Str("status", status).Msg("lua fetch outcome")
+}
+
 func (p *loggingLuaFetchProbe) End() {
 	p.logger.Debug().
 		Dur("duration", p.clock.Since(p.startTime)).

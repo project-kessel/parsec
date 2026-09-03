@@ -77,14 +77,36 @@ data_sources:
       ttl: 24h
       group_name: "compliance-cache"
       cache_size: 134217728  # 128 MB
-  
+
+  # Cross-account RBAC check (RHCLOUD-47320). Fail-safe until registered.
+  # URL from namespace var: PARSEC_RBAC_API.
+  - name: cross_account
+    type: lua
+    script_file: /etc/parsec/scripts/cross_account.lua
+    config:
+      rbac_api:
+        env: "PARSEC_RBAC_API"
+      requests_path: "/api/rbac/v1/cross-account-requests/"
+      query_by: "account"
+      bypass_is_internal: false
+      internal_email_suffix: "@redhat.com"
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+    http:
+      timeout: 5s
+    caching:
+      type: distributed
+      ttl: 5m
+      group_name: "cross-account-cache"
+      cache_size: 67108864  # 64 MB
+
   # Organization metadata
   - name: org_metadata
     type: lua
     script_file: /etc/parsec/scripts/org_metadata.lua
     config:
       org_api: "https://org.internal.example.com"
-      api_key: "inject-via-env-var"  # Use PARSEC_DATA_SOURCES__2__CONFIG__API_KEY
+      api_key: "inject-via-env-var"  # Use PARSEC_DATA_SOURCES__3__CONFIG__API_KEY
     http:
       timeout: 10s
     caching:

@@ -2,6 +2,7 @@ package datasource
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -185,7 +186,26 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 		return nil, err
 	}
 	p.FetchCompleted()
+	if status := outcomeStatus(result); status != "" {
+		p.Outcome(status)
+	}
 	return result, nil
+}
+
+// outcomeStatus returns the JSON "status" string from a Lua result, if present.
+func outcomeStatus(result *service.DataSourceResult) string {
+	if result == nil || result.ContentType != service.ContentTypeJSON || len(result.Data) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Data, &payload); err != nil {
+		return ""
+	}
+	status, ok := payload["status"].(string)
+	if !ok {
+		return ""
+	}
+	return status
 }
 
 // inputToLuaTable converts a DataSourceInput to a Lua table

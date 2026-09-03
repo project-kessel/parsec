@@ -778,3 +778,72 @@ end
 		t.Errorf("error should mention nil input, got: %v", err)
 	}
 }
+
+type recordingLuaObserver struct {
+	NoOpLuaObserver
+	probe *recordingLuaProbe
+}
+
+func (o *recordingLuaObserver) LuaFetchStarted(ctx context.Context, _ string) (context.Context, LuaFetchProbe) {
+	o.probe = &recordingLuaProbe{}
+	return ctx, o.probe
+}
+
+type recordingLuaProbe struct {
+	NoOpLuaFetchProbe
+	outcomes []string
+}
+
+func (p *recordingLuaProbe) Outcome(status string) {
+	p.outcomes = append(p.outcomes, status)
+}
+
+func TestLuaDataSource_Fetch_OutcomeFromJSONStatus(t *testing.T) {
+	obs := &recordingLuaObserver{}
+	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+		Name:     "with-status",
+		Script:   `function fetch(input) return {data = '{"status":"denied"}', content_type = 'application/json'} end`,
+		Observer: obs,
+	})
+	if err != nil {
+		t.Fatalf("NewLuaDataSource: %v", err)
+	}
+
+	if _, err := ds.Fetch(context.Background(), &service.DataSourceInput{
+		Subject: &trust.Result{Subject: "alice"},
+	}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	if obs.probe == nil {
+		t.Fatal("expected LuaFetchStarted to record a probe")
+	}
+	if got := obs.probe.outcomes; len(got) != 1 || got[0] != "denied" {
+		t.Errorf("outcomes=%v, want [denied]", got)
+	}
+}
+
+func TestLuaDataSource_Fetch_NoOutcomeWithoutStatus(t *testing.T) {
+	obs := &recordingLuaObserver{}
+	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+		Name:     "no-status",
+		Script:   `function fetch(input) return {data = '{"ok":true}', content_type = 'application/json'} end`,
+		Observer: obs,
+	})
+	if err != nil {
+		t.Fatalf("NewLuaDataSource: %v", err)
+	}
+
+	if _, err := ds.Fetch(context.Background(), &service.DataSourceInput{
+		Subject: &trust.Result{Subject: "alice"},
+	}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	if obs.probe == nil {
+		t.Fatal("expected LuaFetchStarted to record a probe")
+	}
+	if len(obs.probe.outcomes) != 0 {
+		t.Errorf("outcomes=%v, want none", obs.probe.outcomes)
+	}
+}

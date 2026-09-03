@@ -116,6 +116,11 @@ type luaFetchProbe struct {
 
 func (p *luaFetchProbe) FetchCompleted()    { p.result = luaResultCompleted }
 func (p *luaFetchProbe) FetchCompletedNil() { p.result = luaResultCompletedNil }
+func (p *luaFetchProbe) Outcome(status string) {
+	if status != "" {
+		p.result = attribute.String("result", status)
+	}
+}
 func (p *luaFetchProbe) ScriptLoadFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = luaResultScriptLoadFailed
