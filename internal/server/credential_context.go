@@ -24,8 +24,14 @@ type TLSPeerInfo struct {
 // from their specific transport (Envoy CheckRequest, gRPC context, etc.)
 // before credential extraction.
 type CredentialContext struct {
+	EmployeeAccountNumber string
+	EmployeeOrgID        string
+	IsOrgAdmin           bool
+	CrossAccess          bool
+
 	Headers map[string]string // normalized lowercase header keys
 	Cookies []*http.Cookie    // parsed from the cookie header; nil when absent
+	CrossAccessDetected bool // indicates presence of cross-account access cookies
 	TLSPeer *TLSPeerInfo      // mTLS client cert info; nil when absent
 }
 
@@ -34,14 +40,29 @@ type CredentialContext struct {
 func CredentialContextFromCheckRequest(req *authv3.CheckRequest) (CredentialContext, error) {
 	httpReq := req.GetAttributes().GetRequest().GetHttp()
 	if httpReq == nil {
-		return CredentialContext{}, fmt.Errorf("no HTTP request attributes")
+		return CredentialContext{
+		CrossAccessDetected: crossAccessDetected,}, fmt.Errorf("no HTTP request attributes")
 	}
 	headers := normalizeHeaderKeys(httpReq.GetHeaders())
 	cookies, err := parseCookies(headers["cookie"])
 	if err != nil {
-		return CredentialContext{}, err
+		return CredentialContext{
+		CrossAccessDetected: crossAccessDetected,}, err
 	}
+	// Detect cross-account access cookies
+	crossAccountCookies := []string{"cross_access_account_number", "cross_access_org_id"}
+	crossAccessDetected := false
+	for _, cookie := range cookies {
+		for _, caCookie := range crossAccountCookies {
+			if cookie.Name == caCookie {
+				crossAccessDetected = true
+				break
+			}
+		}
+	}
+
 	return CredentialContext{
+		CrossAccessDetected: crossAccessDetected,
 		Headers: headers,
 		Cookies: cookies,
 	}, nil
@@ -61,7 +82,8 @@ func CredentialContextFromGRPC(ctx context.Context) (CredentialContext, error) {
 		}
 		cookies, err := parseCookies(tc.Headers["cookie"])
 		if err != nil {
-			return CredentialContext{}, err
+			return CredentialContext{
+		CrossAccessDetected: crossAccessDetected,}, err
 		}
 		tc.Cookies = cookies
 	}
