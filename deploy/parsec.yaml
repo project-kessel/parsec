@@ -71,6 +71,9 @@ objects:
                 mountPath: "/etc/parsec/scripts/registry_auth.lua"
                 subPath: "registry_auth.lua"
               - name: config-volume
+                mountPath: "/etc/parsec/scripts/export_compliance.lua"
+                subPath: export_compliance.lua
+              - name: config-volume
                 mountPath: "/etc/parsec/scripts/bop_user.lua"
                 subPath: bop_user.lua
               - name: config-volume
