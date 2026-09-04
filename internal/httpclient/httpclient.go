@@ -33,6 +33,7 @@ type ClientSpec struct {
 	CertSource          CertSource          // nil = share default transport
 	TransportMiddleware TransportMiddleware // nil = no wrapping
 	RootCAPath          string              // PEM-encoded CA cert file to trust; empty = system roots
+	BaseURL             string              // optional origin for relative Lua URLs; empty = none
 }
 
 // RegistryOption configures optional parameters for [NewRegistry].
@@ -64,9 +65,14 @@ func resolveRegistryConfig(opts []RegistryOption) registryConfig {
 // It is also the factory for inline (anonymous) clients, ensuring
 // global concerns like fixture transports are applied uniformly.
 type Registry struct {
-	clients          map[ClientName]*http.Client
+	clients          map[ClientName]registeredClient
 	fixtureTransport http.RoundTripper  // nil in production
 	observer         HTTPClientObserver // nil = no instrumentation
+}
+
+type registeredClient struct {
+	client  *http.Client
+	baseURL string
 }
 
 // NewRegistry creates a Registry. If fixtureTransport is non-nil, it overrides
@@ -74,7 +80,7 @@ type Registry struct {
 func NewRegistry(fixtureTransport http.RoundTripper, opts ...RegistryOption) *Registry {
 	cfg := resolveRegistryConfig(opts)
 	return &Registry{
-		clients:          make(map[ClientName]*http.Client),
+		clients:          make(map[ClientName]registeredClient),
 		fixtureTransport: fixtureTransport,
 		observer:         cfg.observer,
 	}
@@ -92,17 +98,27 @@ func (r *Registry) Register(name ClientName, spec ClientSpec) (*http.Client, err
 		return nil, fmt.Errorf("httpclient: failed to build client %q: %w", name, err)
 	}
 
-	r.clients[name] = client
+	r.clients[name] = registeredClient{client: client, baseURL: spec.BaseURL}
 	return client, nil
 }
 
 // Get retrieves a named client. Returns an error if not found.
 func (r *Registry) Get(name ClientName) (*http.Client, error) {
-	client, ok := r.clients[name]
+	rc, ok := r.clients[name]
 	if !ok {
 		return nil, fmt.Errorf("httpclient: client %q not found", name)
 	}
-	return client, nil
+	return rc.client, nil
+}
+
+// BaseURL returns the configured base URL for a named client.
+// An empty string means no base was set. Returns an error if the name is unknown.
+func (r *Registry) BaseURL(name ClientName) (string, error) {
+	rc, ok := r.clients[name]
+	if !ok {
+		return "", fmt.Errorf("httpclient: client %q not found", name)
+	}
+	return rc.baseURL, nil
 }
 
 // Build creates an anonymous [*http.Client] from the given spec, applying

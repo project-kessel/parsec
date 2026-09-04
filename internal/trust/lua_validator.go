@@ -12,6 +12,7 @@ import (
 	lua "github.com/yuin/gopher-lua"
 
 	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 )
 
@@ -67,14 +68,14 @@ type LuaValidator struct {
 	proto           *lua.FunctionProto
 	credentialTypes []CredentialType
 	configSource    luaservices.ConfigSource
-	httpClient      *http.Client
+	http            httpclient.LuaClient
 	requestOptions  luaservices.RequestOptions
 	observer        LuaValidatorObserver
 }
 
 type luaValidatorConfig struct {
 	configSource   luaservices.ConfigSource
-	httpClient     *http.Client
+	http           httpclient.LuaClient
 	requestOptions luaservices.RequestOptions
 	observer       LuaValidatorObserver
 }
@@ -89,10 +90,18 @@ func WithLuaConfigSource(source luaservices.ConfigSource) LuaValidatorOption {
 	}
 }
 
+// WithLuaHTTP sets the HTTP client and optional base URL for the Lua http service.
+func WithLuaHTTP(client httpclient.LuaClient) LuaValidatorOption {
+	return func(cfg *luaValidatorConfig) {
+		cfg.http = client
+	}
+}
+
 // WithLuaHTTPClient sets the pre-configured HTTP client for the Lua http service.
+// Prefer [WithLuaHTTP] when a base URL is also configured.
 func WithLuaHTTPClient(client *http.Client) LuaValidatorOption {
 	return func(cfg *luaValidatorConfig) {
-		cfg.httpClient = client
+		cfg.http.Client = client
 	}
 }
 
@@ -142,7 +151,7 @@ func NewLuaValidator(name ScriptName, script string, credentialTypes []Credentia
 		proto:           proto,
 		credentialTypes: slices.Clone(credentialTypes),
 		configSource:    cfg.configSource,
-		httpClient:      cfg.httpClient,
+		http:            cfg.http,
 		requestOptions:  cfg.requestOptions,
 		observer:        cfg.observer,
 	}, nil
@@ -158,9 +167,6 @@ func newLuaValidatorConfig(opts ...LuaValidatorOption) luaValidatorConfig {
 	}
 	if cfg.configSource == nil {
 		cfg.configSource = luaservices.NewMapConfigSource(nil)
-	}
-	if cfg.httpClient == nil {
-		cfg.httpClient = http.DefaultClient
 	}
 	if cfg.observer == nil {
 		cfg.observer = NoOpTrustObserver{}
@@ -198,7 +204,10 @@ func (v *LuaValidator) Validate(ctx context.Context, credential Credential) (*Re
 	if v.requestOptions != nil {
 		httpOpts = append(httpOpts, luaservices.WithRequestOptions(v.requestOptions))
 	}
-	httpService, err := luaservices.NewHTTPService(ctx, v.httpClient, httpOpts...)
+	if v.http.BaseURL != "" {
+		httpOpts = append(httpOpts, luaservices.WithBaseURL(v.http.BaseURL))
+	}
+	httpService, err := luaservices.NewHTTPService(ctx, v.http.HTTPClient(), httpOpts...)
 	if err != nil {
 		p.ScriptExecutionFailed(err)
 		return nil, fmt.Errorf("failed to create http service: %w", err)

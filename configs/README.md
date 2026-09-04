@@ -368,12 +368,18 @@ http_clients:
       type: "file"
       cert: "/etc/parsec/certs/client.pem"
       key: "/etc/parsec/certs/client-key.pem"
+
+  # Shared host for Lua relative URLs (RFC 3986 origin-form: scheme + host, no path)
+  - name: "entitlements"
+    timeout: "5s"
+    base_url: "https://entitlements.internal.example.com"
 ```
 
 **Fields:**
 
 - `name` (required) - Unique name for this client
 - `timeout` - Default request timeout (e.g. `"30s"`, `"1m"`). Default: 30s
+- `base_url` - Optional origin (`https://host.example`, no path) that relative Lua `http.get`/`post`/`request` URLs resolve against as `{base}{path}` (for example `/v1/compliance` → `https://host.example/v1/compliance`). A trailing slash on the base is allowed. Values with a path prefix, query, or fragment are rejected at startup. Absolute Lua URLs (scheme present) are used as-is. Empty/absent preserves previous absolute-URL-only behavior. Invalid values (missing scheme or host) also fail at startup. Overlay: `PARSEC_HTTP_CLIENTS__N__BASE_URL` (index `N` is the list slot; reorder → update the index).
 - `ca_cert` - Optional PEM CA file appended to the system root pool for this client
 - `http_auth` - HTTP-layer authentication (header-based)
   - `type` - Auth mechanism: `"bearer"`, `"headers"` (future: `"oauth2_client_credentials"`)
@@ -386,7 +392,25 @@ http_clients:
 
 **Consumer reference:** Data sources and validators can reference a client by name
 (`http_client: "user-api"`) or define one inline (`http: {timeout: "5s"}`).
-When neither is set, the `"default"` client is used.
+When neither is set, the `"default"` client is used. JWT validators use the
+`*http.Client` only; they ignore `base_url` (JWKS URLs are already absolute).
+
+A Lua data source can pass a path to `http.get` when the named client has
+`base_url` set:
+
+```yaml
+http_clients:
+  - name: entitlements
+    timeout: "5s"
+    base_url: "https://entitlements.internal.example.com"
+
+data_sources:
+  - name: export_compliance
+    type: lua
+    http_client: entitlements
+    config:
+      compliance_api: "/v1/compliance"
+```
 
 ### Data Sources
 
@@ -443,22 +467,30 @@ Fail-open Lua data source. CEL calls it on User jwt-auth unless Envoy sets
 `datasource()` returns null and the check is skipped (fail-safe).
 
 ```yaml
+http_clients:
+  - name: entitlements
+    timeout: "5s"
+    base_url: "https://entitlements.internal.example.com"
+
+data_sources:
   - name: export_compliance
     type: lua
     script_file: ./configs/scripts/export_compliance.lua
+    http_client: entitlements
     config:
-      compliance_api: "https://export-compliance.example.internal/v1/compliance"
-    http:
-      timeout: 5s
+      compliance_api: "/v1/compliance"
     caching:
       type: in_memory
       ttl: 24h
       group_name: compliance-cache
 ```
 
-Override the URL without replacing the list:
+`compliance_api` may be a path (resolved against the client's `base_url`) or a
+full URL when it contains `://` (env overlay
+`PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API`). Host overlay:
 
 ```bash
+PARSEC_HTTP_CLIENTS__N__BASE_URL=https://entitlements.internal.example.com
 PARSEC_DATA_SOURCES__1__CONFIG__COMPLIANCE_API=http://127.0.0.1:9099/v1/compliance
 ```
 

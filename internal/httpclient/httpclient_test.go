@@ -206,6 +206,51 @@ func TestRegistry_GetNotFound(t *testing.T) {
 	}
 }
 
+func TestRegistry_StoresBaseURL(t *testing.T) {
+	r := NewRegistry(nil)
+
+	_, err := r.Register("entitlements", ClientSpec{
+		Timeout: 5 * time.Second,
+		BaseURL: "https://entitlements.example",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	got, err := r.BaseURL("entitlements")
+	if err != nil {
+		t.Fatalf("BaseURL failed: %v", err)
+	}
+	if got != "https://entitlements.example" {
+		t.Errorf("BaseURL = %q, want %q", got, "https://entitlements.example")
+	}
+}
+
+func TestRegistry_BaseURLUnset(t *testing.T) {
+	r := NewRegistry(nil)
+
+	_, err := r.Register("plain", ClientSpec{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	got, err := r.BaseURL("plain")
+	if err != nil {
+		t.Fatalf("BaseURL failed: %v", err)
+	}
+	if got != "" {
+		t.Errorf("BaseURL = %q, want empty", got)
+	}
+}
+
+func TestRegistry_BaseURLNotFound(t *testing.T) {
+	r := NewRegistry(nil)
+
+	if _, err := r.BaseURL("missing"); err == nil {
+		t.Fatal("expected error for nonexistent client")
+	}
+}
+
 func TestRegistry_DuplicateRegisterErrors(t *testing.T) {
 	r := NewRegistry(nil)
 

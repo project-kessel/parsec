@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 )
 
@@ -188,6 +189,48 @@ end
 	}
 	if result.Claims.GetString("email") != "http@example.com" {
 		t.Fatalf("email=%v", result.Claims["email"])
+	}
+}
+
+func TestLuaValidator_RelativeURLWithBaseURL(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	script := `
+function validate(input)
+  local resp = http.get("/v1/introspect")
+  if resp == nil or resp.status ~= 200 then
+    return nil
+  end
+  return {
+    subject = "alice",
+    issuer = "https://issuer.example.com",
+    trust_domain = "example.com",
+    expires_at = 4102444800
+  }
+end
+`
+
+	validator, err := NewLuaValidator("http", script, []CredentialType{CredentialTypeBearer},
+		WithLuaHTTP(httpclient.LuaClient{BaseURL: server.URL}),
+	)
+	if err != nil {
+		t.Fatalf("NewLuaValidator: %v", err)
+	}
+
+	result, err := validator.Validate(context.Background(), &BearerCredential{Token: "valid"})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if result.Subject != "alice" {
+		t.Fatalf("Subject=%q", result.Subject)
+	}
+	if gotPath != "/v1/introspect" {
+		t.Errorf("request path = %q, want %q", gotPath, "/v1/introspect")
 	}
 }
 

@@ -48,37 +48,30 @@ func NewHTTPClientRegistry(cfgs []HTTPClientConfig, fixtureTransport http.RoundT
 	return registry, nil
 }
 
-// resolveHTTPClient resolves a consumer's HTTP client from the registry.
-// Resolution order:
-//  1. If httpClientSpec is set, build an inline (anonymous) client via the registry.
-//  2. If httpClientName is set, look it up by name.
-//  3. Otherwise, resolve "default" from the registry.
-//
-// httpClientName and httpClientSpec are mutually exclusive: since it's
-// ambiguous which the caller intended, that's rejected as a config error
-// rather than silently picking one.
-func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, registry *httpclient.Registry) (*http.Client, error) {
+// resolveHTTPClient resolves a consumer's HTTP client from the registry for Lua
+// scripts (client plus optional base URL).
+func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, registry *httpclient.Registry) (httpclient.LuaClient, error) {
 	if registry == nil {
-		return nil, fmt.Errorf("http client registry is required but was not configured")
+		return httpclient.LuaClient{}, fmt.Errorf("http client registry is required but was not configured")
 	}
 
 	if httpClientName != "" && httpClientSpec != nil {
-		return nil, fmt.Errorf("http_client and http are mutually exclusive; use http for an inline client")
+		return httpclient.LuaClient{}, fmt.Errorf("http_client and http are mutually exclusive; use http for an inline client")
 	}
 
 	if httpClientSpec != nil {
 		spec, err := resolveClientSpec(*httpClientSpec)
 		if err != nil {
-			return nil, fmt.Errorf("inline http client spec: %w", err)
+			return httpclient.LuaClient{}, fmt.Errorf("inline http client spec: %w", err)
 		}
-		return registry.Build(spec)
+		return registry.BuildLua(spec)
 	}
 
 	name := httpclient.ClientName(httpClientName)
 	if name == "" {
 		name = "default"
 	}
-	return registry.Get(name)
+	return registry.GetLua(name)
 }
 
 // resolveClientSpec converts an HTTPClientSpec (config layer) into an
@@ -86,6 +79,13 @@ func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, re
 // and constructs TransportMiddleware from auth config.
 func resolveClientSpec(cfg HTTPClientSpec) (httpclient.ClientSpec, error) {
 	var spec httpclient.ClientSpec
+
+	if cfg.BaseURL != "" {
+		if _, err := httpclient.ParseBaseURL(cfg.BaseURL); err != nil {
+			return spec, err
+		}
+		spec.BaseURL = cfg.BaseURL
+	}
 
 	// Parse timeout
 	if cfg.Timeout != "" {

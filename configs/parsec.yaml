@@ -51,6 +51,9 @@ trust_store:
 # Prerequisites for live BOP:
 #   - PARSEC_BOP_CLIENT_ID, PARSEC_BOP_TOKEN
 #   - CA bundle mounted by deployment (ca_cert field below)
+#
+# entitlements.base_url is the shared host for /v1/compliance (and later
+# /v1/services). Overlay: PARSEC_HTTP_CLIENTS__1__BASE_URL
 http_clients:
   - name: backoffice-proxy
     timeout: "30s"
@@ -62,6 +65,9 @@ http_clients:
           env: PARSEC_BOP_CLIENT_ID
         x-rh-apitoken:
           env: PARSEC_BOP_TOKEN
+  - name: entitlements
+    timeout: "5s"
+    base_url: "https://entitlements.internal.example.com"
 
 # Data sources for token enrichment
 data_sources:
@@ -71,17 +77,17 @@ data_sources:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
       enforce_idp_auth: false
-  # Export compliance (RHCLOUD-49359): called unless Envoy sets
+  # Export compliance (RHCLOUD-49359 / RHCLOUD-50834): called unless Envoy sets
   # context_extensions.export_compliance=false on User jwt-auth paths.
   # Absent extension → check on (opt-out). Missing DS → CEL skips (fail-safe).
-  # Override URL via env: PARSEC_DATA_SOURCES__1__CONFIG__COMPLIANCE_API
+  # Path resolves against http_clients.entitlements.base_url.
+  # Full-URL override: PARSEC_DATA_SOURCES__1__CONFIG__COMPLIANCE_API
   - name: export_compliance
     type: lua
     script_file: ./configs/scripts/export_compliance.lua
+    http_client: entitlements
     config:
-      compliance_api: "https://export-compliance.example.internal/v1/compliance"
-    http:
-      timeout: 5s
+      compliance_api: "/v1/compliance"
     caching:
       type: in_memory
       ttl: 24h

@@ -182,3 +182,67 @@ trust_store:
 		t.Errorf("Validators[0].HTTPClientSpec.Timeout = %q, want %q", validatorSpec.Timeout, "34s")
 	}
 }
+
+func TestNewLoader_HTTPClientBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "parsec.yaml")
+	const yamlConfig = `
+http_clients:
+  - name: entitlements
+    timeout: "5s"
+    base_url: "https://entitlements.internal.example.com"
+`
+	if err := os.WriteFile(configPath, []byte(yamlConfig), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	loader, err := NewLoader(configPath)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	cfg, err := loader.Get()
+	if err != nil {
+		t.Fatalf("loader.Get(): %v", err)
+	}
+
+	if len(cfg.HTTPClients) != 1 {
+		t.Fatalf("len(HTTPClients) = %d, want 1", len(cfg.HTTPClients))
+	}
+	got := cfg.HTTPClients[0].BaseURL
+	if got != "https://entitlements.internal.example.com" {
+		t.Errorf("HTTPClients[0].BaseURL = %q, want origin-form entitlements host", got)
+	}
+}
+
+func TestNewLoader_EnvOverrideHTTPClientBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "parsec.yaml")
+	const yamlConfig = `
+http_clients:
+  - name: entitlements
+    timeout: "5s"
+    base_url: "https://placeholder.example"
+`
+	if err := os.WriteFile(configPath, []byte(yamlConfig), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	t.Setenv("PARSEC_HTTP_CLIENTS__0__BASE_URL", "https://entitlements.stage.example")
+
+	loader, err := NewLoader(configPath)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	cfg, err := loader.Get()
+	if err != nil {
+		t.Fatalf("loader.Get(): %v", err)
+	}
+
+	if len(cfg.HTTPClients) != 1 {
+		t.Fatalf("len(HTTPClients) = %d, want 1", len(cfg.HTTPClients))
+	}
+	got := cfg.HTTPClients[0].BaseURL
+	if got != "https://entitlements.stage.example" {
+		t.Errorf("HTTPClients[0].BaseURL = %q, want env overlay value", got)
+	}
+}
