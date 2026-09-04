@@ -5,7 +5,7 @@
 -- configured at the http_clients level via http_auth.type: headers.
 --
 -- Config values:
---   bop_url                 (required) HTTPS endpoint for BOP auth (e.g., https://bop.api.redhat.com/v1/auth)
+--   bop_url                 (required) BOP base URL (e.g., https://bop.api.redhat.com)
 --   trust_domain            (required) trust domain for validated results
 --   issuer_host             (required) RHSM host for the issuer URI (e.g., "rhsm.stage.redhat.com", "rhsm.redhat.com")
 --   bop_certauth_secret     (required) proxy proof secret for x-rh-insights-certauth-secret header
@@ -36,7 +36,7 @@ function validate(input)
     cn_value = cn
   end
 
-  local response, err = http.get(bop_url, {
+  local response, err = http.get(bop_url .. "/v1/auth", {
     ["x-rh-insights-certauth-secret"] = bop_certauth_secret,
     ["x-rh-insights-env"] = bop_env,
     ["x-rh-certauth-cn"] = cn,

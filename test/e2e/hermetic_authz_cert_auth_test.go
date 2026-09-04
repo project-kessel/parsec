@@ -35,13 +35,14 @@ func TestHermeticAuthzCheckCertAuth(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
 	clk := clock.NewFixtureClock(fixedTime)
 
-	bopURL := "https://example.backoffice-proxy.api.redhat.com/v1/auth"
+	bopBaseURL := "https://example.backoffice-proxy.api.redhat.com"
+	bopAuthURL := bopBaseURL + "/v1/auth"
 
 	bopFixture := httpfixture.NewRuleBasedProvider([]httpfixture.HTTPFixtureRule{
 		{
 			Request: httpfixture.FixtureRequest{
 				Method:  "GET",
-				URL:     bopURL,
+				URL:     bopAuthURL,
 				URLType: "exact",
 				Headers: map[string]string{"x-rh-certauth-cn": "/CN=no-user-field"},
 			},
@@ -54,7 +55,7 @@ func TestHermeticAuthzCheckCertAuth(t *testing.T) {
 		{
 			Request: httpfixture.FixtureRequest{
 				Method:  "GET",
-				URL:     bopURL,
+				URL:     bopAuthURL,
 				URLType: "exact",
 			},
 			Response: httpfixture.Fixture{
@@ -93,7 +94,7 @@ func TestHermeticAuthzCheckCertAuth(t *testing.T) {
 		[]trust.CredentialType{trust.CredentialTypeForwardedClientCert},
 		trust.WithLuaHTTPClient(httpClient),
 		trust.WithLuaConfigSource(luaservices.NewMapConfigSource(map[string]any{
-			"bop_url":             bopURL,
+			"bop_url":             bopBaseURL,
 			"bop_env":             "stage",
 			"trust_domain":        "cert.example.com",
 			"issuer_host":         "rhsm.example.com",
