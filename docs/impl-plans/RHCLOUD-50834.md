@@ -81,7 +81,7 @@ Resolution (`net/url`):
 3. Else if `base_url` is empty → return Lua `(nil, error)` (AC4).
 4. Else `base.ResolveReference(rel)`.
 
-Document **origin-form** bases (`https://host.example`, no path) and Lua paths that start with `/`, so RFC 3986 does not replace a trailing path segment.
+Document **origin-form** bases (`https://host.example`, no path; optional trailing `/` only). Non-origin bases are rejected at startup. Lua paths should start with `/` so the joined URL is `{base}/path`.
 
 Registry `Get`/`Build` still return `*http.Client`. Store `BaseURL` beside the client in the registry (see Interface Changes). Unexported `resolveHTTPClient` returns client + base URL.
 
@@ -282,7 +282,7 @@ Per `.cursor/rules/deploy-config-sync.mdc`:
 
 | Entity | Name | Rationale |
 |--------|------|-----------|
-| Config field | `base_url` | Host (and optional path prefix) for relative Lua URLs |
+| Config field | `base_url` | Origin (scheme + host) for relative Lua URLs |
 | Lua option | `WithBaseURL` | Matches `WithRequestOptions` |
 | Validator option | `WithLuaHTTPBaseURL` | Parallel to `WithLuaHTTPClient` |
 | DS field | `HTTPBaseURL` | Parallel to `HTTPClient` on `LuaDataSourceConfig` |
@@ -481,7 +481,7 @@ local response, err = http.get(config.get("compliance_path"))
 
 | # | Item | Status | Resolution |
 |---|------|--------|------------|
-| 1 | RFC 3986: base `https://h/api` + `v1/x` replaces `api` | Open / document | Require origin-form `base_url` and paths starting with `/` in README + validate optional trailing-slash warning? **Decision:** document only; do not reject bases with paths (BOP might want `https://host/v1`). |
+| 1 | RFC 3986: base `https://h/api` + `/v1/x` drops `/api` | Resolved | **Reject** non-origin `base_url` at startup (scheme + host, optional trailing `/` only). Lua relative paths join as `{base}/path`. Host-specific path prefixes belong in full Lua URLs or `compliance_api`-style config, not in `base_url`. |
 | 2 | Absolute Lua URLs still allow any host | Accepted | Same as today (AC3) |
 | 3 | Index-based `PARSEC_HTTP_CLIENTS__N__BASE_URL` | Same as data sources | Document index; no name-based env in this work |
 | 4 | PR 188 not merged yet | Open | Land named `entitlements` client first; this plan stacks after |

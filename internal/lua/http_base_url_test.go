@@ -291,3 +291,48 @@ func TestNewHTTPService_InvalidBaseURLRejected(t *testing.T) {
 		t.Fatal("expected error for unparseable base_url, got nil")
 	}
 }
+
+func TestNewHTTPService_BaseURLWithPathRejected(t *testing.T) {
+	_, err := NewHTTPService(context.Background(), &http.Client{}, WithBaseURL("https://host.example/v1"))
+	if err == nil {
+		t.Fatal("expected error for base_url with path, got nil")
+	}
+}
+
+func TestHTTPService_Get_RelativeWithBaseURLTrailingSlash(t *testing.T) {
+	var gotURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	service, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second},
+		WithBaseURL(server.URL+"/"))
+	if err != nil {
+		t.Fatalf("failed to create http service: %v", err)
+	}
+	service.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.get("/v1/compliance")
+		if response == nil then
+			return "err:" .. tostring(err)
+		end
+		return response.status .. ":" .. response.body
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	got := lua.LVAsString(L.Get(-1))
+	if got != "200:ok" {
+		t.Errorf("GET relative result = %q, want %q", got, "200:ok")
+	}
+	if gotURL != "/v1/compliance" {
+		t.Errorf("request path = %q, want %q", gotURL, "/v1/compliance")
+	}
+}

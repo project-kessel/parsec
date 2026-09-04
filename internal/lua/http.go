@@ -9,6 +9,8 @@ import (
 	"net/url"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/project-kessel/parsec/internal/httpclient"
 )
 
 // RequestOptions is a function that can modify a request before it is sent.
@@ -29,9 +31,9 @@ func WithRequestOptions(ro RequestOptions) HTTPServiceOption {
 	return func(c *httpServiceConfig) { c.requestOptions = ro }
 }
 
-// WithBaseURL sets an origin (scheme + host) that relative Lua URLs resolve
-// against. Empty or omitted preserves absolute-URL-only behavior. When set,
-// the value must include a scheme and host.
+// WithBaseURL sets an origin-form base (scheme + host, optional trailing slash
+// only) that relative Lua URLs resolve against. Empty or omitted preserves
+// absolute-URL-only behavior. Path, query, and fragment components are rejected.
 func WithBaseURL(base string) HTTPServiceOption {
 	return func(c *httpServiceConfig) { c.baseURL = base }
 }
@@ -41,7 +43,7 @@ type HTTPService struct {
 	ctx            context.Context
 	client         *http.Client
 	requestOptions RequestOptions
-	baseURL        *url.URL // nil = absolute Lua URLs only
+	baseURL        string // empty = absolute Lua URLs only; stored origin string
 }
 
 // NewHTTPService creates a new HTTP service. ctx is required and propagated
@@ -59,8 +61,7 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		opt(&cfg)
 	}
 
-	base, err := parseBaseURL(cfg.baseURL)
-	if err != nil {
+	if _, err := httpclient.ParseBaseURL(cfg.baseURL); err != nil {
 		return nil, err
 	}
 
@@ -68,22 +69,8 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		ctx:            ctx,
 		client:         client,
 		requestOptions: cfg.requestOptions,
-		baseURL:        base,
+		baseURL:        cfg.baseURL,
 	}, nil
-}
-
-func parseBaseURL(raw string) (*url.URL, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return nil, fmt.Errorf("invalid base_url %q: %w", raw, err)
-	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid base_url %q: must include scheme and host", raw)
-	}
-	return parsed, nil
 }
 
 // resolveRequestURL returns an absolute URL for http.NewRequest. Lua URLs
@@ -99,10 +86,14 @@ func (s *HTTPService) resolveRequestURL(raw string) (string, error) {
 	if parsed.Host != "" {
 		return "", fmt.Errorf("relative url %q with host but no scheme is not allowed", raw)
 	}
-	if s.baseURL == nil {
+	if s.baseURL == "" {
 		return "", fmt.Errorf("relative url %q requires a configured base_url", raw)
 	}
-	return s.baseURL.ResolveReference(parsed).String(), nil
+	base, err := httpclient.ParseBaseURL(s.baseURL)
+	if err != nil {
+		return "", err
+	}
+	return base.ResolveReference(parsed).String(), nil
 }
 
 // Register adds the HTTP service to the Lua state

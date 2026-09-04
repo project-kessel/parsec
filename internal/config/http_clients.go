@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
 
@@ -82,12 +81,8 @@ func resolveClientSpec(cfg HTTPClientSpec) (httpclient.ClientSpec, error) {
 	var spec httpclient.ClientSpec
 
 	if cfg.BaseURL != "" {
-		parsed, err := url.Parse(cfg.BaseURL)
-		if err != nil {
-			return spec, fmt.Errorf("invalid base_url %q: %w", cfg.BaseURL, err)
-		}
-		if parsed.Scheme == "" || parsed.Host == "" {
-			return spec, fmt.Errorf("invalid base_url %q: must include scheme and host", cfg.BaseURL)
+		if _, err := httpclient.ParseBaseURL(cfg.BaseURL); err != nil {
+			return spec, err
 		}
 		spec.BaseURL = cfg.BaseURL
 	}

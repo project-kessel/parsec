@@ -379,7 +379,7 @@ http_clients:
 
 - `name` (required) - Unique name for this client
 - `timeout` - Default request timeout (e.g. `"30s"`, `"1m"`). Default: 30s
-- `base_url` - Optional origin (`https://host.example`, no path) that relative Lua `http.get`/`post`/`request` URLs resolve against. Absolute Lua URLs (scheme present) are used as-is. Empty/absent preserves previous absolute-URL-only behavior. Invalid values (missing scheme or host) fail at startup. Overlay: `PARSEC_HTTP_CLIENTS__N__BASE_URL` (index `N` is the list slot; reorder → update the index).
+- `base_url` - Optional origin (`https://host.example`, no path) that relative Lua `http.get`/`post`/`request` URLs resolve against as `{base}{path}` (for example `/v1/compliance` → `https://host.example/v1/compliance`). A trailing slash on the base is allowed. Values with a path prefix, query, or fragment are rejected at startup. Absolute Lua URLs (scheme present) are used as-is. Empty/absent preserves previous absolute-URL-only behavior. Invalid values (missing scheme or host) also fail at startup. Overlay: `PARSEC_HTTP_CLIENTS__N__BASE_URL` (index `N` is the list slot; reorder → update the index).
 - `ca_cert` - Optional PEM CA file appended to the system root pool for this client
 - `http_auth` - HTTP-layer authentication (header-based)
   - `type` - Auth mechanism: `"bearer"`, `"headers"` (future: `"oauth2_client_credentials"`)

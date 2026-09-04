@@ -127,6 +127,17 @@ func TestNewHTTPClientRegistry_InvalidBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewHTTPClientRegistry_BaseURLWithPathRejected(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{Name: "bad", HTTPClientSpec: HTTPClientSpec{BaseURL: "https://host.example/v1"}},
+	}
+
+	_, err := NewHTTPClientRegistry(cfgs, nil)
+	if err == nil {
+		t.Fatal("expected error for base_url with path")
+	}
+}
+
 func TestNewHTTPClientRegistry_StoresBaseURL(t *testing.T) {
 	cfgs := []HTTPClientConfig{
 		{Name: "entitlements", HTTPClientSpec: HTTPClientSpec{

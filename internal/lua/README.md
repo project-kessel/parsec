@@ -21,10 +21,11 @@ The HTTP service provides HTTP client functionality to Lua scripts.
 
 URLs may be absolute (`https://host/path`) or relative (`/v1/compliance`).
 Relative URLs resolve against the HTTP client's optional `base_url`
-(`WithBaseURL`). Prefer an origin-form base (`https://host.example`, no path)
-and Lua paths that start with `/`. If the Lua URL has a scheme, it is used as-is
-even when `base_url` is set. A relative URL with no `base_url` returns
-`(nil, error)` and does not hit the network.
+(`WithBaseURL`). `base_url` must be origin-form (scheme + host, optional
+trailing `/` only); path prefixes are rejected at startup. Use Lua paths that
+start with `/` so the joined URL is `{base}/path`. If the Lua URL has a scheme,
+it is used as-is even when `base_url` is set. A relative URL with no `base_url`
+returns `(nil, error)` and does not hit the network.
 
 #### Example
 
