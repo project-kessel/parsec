@@ -72,7 +72,7 @@ func newLuaDataSource(cfg DataSourceConfig, httpRegistry *httpclient.Registry, o
 	}
 
 	// Resolve HTTP client from registry
-	resolved, err := resolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientSpec, httpRegistry)
+	luaHTTP, err := resolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientSpec, httpRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve HTTP client: %w", err)
 	}
@@ -84,8 +84,7 @@ func newLuaDataSource(cfg DataSourceConfig, httpRegistry *httpclient.Registry, o
 			Name:         cfg.Name,
 			Script:       script,
 			ConfigSource: configSource,
-			HTTPClient:   resolved.Client,
-			HTTPBaseURL:  resolved.BaseURL,
+			HTTP:         luaHTTP,
 			Observer:     obs,
 		})
 		if err != nil {
@@ -97,8 +96,7 @@ func newLuaDataSource(cfg DataSourceConfig, httpRegistry *httpclient.Registry, o
 			Name:         cfg.Name,
 			Script:       script,
 			ConfigSource: configSource,
-			HTTPClient:   resolved.Client,
-			HTTPBaseURL:  resolved.BaseURL,
+			HTTP:         luaHTTP,
 			Observer:     obs,
 		}
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/issuer"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
@@ -74,10 +75,9 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 			Name:   "export_compliance",
 			Script: string(luaScript),
 			ConfigSource: luaservices.NewMapConfigSource(map[string]any{
-				"compliance_path": "/v1/compliance",
+				"compliance_api": "/v1/compliance",
 			}),
-			HTTPClient:  client,
-			HTTPBaseURL: testComplianceBaseURL,
+			HTTP: httpclient.LuaClient{Client: client, BaseURL: testComplianceBaseURL},
 		})
 		if err != nil {
 			t.Fatalf("compliance DS: %v", err)
@@ -312,7 +312,7 @@ func trustStore(t *testing.T, jwks *httpfixture.JWKSFixture, client *http.Client
 		Issuer:      jwks.Issuer(),
 		JWKSURL:     jwks.JWKSURL(),
 		TrustDomain: "https://sso.redhat.com/auth/realms/redhat-external",
-		HTTPClient:  client,
+		HTTPClient: client,
 		Clock:       clk,
 	})
 	if err != nil {

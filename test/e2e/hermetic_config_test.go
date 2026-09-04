@@ -13,6 +13,7 @@ import (
 	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/issuer"
 	"github.com/project-kessel/parsec/internal/mapper"
@@ -149,14 +150,14 @@ function fetch(input)
     end
     return nil
 end`,
-		HTTPClient: &http.Client{
+		HTTP: httpclient.LuaClient{Client: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: allFixtures,
 				Strict:   true,
 				Clock:    clk,
 			}),
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("failed to create datasource: %v", err)

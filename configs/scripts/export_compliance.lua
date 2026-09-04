@@ -6,12 +6,9 @@
 -- (same as auth_sso_jwt). SSO User jwt-auth only; CEL skips other auth types.
 --
 -- Config:
---   compliance_path — path only, e.g. /v1/compliance (resolved against the
---     HTTP client's base_url). Default: /v1/compliance
---   compliance_api — full URL alias (contains "://") for env overlay
---     PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API; also accepts a path
---     if it has no scheme. A full URL wins over compliance_path so existing
---     env overlays keep working.
+--   compliance_api — full URL (contains "://") or a path such as /v1/compliance.
+--     Paths resolve against the HTTP client's base_url when set. Default path:
+--     /v1/compliance. Env overlay: PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API.
 --
 -- Behavior (fail-open):
 --   - Any error, non-200 response, malformed JSON, or missing username returns
@@ -39,22 +36,10 @@ local DEFAULT_COMPLIANCE_PATH = "/v1/compliance"
 
 local function resolve_compliance_url()
   local api = config.get("compliance_api")
-  if api ~= nil and api ~= "" then
-    -- Full URL (scheme present) wins so env overlay of COMPLIANCE_API is
-    -- unchanged. A value without "://" is treated as a path.
-    if string.find(api, "://", 1, true) ~= nil then
-      return api
-    end
+  if api == nil or api == "" then
+    return DEFAULT_COMPLIANCE_PATH
   end
-
-  local path = config.get("compliance_path")
-  if path ~= nil and path ~= "" then
-    return path
-  end
-  if api ~= nil and api ~= "" then
-    return api
-  end
-  return DEFAULT_COMPLIANCE_PATH
+  return api
 end
 
 local function claim_str(claims, key)

@@ -409,7 +409,7 @@ data_sources:
     type: lua
     http_client: entitlements
     config:
-      compliance_path: "/v1/compliance"
+      compliance_api: "/v1/compliance"
 ```
 
 ### Data Sources
@@ -478,15 +478,15 @@ data_sources:
     script_file: ./configs/scripts/export_compliance.lua
     http_client: entitlements
     config:
-      compliance_path: "/v1/compliance"
+      compliance_api: "/v1/compliance"
     caching:
       type: in_memory
       ttl: 24h
       group_name: compliance-cache
 ```
 
-Path `/v1/compliance` resolves against the named client's `base_url`. A full
-`compliance_api` URL still works and wins when it contains `://` (env overlay
+`compliance_api` may be a path (resolved against the client's `base_url`) or a
+full URL when it contains `://` (env overlay
 `PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API`). Host overlay:
 
 ```bash

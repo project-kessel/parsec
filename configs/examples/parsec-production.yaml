@@ -42,8 +42,6 @@ trust_store:
       actor.trust_domain == "prod.example.com" && 
       actor.claims.verified == true
 
-# Named HTTP clients. Hosts belong in namespace variables (RHCLOUD-50414):
-#   PARSEC_HTTP_CLIENTS__0__BASE_URL
 http_clients:
   - name: entitlements
     timeout: "5s"
@@ -69,15 +67,16 @@ data_sources:
   # Export compliance check (RHCLOUD-49359 / RHCLOUD-50834).
   # Opt-out via Envoy context_extensions.export_compliance=false.
   # Default (absent/"true"): check on, consistent with auth_sso_jwt.
-  # Fail-open: any error allows through. Host from entitlements.base_url
-  # (namespace var PARSEC_HTTP_CLIENTS__0__BASE_URL). Full-URL fail-safe:
+  # Fail-open: any error allows through. compliance_api is a path when
+  # http_clients.entitlements.base_url is set (overlay via
+  # PARSEC_HTTP_CLIENTS__0__BASE_URL) or a full URL via
   # PARSEC_DATA_SOURCES__1__CONFIG__COMPLIANCE_API.
   - name: export_compliance
     type: lua
     script_file: /etc/parsec/scripts/export_compliance.lua
     http_client: entitlements
     config:
-      compliance_path: "/v1/compliance"
+      compliance_api: "/v1/compliance"
     caching:
       type: distributed
       ttl: 24h

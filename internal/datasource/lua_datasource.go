@@ -3,10 +3,10 @@ package datasource
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	lua "github.com/yuin/gopher-lua"
 
+	"github.com/project-kessel/parsec/internal/httpclient"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/service"
@@ -25,10 +25,9 @@ type LuaDataSource struct {
 	name           string
 	proto          *lua.FunctionProto
 	configSource   luaservices.ConfigSource
-	httpClient     *http.Client
+	http           httpclient.LuaClient
 	requestOptions luaservices.RequestOptions
 	observer       LuaObserver
-	httpBaseURL    string
 }
 
 // LuaDataSourceConfig configures a Lua data source
@@ -54,13 +53,9 @@ type LuaDataSourceConfig struct {
 	// If nil, an empty MapConfigSource will be used
 	ConfigSource luaservices.ConfigSource
 
-	// HTTPClient is the pre-configured HTTP client for the Lua http service.
-	// If nil, http.DefaultClient will be used.
-	HTTPClient *http.Client
-
-	// HTTPBaseURL is an optional origin that relative Lua URLs resolve against.
-	// Empty preserves absolute-URL-only behavior.
-	HTTPBaseURL string
+	// HTTP bundles the client and optional base URL for relative Lua URLs.
+	// Zero value uses [http.DefaultClient] with absolute URLs only.
+	HTTP httpclient.LuaClient
 
 	// RequestOptions is a programmatic hook that augments outgoing HTTP requests
 	// (e.g. injecting headers or query params from Go context). Optional.
@@ -99,19 +94,13 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		obs = NoOpDataSourceObserver{}
 	}
 
-	httpClient := config.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-
 	return &LuaDataSource{
 		name:           config.Name,
 		proto:          proto,
 		configSource:   config.ConfigSource,
-		httpClient:     httpClient,
+		http:           config.HTTP,
 		requestOptions: config.RequestOptions,
 		observer:       obs,
-		httpBaseURL:    config.HTTPBaseURL,
 	}, nil
 }
 
@@ -136,10 +125,10 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 	if ds.requestOptions != nil {
 		httpOpts = append(httpOpts, luaservices.WithRequestOptions(ds.requestOptions))
 	}
-	if ds.httpBaseURL != "" {
-		httpOpts = append(httpOpts, luaservices.WithBaseURL(ds.httpBaseURL))
+	if ds.http.BaseURL != "" {
+		httpOpts = append(httpOpts, luaservices.WithBaseURL(ds.http.BaseURL))
 	}
-	httpService, err := luaservices.NewHTTPService(ctx, ds.httpClient, httpOpts...)
+	httpService, err := luaservices.NewHTTPService(ctx, ds.http.HTTPClient(), httpOpts...)
 	if err != nil {
 		p.ScriptExecutionFailed(err)
 		return nil, fmt.Errorf("failed to create http service: %w", err)
@@ -392,13 +381,8 @@ type CacheableLuaDataSourceConfig struct {
 	// If nil, an empty MapConfigSource will be used
 	ConfigSource luaservices.ConfigSource
 
-	// HTTPClient is the pre-configured HTTP client for the Lua http service.
-	// If nil, http.DefaultClient will be used.
-	HTTPClient *http.Client
-
-	// HTTPBaseURL is an optional origin that relative Lua URLs resolve against.
-	// Empty preserves absolute-URL-only behavior.
-	HTTPBaseURL string
+	// HTTP bundles the client and optional base URL for relative Lua URLs.
+	HTTP httpclient.LuaClient
 
 	// RequestOptions is a programmatic hook that augments outgoing HTTP requests. Optional.
 	RequestOptions luaservices.RequestOptions

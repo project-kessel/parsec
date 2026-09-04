@@ -87,7 +87,7 @@ data_sources:
     script_file: ./configs/scripts/export_compliance.lua
     http_client: entitlements
     config:
-      compliance_path: "/v1/compliance"
+      compliance_api: "/v1/compliance"
     caching:
       type: in_memory
       ttl: 24h

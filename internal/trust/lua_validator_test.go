@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/project-kessel/parsec/internal/clock"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 )
 
@@ -215,7 +216,7 @@ end
 `
 
 	validator, err := NewLuaValidator("http", script, []CredentialType{CredentialTypeBearer},
-		WithLuaHTTPBaseURL(server.URL),
+		WithLuaHTTP(httpclient.LuaClient{BaseURL: server.URL}),
 	)
 	if err != nil {
 		t.Fatalf("NewLuaValidator: %v", err)

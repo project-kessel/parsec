@@ -96,6 +96,9 @@ func (s *HTTPService) resolveRequestURL(raw string) (string, error) {
 	if parsed.Scheme != "" {
 		return raw, nil
 	}
+	if parsed.Host != "" {
+		return "", fmt.Errorf("relative url %q with host but no scheme is not allowed", raw)
+	}
 	if s.baseURL == nil {
 		return "", fmt.Errorf("relative url %q requires a configured base_url", raw)
 	}

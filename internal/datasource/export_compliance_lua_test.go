@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/request"
@@ -52,7 +53,7 @@ func newComplianceDS(t *testing.T, script string, client *http.Client) *LuaDataS
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
 			"compliance_api": complianceAPIURL,
 		}),
-		HTTPClient: client,
+		HTTP: httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
@@ -68,7 +69,7 @@ func newCacheableComplianceDS(t *testing.T, script string, client *http.Client) 
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
 			"compliance_api": complianceAPIURL,
 		}),
-		HTTPClient: client,
+		HTTP: httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -165,10 +166,9 @@ func TestExportComplianceLua_Fetch_PathWithBaseURL(t *testing.T) {
 		Name:   "export_compliance",
 		Script: script,
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
-			"compliance_path": "/v1/compliance",
+			"compliance_api": "/v1/compliance",
 		}),
-		HTTPClient:  client,
-		HTTPBaseURL: "https://export-compliance.example.internal",
+		HTTP: httpclient.LuaClient{Client: client, BaseURL: "https://export-compliance.example.internal"},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
@@ -462,7 +462,7 @@ func TestExportComplianceLua_MissingConfig(t *testing.T) {
 		Name:         "export_compliance",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(nil),
-		HTTPClient:   http.DefaultClient,
+		HTTP: httpclient.LuaClient{Client: http.DefaultClient},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
@@ -496,11 +496,9 @@ func TestExportComplianceLua_Fetch_FullComplianceAPIOverridesPath(t *testing.T) 
 		Name:   "export_compliance",
 		Script: script,
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
-			"compliance_path": "/wrong/path",
-			"compliance_api":  complianceAPIURL,
+			"compliance_api": complianceAPIURL,
 		}),
-		HTTPClient:  client,
-		HTTPBaseURL: "https://unused.example",
+		HTTP: httpclient.LuaClient{Client: client, BaseURL: "https://unused.example"},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)

@@ -72,7 +72,7 @@ func TestBOPUser_HappyPath(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -174,7 +174,7 @@ func TestBOPUser_Non200Response(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -208,7 +208,7 @@ func TestBOPUser_EmptyArray(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -245,7 +245,7 @@ func TestBOPUser_MultipleUsers(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -279,7 +279,7 @@ func TestBOPUser_MissingOrgId(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -316,7 +316,7 @@ func TestBOPUser_MissingId(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -370,7 +370,7 @@ func TestBOPUser_VerifiesRequestHeaders(t *testing.T) {
 			"users_path": "/v1/users",
 			"bop_env":    "prod",
 		}),
-		HTTPClient: bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -450,7 +450,7 @@ func TestBOPUser_HTTPClientInjectsAuthHeaders(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   client,
+		HTTP: httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -495,7 +495,7 @@ func TestBOPUser_StripsSSOPrefix(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -569,7 +569,7 @@ func TestBOPUser_CacheKey(t *testing.T) {
 		Name:         "bop-user",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(bopLuaConfig()),
-		HTTPClient:   bopFixtureClient(provider),
+		HTTP: httpclient.LuaClient{Client: bopFixtureClient(provider)},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)

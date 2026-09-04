@@ -188,16 +188,14 @@ func newLuaValidator(name string, cfg ValidatorConfig, httpRegistry *httpclient.
 		configSource = luaservices.NewMapConfigSource(resolved)
 	}
 
-	// Resolve HTTP client from registry
-	resolved, err := resolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientSpec, httpRegistry)
+	luaHTTP, err := resolveHTTPClient(cfg.HTTPClient, cfg.HTTPClientSpec, httpRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("lua_validator: failed to resolve HTTP client: %w", err)
 	}
 
 	opts := []trust.LuaValidatorOption{
 		trust.WithLuaConfigSource(configSource),
-		trust.WithLuaHTTPClient(resolved.Client),
-		trust.WithLuaHTTPBaseURL(resolved.BaseURL),
+		trust.WithLuaHTTP(luaHTTP),
 		trust.WithLuaValidatorObserver(trustObs),
 	}
 

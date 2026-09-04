@@ -249,6 +249,42 @@ func TestHTTPService_RelativeWithoutBaseURLErrors(t *testing.T) {
 	}
 }
 
+func TestHTTPService_ProtocolRelativeURLRejected(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	service, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second},
+		WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	service.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.get("//attacker.example/path")
+		if response == nil and err ~= nil and err ~= "" then
+			return "error"
+		end
+		return "no-error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	got := lua.LVAsString(L.Get(-1))
+	if got != "error" {
+		t.Errorf("protocol-relative URL = %q, want %q", got, "error")
+	}
+	if hits != 0 {
+		t.Errorf("server was hit %d times, want 0", hits)
+	}
+}
+
 func TestNewHTTPService_InvalidBaseURLRejected(t *testing.T) {
 	_, err := NewHTTPService(context.Background(), &http.Client{}, WithBaseURL("not a url"))
 	if err == nil {

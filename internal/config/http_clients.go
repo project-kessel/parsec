@@ -49,55 +49,30 @@ func NewHTTPClientRegistry(cfgs []HTTPClientConfig, fixtureTransport http.RoundT
 	return registry, nil
 }
 
-// resolvedHTTPClient is a registry client plus its optional Lua base URL.
-type resolvedHTTPClient struct {
-	Client  *http.Client
-	BaseURL string
-}
-
-// resolveHTTPClient resolves a consumer's HTTP client from the registry.
-// Resolution order:
-//  1. If httpClientSpec is set, build an inline (anonymous) client via the registry.
-//  2. If httpClientName is set, look it up by name.
-//  3. Otherwise, resolve "default" from the registry.
-//
-// httpClientName and httpClientSpec are mutually exclusive: since it's
-// ambiguous which the caller intended, that's rejected as a config error
-// rather than silently picking one.
-func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, registry *httpclient.Registry) (resolvedHTTPClient, error) {
+// resolveHTTPClient resolves a consumer's HTTP client from the registry for Lua
+// scripts (client plus optional base URL).
+func resolveHTTPClient(httpClientName string, httpClientSpec *HTTPClientSpec, registry *httpclient.Registry) (httpclient.LuaClient, error) {
 	if registry == nil {
-		return resolvedHTTPClient{}, fmt.Errorf("http client registry is required but was not configured")
+		return httpclient.LuaClient{}, fmt.Errorf("http client registry is required but was not configured")
 	}
 
 	if httpClientName != "" && httpClientSpec != nil {
-		return resolvedHTTPClient{}, fmt.Errorf("http_client and http are mutually exclusive; use http for an inline client")
+		return httpclient.LuaClient{}, fmt.Errorf("http_client and http are mutually exclusive; use http for an inline client")
 	}
 
 	if httpClientSpec != nil {
 		spec, err := resolveClientSpec(*httpClientSpec)
 		if err != nil {
-			return resolvedHTTPClient{}, fmt.Errorf("inline http client spec: %w", err)
+			return httpclient.LuaClient{}, fmt.Errorf("inline http client spec: %w", err)
 		}
-		client, err := registry.Build(spec)
-		if err != nil {
-			return resolvedHTTPClient{}, err
-		}
-		return resolvedHTTPClient{Client: client, BaseURL: spec.BaseURL}, nil
+		return registry.BuildLua(spec)
 	}
 
 	name := httpclient.ClientName(httpClientName)
 	if name == "" {
 		name = "default"
 	}
-	client, err := registry.Get(name)
-	if err != nil {
-		return resolvedHTTPClient{}, err
-	}
-	baseURL, err := registry.BaseURL(name)
-	if err != nil {
-		return resolvedHTTPClient{}, err
-	}
-	return resolvedHTTPClient{Client: client, BaseURL: baseURL}, nil
+	return registry.GetLua(name)
 }
 
 // resolveClientSpec converts an HTTPClientSpec (config layer) into an

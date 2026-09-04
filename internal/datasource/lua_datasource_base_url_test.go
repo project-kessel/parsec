@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -31,7 +32,7 @@ function fetch(input)
 	return {data = response.body, content_type = "application/json"}
 end
 `,
-		HTTPBaseURL: server.URL,
+		HTTP: httpclient.LuaClient{BaseURL: server.URL},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
