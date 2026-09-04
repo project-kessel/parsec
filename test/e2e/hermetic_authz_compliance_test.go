@@ -312,7 +312,7 @@ func trustStore(t *testing.T, jwks *httpfixture.JWKSFixture, client *http.Client
 		Issuer:      jwks.Issuer(),
 		JWKSURL:     jwks.JWKSURL(),
 		TrustDomain: "https://sso.redhat.com/auth/realms/redhat-external",
-		HTTPClient: client,
+		HTTPClient:  client,
 		Clock:       clk,
 	})
 	if err != nil {

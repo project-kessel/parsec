@@ -462,7 +462,7 @@ func TestExportComplianceLua_MissingConfig(t *testing.T) {
 		Name:         "export_compliance",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(nil),
-		HTTP: httpclient.LuaClient{Client: http.DefaultClient},
+		HTTP:         httpclient.LuaClient{Client: http.DefaultClient},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
