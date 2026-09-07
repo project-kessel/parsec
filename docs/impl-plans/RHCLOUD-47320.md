@@ -1,7 +1,54 @@
 # RHCLOUD-47320: Cross-account / org-admin access checks
 
 **JIRA**: https://redhat.atlassian.net/browse/RHCLOUD-47320
-**Status**: Draft
+**Status**: In Progress (WIP committed 2026-09-07; not pushed)
+
+## Remaining Work (before merge)
+
+Single PR on `parsec-CAR`. Implementation is **not** production-ready for live RBAC yet.
+
+### Must-do (blocking)
+
+- [ ] **`cross_account.lua`**: send `x-rh-identity` (base64 employee identity, pre-swap) on RBAC
+      `GET` — same pattern as `export_compliance.lua`. RBAC resolves the employee from
+      this header when `query_by=user_id`; query params alone are insufficient.
+- [ ] **`http_clients.rbac`**: wire `http_auth` (PSK / service headers per platform) in
+      `parsec.yaml` example + **app-interface** stage/prod secrets (not parsec-only).
+- [ ] **Run tests locally** (blocked in agent env by Go toolchain):
+      `go test ./internal/datasource/ -run CrossAccount`
+      `go test ./configs/scripts/ -run CrossAccount`
+      `go test ./test/e2e/ -run HermeticAuthzCrossAccount`
+- [ ] **`deploy/parsec-ephem.yaml`**: mount `cross_account.lua`; extend identity-policy
+      (per `.cursor/rules/deploy-config-sync.mdc`).
+
+### Should-do (AC / parity)
+
+- [ ] Confirm `employee_account_number` / `employee_org_id` placement vs 3scale
+      `x-rh-identity` shape (currently at identity root in CEL).
+- [ ] AC8 audit: verify Lua DS observer logs distinguish success / forbidden /
+      rbac_denied / infra (may need structured probe attributes).
+- [ ] E2E: service-account / cert-auth paths do not invoke cross-account (AC1).
+- [ ] E2E: compliance runs on original identity before cross-account swap (ordering).
+
+### Deploy follow-up (separate repo)
+
+- [ ] App-interface: register `cross_account` DS, `rbac` HTTP client + auth, cache TTL,
+      script volume mount, `identity-policy` toggles (`cross_access_bypass_is_internal`,
+      `cross_access_query_by`). Until applied, DS absent → fail-safe skip.
+
+### Deferred / optional
+
+- [ ] PR 3: generic parsed `cookies` on `RequestAttributes` (only if Lua cookie parsing
+      becomes a maintenance issue).
+- [ ] Resolve open questions in Risks table (RBAC URL, org-id param, cache TTL).
+
+### Done in this commit
+
+- [x] `cross_account.lua` — cookies, internal/email checks, RBAC list call, cache key
+- [x] `redhat_identity.cel` — guards + swap on console / rhsm / portal jwt-auth branches
+- [x] Config: `parsec.yaml`, production example, README snippet
+- [x] Tests: Lua unit, CEL unit, hermetic ext_authz e2e (fixture RBAC only)
+- [x] Plan doc `docs/impl-plans/RHCLOUD-47320.md`
 **Author**: Adam O'Brien / AI Assistant
 **Date**: 2026-09-07
 
@@ -213,13 +260,13 @@ Work starts from `origin/main`. **Do not** build on commit `5ec349d`.
 **Files**: Remove or revert `identity_mutation.go`, `rbac_mock.go`,
 `cross_account_test.go`, and cross-account fields on `CredentialContext` from
 `5ec349d` if present on the working branch.
-**Status**: Pending
+**Status**: Done (scaffolding absent on `parsec-CAR`)
 
 #### Step 2: Implement `cross_account.lua`
 
 **Package**: `configs/scripts`
 **Files**: `cross_account.lua`
-**Status**: Pending
+**Status**: Done
 
 **Behavior**:
 
@@ -248,10 +295,10 @@ HTTP client: dedicated `rbac` client or shared host — TBD from external spec.
 
 **Package**: `internal/datasource`
 **Files**: `cross_account_lua_test.go`
-**Status**: Pending
+**Status**: Done
 
 Cases: no cookies (active false), non-internal (forbidden), RBAC empty (denied),
-RBAC approved (success), RBAC 503 (nil), cache key composition, bypass
+RBAC approved (success), RBAC 503 (infra), cache key composition, bypass
 `is_internal` with/without `@redhat.com`.
 
 #### Step 4: Wire data source + identity-policy extensions
@@ -259,7 +306,7 @@ RBAC approved (success), RBAC 503 (nil), cache key composition, bypass
 **Package**: `configs/`
 **Files**: `parsec.yaml`, `configs/examples/parsec-production.yaml`,
 `configs/README.md`
-**Status**: Pending
+**Status**: Done
 
 ```yaml
 # identity-policy static data — add:
@@ -290,7 +337,7 @@ compile without it).
 
 **Package**: `configs/scripts`
 **Files**: `redhat_identity.cel`
-**Status**: Pending
+**Status**: Done
 
 For **console**, **rhsm**, and **portal** User jwt-auth branches only:
 
@@ -315,7 +362,7 @@ invocation with cookies → `fail("cross_account_check_failed")` (maps to 500).
 
 **Package**: `configs/scripts`
 **Files**: `redhat_identity_test.go`
-**Status**: Pending
+**Status**: Done
 
 One test per AC (1–5, 4) using static/canned `cross_account` DS responses.
 Verify exact deny messages, field swap, and absence of `employee_*` when
@@ -325,7 +372,7 @@ inactive.
 
 **Package**: `test/e2e`
 **Files**: `hermetic_authz_cross_account_test.go`
-**Status**: Pending
+**Status**: Done
 
 Full path: JWT fixture + cookie header + Lua DS with `httpfixture` RBAC
 responses → ext_authz 200/403/500. Include:
@@ -338,7 +385,7 @@ responses → ext_authz 200/403/500. Include:
 
 **Package**: `deploy/`
 **Files**: `parsec-ephem.yaml`, production examples per deploy-config-sync rule
-**Status**: Pending
+**Status**: Pending (production example updated; ephem + app-interface follow-up)
 
 ---
 
@@ -547,3 +594,4 @@ See Step 4 YAML snippet above.
 | Date | Reviewer | Feedback | Changes Made |
 |------|----------|----------|--------------|
 | 2026-09-07 | — | Plan created from JIRA + prior commit review | Initial draft |
+| 2026-09-07 | Adam | WIP commit; RBAC needs x-rh-identity + http_auth | Remaining Work section added |

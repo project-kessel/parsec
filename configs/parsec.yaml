@@ -62,6 +62,9 @@ http_clients:
           env: PARSEC_BOP_CLIENT_ID
         x-rh-apitoken:
           env: PARSEC_BOP_TOKEN
+  - name: rbac
+    timeout: "10s"
+    base_url: "https://rbac.internal.example.com"
 
 # Data sources for token enrichment
 data_sources:
@@ -71,6 +74,8 @@ data_sources:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
       enforce_idp_auth: false
+      cross_access_bypass_is_internal: false
+      cross_access_query_by: account
   # Export compliance (RHCLOUD-49359): called unless Envoy sets
   # context_extensions.export_compliance=false on User jwt-auth paths.
   # Absent extension → check on (opt-out). Missing DS → CEL skips (fail-safe).
@@ -98,6 +103,25 @@ data_sources:
     caching:
       type: in_memory
       ttl: 5m
+
+  # Cross-account access (RHCLOUD-47320): internal employee browser cookies +
+  # RBAC-approved request. JWT User paths only. Missing DS → CEL skips (fail-safe).
+  - name: cross_account
+    type: lua
+    script_file: ./configs/scripts/cross_account.lua
+    http_client: rbac
+    config:
+      rbac_path: "/api/rbac/v1/cross-account-requests/"
+      approved_only: "true"
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+      cross_access_bypass_is_internal: false
+      cross_access_query_by: account
+      employee_email_suffix: "@redhat.com"
+    caching:
+      type: in_memory
+      ttl: 5m
+      group_name: cross-account-cache
 
 # Token issuers
 #

@@ -399,6 +399,17 @@ data_sources:
     data:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
+      cross_access_bypass_is_internal: false
+      cross_access_query_by: account
+  - name: cross_account
+    type: lua
+    script_file: ./configs/scripts/cross_account.lua
+    http_client: rbac
+    config:
+      rbac_path: "/api/rbac/v1/cross-account-requests/"
+    caching:
+      type: in_memory
+      ttl: 5m
   - name: user_roles
     type: lua
     script_file: ./scripts/user_roles.lua  # Or use inline script

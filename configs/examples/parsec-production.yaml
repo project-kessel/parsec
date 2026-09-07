@@ -42,6 +42,11 @@ trust_store:
       actor.trust_domain == "prod.example.com" && 
       actor.claims.verified == true
 
+http_clients:
+  - name: rbac
+    timeout: "10s"
+    base_url: "https://rbac.internal.example.com"
+
 # Data sources with distributed caching
 data_sources:
   # User entitlements from central authorization service
@@ -77,6 +82,25 @@ data_sources:
       ttl: 24h
       group_name: "compliance-cache"
       cache_size: 134217728  # 128 MB
+
+  # Cross-account access (RHCLOUD-47320). JWT User paths only. Missing DS → skip.
+  - name: cross_account
+    type: lua
+    script_file: /etc/parsec/scripts/cross_account.lua
+    http_client: rbac
+    config:
+      rbac_path: "/api/rbac/v1/cross-account-requests/"
+      approved_only: "true"
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+      cross_access_bypass_is_internal: false
+      cross_access_query_by: account
+      employee_email_suffix: "@redhat.com"
+    caching:
+      type: distributed
+      ttl: 5m
+      group_name: "cross-account-cache"
+      cache_size: 67108864  # 64 MB
   
   # Organization metadata
   - name: org_metadata
