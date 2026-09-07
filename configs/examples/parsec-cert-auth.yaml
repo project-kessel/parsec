@@ -72,7 +72,7 @@ trust_store:
       credential_types: ["forwarded_client_cert"]
       http_client: backoffice-proxy
       config:
-        bop_url: "https://backoffice-proxy.apps.ext.spoke.preprod.us-west-2.aws.paas.redhat.com/v1/auth"
+        bop_url: "https://backoffice-proxy.apps.ext.spoke.preprod.us-west-2.aws.paas.redhat.com"
         bop_env: "stage"
         trust_domain: "cert.redhat.com"
         issuer_host: "rhsm.stage.redhat.com"

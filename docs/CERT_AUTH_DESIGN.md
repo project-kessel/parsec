@@ -88,7 +88,7 @@ Validates `ForwardedClientCertCredential` by calling BOP's `/v1/auth` endpoint. 
 3. Read `input.credential.subject` and `input.credential.issuer`
 4. Reject if either is nil or empty (return `nil`)
 5. Parse CN value from subject string using pattern `/CN=([^/]+)`
-6. GET `bop_url` with headers:
+6. GET `bop_url + "/v1/auth"` with headers:
    - `x-rh-clientid` — BOP client ID (injected by HTTP client via `http_auth.type: headers`)
    - `x-rh-apitoken` — BOP API token (injected by HTTP client via `http_auth.type: headers`)
    - `x-rh-insights-certauth-secret` — proxy proof secret (from config, resolved from env at startup)
@@ -218,7 +218,7 @@ trust_store:
       credential_types: ["forwarded_client_cert"]
       http_client: backoffice-proxy
       config:
-        bop_url: "https://backoffice-proxy.apps.ext.spoke.preprod.us-west-2.aws.paas.redhat.com/v1/auth"
+        bop_url: "https://backoffice-proxy.apps.ext.spoke.preprod.us-west-2.aws.paas.redhat.com"
         bop_env: "stage"
         trust_domain: "cert.redhat.com"
         bop_certauth_secret:
@@ -244,7 +244,7 @@ trust_store:
 | `script_file` | Yes | Path to the Lua script |
 | `credential_types` | Yes | Must include `"forwarded_client_cert"` |
 | `http_client` | No | Name of a client from `http_clients` registry |
-| `config.bop_url` | Yes | HTTPS URL of BOP auth endpoint |
+| `config.bop_url` | Yes | Common HTTPS base URL for BOP endpoints |
 | `config.bop_env` | No | Environment for `x-rh-insights-env` header (defaults to `"stage"`) |
 | `config.trust_domain` | Yes | Trust domain assigned to validated results |
 | `config.bop_certauth_secret` | Yes | Proxy proof secret (supports `{env: "VAR"}` syntax for env var resolution) |
