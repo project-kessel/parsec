@@ -26,7 +26,6 @@ import (
 const testRBACBaseURL = "https://rbac.example.internal"
 const testRBACListPath = "/api/rbac/v1/cross-account-requests/"
 const testRBACListURL = testRBACBaseURL + testRBACListPath
-const testComplianceAPIURL = "https://export-compliance.example.internal/v1/compliance"
 
 func TestHermeticAuthzCrossAccount(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
