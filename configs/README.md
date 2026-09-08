@@ -393,6 +393,17 @@ When neither is set, the `"default"` client is used.
 Data sources enrich tokens with external data:
 
 ```yaml
+http_clients:
+  - name: rbac
+    timeout: "10s"
+    # Relative rbac_path against http_clients[].base_url: PR #201 (RHCLOUD-50834).
+    # Until that merges, set a full URL in cross_account.config.rbac_path (see below).
+    http_auth:  # stage/prod: inject via app-interface secrets
+      type: headers
+      headers:
+        authorization:
+          env: PARSEC_RBAC_AUTHORIZATION
+
 data_sources:
   - name: identity-policy
     type: static
@@ -406,7 +417,7 @@ data_sources:
     script_file: ./configs/scripts/cross_account.lua
     http_client: rbac
     config:
-      rbac_path: "/api/rbac/v1/cross-account-requests/"
+      rbac_path: "https://rbac.internal.example.com/api/rbac/v1/cross-account-requests/"
     caching:
       type: in_memory
       ttl: 5m

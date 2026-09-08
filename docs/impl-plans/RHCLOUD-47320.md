@@ -1,53 +1,49 @@
 # RHCLOUD-47320: Cross-account / org-admin access checks
 
 **JIRA**: https://redhat.atlassian.net/browse/RHCLOUD-47320
-**Status**: In Progress (WIP committed 2026-09-07; not pushed)
+**PR**: https://github.com/project-kessel/parsec/pull/206
+**Status**: Ready for review (parsec repo complete; app-interface follow-up required)
 
 ## Remaining Work (before merge)
 
-Single PR on `parsec-CAR`. Implementation is **not** production-ready for live RBAC yet.
+Single PR on `parsec-CAR`. Core feature is implemented and hermetically tested.
+Production rollout still requires **app-interface** secret updates (separate repo).
 
-### Must-do (blocking)
+### Must-do (blocking merge in parsec repo)
 
-- [ ] **`cross_account.lua`**: send `x-rh-identity` (base64 employee identity, pre-swap) on RBAC
-      `GET` — same pattern as `export_compliance.lua`. RBAC resolves the employee from
-      this header when `query_by=user_id`; query params alone are insufficient.
-- [ ] **`http_clients.rbac`**: wire `http_auth` (PSK / service headers per platform) in
-      `parsec.yaml` example + **app-interface** stage/prod secrets (not parsec-only).
-- [ ] **Run tests locally** (blocked in agent env by Go toolchain):
-      `go test ./internal/datasource/ -run CrossAccount`
-      `go test ./configs/scripts/ -run CrossAccount`
-      `go test ./test/e2e/ -run HermeticAuthzCrossAccount`
-- [ ] **`deploy/parsec-ephem.yaml`**: mount `cross_account.lua`; extend identity-policy
-      (per `.cursor/rules/deploy-config-sync.mdc`).
+- [x] **`cross_account.lua`**: send `x-rh-identity` (base64 employee identity, pre-swap) on RBAC `GET`
+- [x] **`rbac_path`**: full URL in config until [PR #201](https://github.com/project-kessel/parsec/pull/201) (`base_url` + relative path) merges
+- [x] **`http_clients.rbac.http_auth`**: example in `parsec-production.yaml` (env-based headers)
+- [x] **`deploy/parsec.yaml`**: mount `cross_account.lua`
+- [x] **Hermetic tests**: Lua unit, CEL unit, ext_authz e2e (including SA skip + compliance ordering)
+
+### Depends on follow-up PR
+
+- [ ] **[PR #201](https://github.com/project-kessel/parsec/pull/201) / RHCLOUD-50834**: `http_clients[].base_url` for relative `rbac_path` (and `export_compliance` path). After merge, switch configs from full `rbac_path` URLs to `base_url` + `/api/rbac/v1/cross-account-requests/`.
 
 ### Should-do (AC / parity)
 
-- [ ] Confirm `employee_account_number` / `employee_org_id` placement vs 3scale
-      `x-rh-identity` shape (currently at identity root in CEL).
-- [ ] AC8 audit: verify Lua DS observer logs distinguish success / forbidden /
-      rbac_denied / infra (may need structured probe attributes).
-- [ ] E2E: service-account / cert-auth paths do not invoke cross-account (AC1).
-- [ ] E2E: compliance runs on original identity before cross-account swap (ordering).
+- [x] E2E: service-account path does not invoke cross-account
+- [x] E2E: compliance runs on original identity before cross-account swap
+- [ ] Confirm `employee_account_number` / `employee_org_id` placement vs 3scale `x-rh-identity` shape (currently at identity root in CEL; matches JIRA wording)
+- [ ] AC8 audit: verify Lua DS observer logs distinguish success / forbidden / rbac_denied / infra (relies on existing `LuaObserver`; no new probe fields added)
 
-### Deploy follow-up (separate repo)
+### Deploy follow-up (separate repo — required before prod enforcement)
 
-- [ ] App-interface: register `cross_account` DS, `rbac` HTTP client + auth, cache TTL,
-      script volume mount, `identity-policy` toggles (`cross_access_bypass_is_internal`,
-      `cross_access_query_by`). Until applied, DS absent → fail-safe skip.
+- [ ] App-interface: register `cross_account` DS, `rbac` HTTP client (`http_auth`, optional `ca_cert`; `base_url` after #201), cache TTL, script volume mount, `identity-policy` toggles. Until applied, DS absent → fail-safe skip.
 
 ### Deferred / optional
 
-- [ ] PR 3: generic parsed `cookies` on `RequestAttributes` (only if Lua cookie parsing
-      becomes a maintenance issue).
-- [ ] Resolve open questions in Risks table (RBAC URL, org-id param, cache TTL).
+- [ ] **`deploy/parsec-ephem.yaml`**: ephem template uses inline legacy CEL without CAR guards; use `configs/examples/parsec-cross-account-local.yaml` for local CAR testing instead
+- [ ] PR 3: generic parsed `cookies` on `RequestAttributes` (only if Lua cookie parsing becomes a maintenance issue)
+- [ ] Resolve open questions in Risks table (exact RBAC auth header names for stage/prod)
 
-### Done in this commit
+### Done
 
-- [x] `cross_account.lua` — cookies, internal/email checks, RBAC list call, cache key
+- [x] `cross_account.lua` — cookies, internal/email checks, RBAC list call, `x-rh-identity`, cache key
 - [x] `redhat_identity.cel` — guards + swap on console / rhsm / portal jwt-auth branches
-- [x] Config: `parsec.yaml`, production example, README snippet
-- [x] Tests: Lua unit, CEL unit, hermetic ext_authz e2e (fixture RBAC only)
+- [x] Config: `parsec.yaml`, production example, `parsec-cross-account-local.yaml`, README snippet
+- [x] Tests: Lua unit, CEL unit, hermetic ext_authz e2e (fixture RBAC; full URL in `rbac_path` until #201)
 - [x] Plan doc `docs/impl-plans/RHCLOUD-47320.md`
 **Author**: Adam O'Brien / AI Assistant
 **Date**: 2026-09-07
@@ -384,8 +380,8 @@ responses → ext_authz 200/403/500. Include:
 #### Step 8: Deploy template sync
 
 **Package**: `deploy/`
-**Files**: `parsec-ephem.yaml`, production examples per deploy-config-sync rule
-**Status**: Pending (production example updated; ephem + app-interface follow-up)
+**Files**: `parsec.yaml`, production examples per deploy-config-sync rule
+**Status**: Done (`deploy/parsec.yaml` mounts `cross_account.lua`; ephem template deferred — see Remaining Work)
 
 ---
 
@@ -581,7 +577,7 @@ See Step 4 YAML snippet above.
 
 | # | Item | Status | Resolution |
 |---|------|--------|------------|
-| 1 | Exact RBAC base URL, path, and auth headers for stage/prod | **Open** | Confirm from platform team / 3scale source / app-interface |
+| 1 | Exact RBAC base URL, path, and auth headers for stage/prod | **Open** | Full `rbac_path` in CAR configs until #201; then `base_url` + relative path |
 | 2 | Org-id query param name (`org_id` vs `target_org`) | **Open** | Read insights-rbac OpenAPI or 3scale Lua |
 | 3 | Placement of `employee_account_number` / `employee_org_id` in identity JSON | **Open** | Confirm 3scale `x-rh-identity` shape |
 | 4 | Cache TTL (JIRA requires caching; no duration specified) | **Open** | Propose 5m in-memory dev / distributed prod; align with RBAC SLA |
@@ -594,4 +590,4 @@ See Step 4 YAML snippet above.
 | Date | Reviewer | Feedback | Changes Made |
 |------|----------|----------|--------------|
 | 2026-09-07 | — | Plan created from JIRA + prior commit review | Initial draft |
-| 2026-09-07 | Adam | WIP commit; RBAC needs x-rh-identity + http_auth | Remaining Work section added |
+| 2026-09-08 | Adam | Dropped duplicate base_url impl; full rbac_path URLs until #201 | CAR defers RHCLOUD-50834 to follow-on PR |

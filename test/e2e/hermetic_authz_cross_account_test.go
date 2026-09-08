@@ -2,6 +2,8 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -22,7 +24,9 @@ import (
 )
 
 const testRBACBaseURL = "https://rbac.example.internal"
-const testRBACListURL = testRBACBaseURL + "/api/rbac/v1/cross-account-requests/"
+const testRBACListPath = "/api/rbac/v1/cross-account-requests/"
+const testRBACListURL = testRBACBaseURL + testRBACListPath
+const testComplianceAPIURL = "https://export-compliance.example.internal/v1/compliance"
 
 func TestHermeticAuthzCrossAccount(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -44,6 +48,10 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 	luaScript, err := os.ReadFile("../../configs/scripts/cross_account.lua")
 	if err != nil {
 		t.Fatalf("read Lua: %v", err)
+	}
+	complianceScript, err := os.ReadFile("../../configs/scripts/export_compliance.lua")
+	if err != nil {
+		t.Fatalf("read compliance Lua: %v", err)
 	}
 
 	celMapper, err := mapper.NewCELMapper(string(celScript), mapper.WithClock(clk))
@@ -81,6 +89,21 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		return ds
 	}
 
+	newComplianceDS := func(client *http.Client) service.DataSource {
+		ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
+			Name:   "export_compliance",
+			Script: string(complianceScript),
+			ConfigSource: luaservices.NewMapConfigSource(map[string]any{
+				"compliance_api": testComplianceAPIURL,
+			}),
+			HTTPClient: client,
+		})
+		if err != nil {
+			t.Fatalf("export_compliance DS: %v", err)
+		}
+		return ds
+	}
+
 	internalConsoleClaims := map[string]interface{}{
 		"sub":                "emp-1",
 		"preferred_username": "tam@redhat.com",
@@ -94,9 +117,12 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		},
 	}
 
-	newAuthz := func(withCrossAccountDS bool, client *http.Client) *server.AuthzServer {
+	newAuthz := func(withCrossAccountDS bool, withComplianceDS bool, client *http.Client) *server.AuthzServer {
 		dsRegistry := service.NewDataSourceRegistry()
 		dsRegistry.Register(identityPolicyDS)
+		if withComplianceDS {
+			dsRegistry.Register(newComplianceDS(client))
+		}
 		if withCrossAccountDS {
 			dsRegistry.Register(newCrossAccountDS(client))
 		}
@@ -122,7 +148,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				Clock:  clk,
 			}),
 		}
-		authz := newAuthz(false, client)
+		authz := newAuthz(false, false, client)
 		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999"))
 		if err != nil {
@@ -149,7 +175,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				Clock:  clk,
 			}),
 		}
-		authz := newAuthz(true, client)
+		authz := newAuthz(true, false, client)
 		claims := map[string]interface{}{
 			"sub":                "user-1",
 			"preferred_username": "alice",
@@ -186,7 +212,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				Clock:  clk,
 			}),
 		}
-		authz := newAuthz(true, client)
+		authz := newAuthz(true, false, client)
 		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999"))
 		if err != nil {
@@ -211,7 +237,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				Clock:  clk,
 			}),
 		}
-		authz := newAuthz(true, client)
+		authz := newAuthz(true, false, client)
 		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
 		if err != nil {
@@ -250,7 +276,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				Clock:  clk,
 			}),
 		}
-		authz := newAuthz(true, client)
+		authz := newAuthz(true, false, client)
 		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999"))
 		if err != nil {
@@ -265,6 +291,100 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 		if denied.Status.Code != 500 {
 			t.Errorf("expected HTTP 500, got %d", denied.Status.Code)
+		}
+	})
+
+	t.Run("service account: no cross-account RBAC call", func(t *testing.T) {
+		var rbacCalls int
+		client := &http.Client{
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+					if fix := jwksFixture.GetFixture(req); fix != nil {
+						return fix
+					}
+					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
+						rbacCalls++
+					}
+					return nil
+				}),
+				Strict: false,
+				Clock:  clk,
+			}),
+		}
+		authz := newAuthz(true, false, client)
+		token := mustSignToken(t, jwksFixture, map[string]interface{}{
+			"preferred_username": "service-account-myapp",
+			"client_id":          "myapp",
+			"sub":                "abc-123",
+			"scope":              "api.console openid",
+			"organization": map[string]interface{}{
+				"id":             "org-1",
+				"account_number": "12345",
+			},
+		})
+		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999"))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		assertOKResponse(t, resp)
+		if rbacCalls != 0 {
+			t.Fatalf("expected no RBAC calls for service account, got %d", rbacCalls)
+		}
+	})
+
+	t.Run("compliance uses employee identity before cross-account swap", func(t *testing.T) {
+		var complianceIdentityB64 string
+		client := &http.Client{
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+					if fix := jwksFixture.GetFixture(req); fix != nil {
+						return fix
+					}
+					if req.Method == http.MethodGet && req.URL.String() == testComplianceAPIURL {
+						complianceIdentityB64 = req.Header.Get("x-rh-identity")
+						return &httpfixture.Fixture{
+							StatusCode: 200,
+							Body:       `{"result_code":"ALLOWED"}`,
+						}
+					}
+					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved"}]}`}
+					}
+					return nil
+				}),
+				Strict: true,
+				Clock:  clk,
+			}),
+		}
+		authz := newAuthz(true, true, client)
+		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
+		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		assertOKResponse(t, resp)
+		if complianceIdentityB64 == "" {
+			t.Fatal("expected compliance call with x-rh-identity")
+		}
+		raw, err := base64.StdEncoding.DecodeString(complianceIdentityB64)
+		if err != nil {
+			t.Fatalf("decode compliance identity: %v", err)
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			t.Fatalf("unmarshal compliance identity: %v", err)
+		}
+		identity, ok := envelope["identity"].(map[string]any)
+		if !ok {
+			t.Fatalf("compliance identity envelope: %+v", envelope)
+		}
+		if identity["account_number"] != "111111" {
+			t.Fatalf("compliance account_number=%v, want employee 111111", identity["account_number"])
+		}
+
+		tokenIdentity := decodeTokenIdentity(t, resp)
+		if tokenIdentity["account_number"] != "999999" {
+			t.Fatalf("swapped account_number=%v, want target 999999", tokenIdentity["account_number"])
 		}
 	})
 }
