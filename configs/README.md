@@ -393,12 +393,34 @@ When neither is set, the `"default"` client is used.
 Data sources enrich tokens with external data:
 
 ```yaml
+http_clients:
+  - name: rbac
+    timeout: "10s"
+    # Relative rbac_path against http_clients[].base_url: PR #201 (RHCLOUD-50834).
+    # Until that merges, set a full URL in cross_account.config.rbac_path (see below).
+    http_auth:  # stage/prod: inject via app-interface secrets
+      type: headers
+      headers:
+        authorization:
+          env: PARSEC_RBAC_AUTHORIZATION
+
 data_sources:
   - name: identity-policy
     type: static
     data:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
+      cross_access_bypass_is_internal: false
+      cross_access_query_by: account
+  - name: cross_account
+    type: lua
+    script_file: ./configs/scripts/cross_account.lua
+    http_client: rbac
+    config:
+      rbac_path: "https://rbac.internal.example.com/api/rbac/v1/cross-account-requests/"
+    caching:
+      type: in_memory
+      ttl: 5m
   - name: user_roles
     type: lua
     script_file: ./scripts/user_roles.lua  # Or use inline script
