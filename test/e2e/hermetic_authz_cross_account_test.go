@@ -13,7 +13,6 @@ import (
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/datasource"
-	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/issuer"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
@@ -66,7 +65,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 			Name:   "cross_account",
 			Script: string(luaScript),
 			ConfigSource: luaservices.NewMapConfigSource(map[string]any{
-				"rbac_path":                       "/api/rbac/v1/cross-account-requests/",
+				"rbac_path":                       testRBACListURL,
 				"approved_only":                   "true",
 				"internal_idp_target":             "https://sso.redhat.com/auth/realms/internal",
 				"role_fallback_enabled":           false,
@@ -74,7 +73,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				"cross_access_query_by":           "account",
 				"employee_email_suffix":           "@redhat.com",
 			}),
-			HTTP: httpclient.LuaClient{Client: client, BaseURL: testRBACBaseURL},
+			HTTPClient: client,
 		})
 		if err != nil {
 			t.Fatalf("cross_account DS: %v", err)

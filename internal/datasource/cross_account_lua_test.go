@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/request"
@@ -21,6 +20,7 @@ import (
 
 const rbacBaseURL = "https://rbac.example.internal"
 const rbacListPath = "/api/rbac/v1/cross-account-requests/"
+const rbacListURL = rbacBaseURL + rbacListPath
 
 func loadCrossAccountScript(t *testing.T) string {
 	t.Helper()
@@ -34,7 +34,7 @@ func loadCrossAccountScript(t *testing.T) string {
 
 func defaultCrossAccountConfig() map[string]any {
 	return map[string]any{
-		"rbac_path":                       rbacListPath,
+		"rbac_path":                       rbacListURL,
 		"approved_only":                   "true",
 		"internal_idp_target":             "https://sso.redhat.com/auth/realms/internal",
 		"role_fallback_enabled":           false,
@@ -77,7 +77,7 @@ func newCrossAccountDS(t *testing.T, script string, client *http.Client, cfg map
 		Name:         "cross_account",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(cfg),
-		HTTP:         httpclient.LuaClient{Client: client, BaseURL: rbacBaseURL},
+		HTTPClient:   client,
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
@@ -353,7 +353,7 @@ func TestCrossAccountLua_CacheKey(t *testing.T) {
 		Name:         "cross_account",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(defaultCrossAccountConfig()),
-		HTTP:         httpclient.LuaClient{Client: &http.Client{Timeout: 5 * time.Second}, BaseURL: rbacBaseURL},
+		HTTPClient:   &http.Client{Timeout: 5 * time.Second},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -377,7 +377,7 @@ func TestCrossAccountLua_CacheKeyNilWithoutCookies(t *testing.T) {
 		Name:         "cross_account",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(defaultCrossAccountConfig()),
-		HTTP:         httpclient.LuaClient{Client: &http.Client{Timeout: 5 * time.Second}, BaseURL: rbacBaseURL},
+		HTTPClient:   &http.Client{Timeout: 5 * time.Second},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
