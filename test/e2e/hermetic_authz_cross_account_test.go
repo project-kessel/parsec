@@ -20,7 +20,6 @@ import (
 	"github.com/project-kessel/parsec/internal/mapper"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
-	"github.com/project-kessel/parsec/internal/trust"
 )
 
 const testRBACBaseURL = "https://rbac.example.internal"

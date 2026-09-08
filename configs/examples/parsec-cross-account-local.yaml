@@ -1,0 +1,99 @@
+# parsec Configuration - Cross-Account Access + Local RBAC
+#
+# Hermetic JWT signing (JWKS fixture) with real HTTP to localhost insights-rbac.
+# No BOP or export-compliance datasources — CAR-only local testing.
+#
+# Prerequisites:
+#   - insights-rbac running at http://localhost:8000 (DEVELOPMENT=True is fine)
+#
+# Usage:
+#   ./scripts/verify-cross-account-rbac-local.sh
+#   # or manually:
+#   ./bin/parsec serve --config ./configs/examples/parsec-cross-account-local.yaml
+#
+# See docs/verification/cross-account-rbac-local/ for captured request/response logs.
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+fixtures_allow_real_http: true
+
+observability:
+  type: logging
+  log_level: debug
+  log_format: json
+
+trust_domain: "parsec.example.com"
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+fixtures:
+  - type: jwks
+    issuer: "https://sso.redhat.com/auth/realms/redhat-external"
+    jwks_url: "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/certs"
+    algorithm: "RS256"
+    private_key_file: ./testdata/cross-account-local/jwt-signing.pem
+
+trust_store:
+  type: stub_store
+  validators:
+    - name: redhat-sso
+      type: jwt_validator
+      issuer: "https://sso.redhat.com/auth/realms/redhat-external"
+      jwks_url: "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/certs"
+      trust_domain: "https://sso.redhat.com/auth/realms/redhat-external"
+      refresh_interval: "15m"
+      audiences: ["api.console", "rhsm-api", "customer-portal", ""]
+
+http_clients:
+  - name: rbac
+    timeout: "10s"
+    base_url: "http://localhost:8000"
+
+data_sources:
+  - name: identity-policy
+    type: static
+    data:
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+      enforce_idp_auth: false
+      cross_access_bypass_is_internal: false
+      cross_access_query_by: account
+
+  - name: cross_account
+    type: lua
+    script_file: ./configs/scripts/cross_account.lua
+    http_client: rbac
+    config:
+      rbac_path: "/api/rbac/v1/cross-account-requests/"
+      approved_only: "true"
+      internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
+      role_fallback_enabled: true
+      cross_access_query_by: account
+      employee_email_suffix: "@redhat.com"
+    caching:
+      type: in_memory
+      ttl: 5m
+      group_name: cross-account-cache
+
+issuers:
+  - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
+    type: unsigned
+    claim_mappers:
+      - type: cel
+        name: redhat-identity-mapper
+        script_file: ./configs/scripts/redhat_identity.cel
+
+credential_sources:
+  - name: authorization-bearer
+    type: authorization_bearer_opaque
+
+authz_server:
+  policy:
+    type: static_authenticated
+    token_types:
+      - type: "urn:redhat:params:oauth:token-type:rh-identity"
+        header_name: "x-rh-identity"

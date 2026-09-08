@@ -13,6 +13,9 @@
 --   cross_access_bypass_is_internal — skip is_internal flag; email still required
 --   cross_access_query_by      — "account" (default) or "org_id"
 --   employee_email_suffix      — required email suffix (default "@redhat.com")
+-- Headers sent to RBAC:
+--   - x-rh-identity (base64 employee identity JSON, pre-swap)
+--   - Accept: application/json
 --
 -- Returns (JSON in data):
 --   { "active": false }                         — no cross_access_* cookies (CEL no-op)
@@ -61,6 +64,15 @@ local function resolve_email(claims)
   return claim_str(claims, "email")
 end
 
+-- resolve_username extracts the username from subject claims (console / rhsm / portal).
+local function resolve_username(claims)
+  if claims == nil then return "" end
+  local username = claim_str(claims, "preferred_username")
+  if username == "" then username = claim_str(claims, "username") end
+  if username == "" then username = claim_str(claims, "sub") end
+  return username
+end
+
 local function resolve_employee_account_org(claims)
   local account_number = org_field(claims, "account_number")
   if account_number == "" then account_number = claim_str(claims, "account_number") end
@@ -72,6 +84,35 @@ local function resolve_employee_account_org(claims)
   if org_id == "" then org_id = account_number end
 
   return account_number, org_id
+end
+
+local function build_identity_envelope(claims)
+  local username = resolve_username(claims)
+  local account_number, org_id = resolve_employee_account_org(claims)
+  return {
+    identity = {
+      auth_type = "jwt-auth",
+      account_number = account_number,
+      org_id = org_id,
+      type = "User",
+      user = {
+        username = username,
+        email = resolve_email(claims),
+        user_id = resolve_user_id(claims)
+      },
+      internal = {
+        org_id = org_id,
+        cross_access = false
+      }
+    }
+  }
+end
+
+local function encode_identity_header(claims)
+  local envelope = build_identity_envelope(claims)
+  local encoded, enc_err = json.encode(envelope)
+  if encoded == nil then return "" end
+  return base64.encode(encoded)
 end
 
 local function cookie_header(input)
@@ -192,9 +233,15 @@ local function resolve_rbac_url(user_id, target_value, query_by)
   return path .. query
 end
 
-local function rbac_has_approved_request(user_id, target_value, query_by)
-  local api_url = resolve_rbac_url(user_id, target_value, query_by)
+local function rbac_has_approved_request(claims, target_value, query_by)
+  local api_url = resolve_rbac_url(resolve_user_id(claims), target_value, query_by)
+  local identity_b64 = encode_identity_header(claims)
+  if identity_b64 == "" then
+    return nil, "infra"
+  end
+
   local response, err = http.get(api_url, {
+    ["x-rh-identity"] = identity_b64,
     ["Accept"] = "application/json"
   })
 
@@ -275,7 +322,7 @@ function fetch(input)
     return encode_result({ error = "rbac_denied" })
   end
 
-  local approved, err_kind = rbac_has_approved_request(user_id, target_value, query_by)
+  local approved, err_kind = rbac_has_approved_request(claims, target_value, query_by)
   if err_kind == "infra" then
     return encode_result({ error = "infra" })
   end

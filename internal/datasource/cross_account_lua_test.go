@@ -2,6 +2,7 @@ package datasource
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -180,12 +181,14 @@ func TestCrossAccountLua_RBACDenied(t *testing.T) {
 func TestCrossAccountLua_RBACApproved(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	var gotURL string
+	var gotIdentityHeader string
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
 				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
 					gotURL = req.URL.String()
+					gotIdentityHeader = req.Header.Get("x-rh-identity")
 					return &httpfixture.Fixture{
 						StatusCode: 200,
 						Body:       `{"data":[{"status":"approved"}]}`,
@@ -220,6 +223,28 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 	}
 	if !strings.Contains(gotURL, "query_by=user_id") || !strings.Contains(gotURL, "account=999999") {
 		t.Fatalf("unexpected RBAC URL: %s", gotURL)
+	}
+	if gotIdentityHeader == "" {
+		t.Fatal("expected x-rh-identity header on RBAC request")
+	}
+	raw, err := base64.StdEncoding.DecodeString(gotIdentityHeader)
+	if err != nil {
+		t.Fatalf("decode x-rh-identity: %v", err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal identity envelope: %v", err)
+	}
+	identity, ok := envelope["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity envelope missing identity: %+v", envelope)
+	}
+	if identity["account_number"] != "111111" {
+		t.Fatalf("unexpected account_number in identity envelope: %+v", identity)
+	}
+	user, ok := identity["user"].(map[string]any)
+	if !ok || user["username"] != "tam@redhat.com" {
+		t.Fatalf("unexpected user in identity envelope: %+v", identity)
 	}
 }
 

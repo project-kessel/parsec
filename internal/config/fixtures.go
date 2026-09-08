@@ -70,11 +70,12 @@ func BuildHTTPFixtureProvider(fixtures []FixtureConfig, clk clock.Clock) (httpfi
 		}
 
 		jwksFixture, err := httpfixture.NewJWKSFixture(httpfixture.JWKSFixtureConfig{
-			Issuer:    f.Issuer,
-			JWKSURL:   f.JWKSURL,
-			KeyID:     f.KeyID, // Can be empty, will use default
-			Algorithm: algo,    // Can be zero value, will use default
-			Clock:     clk,
+			Issuer:         f.Issuer,
+			JWKSURL:        f.JWKSURL,
+			KeyID:          f.KeyID,
+			Algorithm:      algo,
+			Clock:          clk,
+			PrivateKeyFile: f.PrivateKeyFile,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create JWKS fixture for issuer %s: %w", f.Issuer, err)

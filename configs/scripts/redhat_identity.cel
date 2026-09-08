@@ -312,7 +312,6 @@ isServiceAccountToken(subject.claims) ? {
         },
         "entitlements": {}
       }
-    }
     ) : (
       has(subject.audience) && "customer-portal" in subject.audience ? (
         !(has(request.additional.context_extensions) && "export_compliance" in request.additional.context_extensions && request.additional.context_extensions.export_compliance == "false")
