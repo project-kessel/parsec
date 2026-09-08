@@ -422,9 +422,9 @@ type FixtureConfig struct {
 
 	// JWKS fields (when Type is "jwks")
 	Issuer         string `koanf:"issuer"`           // Issuer URL (iss claim)
-	JWKSURL        string `koanf:"jwks_url"`        // URL where JWKS will be served
-	KeyID          string `koanf:"key_id"`          // Optional key identifier (defaults to "test-key-1")
-	Algorithm      string `koanf:"algorithm"`      // Optional algorithm (defaults to "RS256")
+	JWKSURL        string `koanf:"jwks_url"`         // URL where JWKS will be served
+	KeyID          string `koanf:"key_id"`           // Optional key identifier (defaults to "test-key-1")
+	Algorithm      string `koanf:"algorithm"`        // Optional algorithm (defaults to "RS256")
 	PrivateKeyFile string `koanf:"private_key_file"` // Optional PEM RSA private key for deterministic local signing
 }
 

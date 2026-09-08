@@ -198,7 +198,7 @@ func TestRedHatIdentityCEL_UnsignedJSONBOPError(t *testing.T) {
 
 func consoleJWTSubject() *trust.Result {
 	return &trust.Result{
-		Subject: "user-1",
+		Subject:  "user-1",
 		Audience: []string{"api.console"},
 		Claims: map[string]any{
 			"sub":                "user-1",
@@ -328,7 +328,7 @@ func TestRedHatIdentityCEL_CrossAccountActiveSwap(t *testing.T) {
 		Actor:   trust.AnonymousResult(),
 		DataSourceRegistry: crossAccountRegistry(map[string]any{
 			"active":                  true,
-			"target_account_number":     "999999",
+			"target_account_number":   "999999",
 			"target_org_id":           "target-org",
 			"employee_account_number": "111111",
 			"employee_org_id":         "org-1",
