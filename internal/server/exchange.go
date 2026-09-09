@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
@@ -44,19 +47,35 @@ func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenServic
 }
 
 // Exchange implements the token exchange endpoint (RFC 8693)
-func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeRequest) (*parsecv1.ExchangeResponse, error) {
+func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeRequest) (response *parsecv1.ExchangeResponse, returnErr error) {
+	ctx = contextWithRequestID(ctx, nil, nil)
+	_ = grpc.SetHeader(ctx, metadata.Pairs(requestIDHeader, request.ID(ctx)))
+
+	// RFC 8693 defaults requested_token_type to access_token. Parsec issues a
+	// transaction token for that default to preserve its existing behavior.
+	requestedTokenType := service.TokenTypeTransactionToken
+	if req.RequestedTokenType != "" {
+		requestedTokenType = service.TokenType(req.RequestedTokenType)
+	}
+	reasonCode := "internal_error"
+
 	// Create request-scoped probe
 	ctx, p := s.observer.TokenExchangeStarted(ctx, req.GrantType, req.RequestedTokenType, req.Audience, req.Scope)
-	defer p.End()
+	defer func() {
+		p.RequestCompleted(exchangeRequestCompletion(returnErr, reasonCode, requestedTokenType))
+		p.End()
+	}()
 
 	// 1. Validate the grant type
 	if req.GrantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
+		reasonCode = "grant_type_unsupported"
 		return nil, fmt.Errorf("unsupported grant_type: %s", req.GrantType)
 	}
 
 	// 2. Authenticate actor (caller) from gRPC context
 	actor, err := authenticateActor(ctx, s.callerCredentialSources, s.trustStore, p)
 	if err != nil {
+		reasonCode = "credential_invalid"
 		return nil, err
 	}
 
@@ -67,6 +86,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		// Legacy parsec clients may still send base64-encoded JSON; parseRequestContextClaims accepts both.
 		requestContextClaims, err := parseRequestContextClaims(req.RequestContext)
 		if err != nil {
+			reasonCode = "invalid_request"
 			p.RequestContextParseFailed(err)
 			return nil, err
 		}
@@ -74,6 +94,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		// Get the claims filter for this actor
 		claimsFilter, err := s.claimsFilterRegistry.GetFilter(actor)
 		if err != nil {
+			reasonCode = auditReasonFromError(err, "internal_error")
 			p.RequestContextParseFailed(err)
 			return nil, fmt.Errorf("failed to get claims filter for actor: %w", err)
 		}
@@ -102,6 +123,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// 4. Filter trust store based on actor permissions
 	filteredStore, err := s.trustStore.ForActor(ctx, actor, reqAttrs)
 	if err != nil {
+		reasonCode = auditReasonFromError(err, "scheme_not_allowed")
 		return nil, fmt.Errorf("failed to filter trust store: %w", err)
 	}
 
@@ -111,22 +133,19 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// Validate subject credential against filtered trust store
 	result, err := filteredStore.Validate(ctx, cred)
 	if err != nil {
+		reasonCode = "credential_invalid"
+		if errors.Is(err, trust.ErrExpiredToken) {
+			reasonCode = "credential_expired"
+		}
 		p.SubjectTokenValidationFailed(err)
 		return nil, fmt.Errorf("token validation failed: %w", err)
 	}
 	p.SubjectTokenValidationSucceeded(result)
 
-	// 6. Determine which token type to issue
-	// RFC 8693: If requested_token_type is not specified, default to access_token
-	// For parsec, we default to transaction tokens
-	requestedTokenType := service.TokenTypeTransactionToken
-	if req.RequestedTokenType != "" {
-		requestedTokenType = service.TokenType(req.RequestedTokenType)
-	}
-
 	// 7. Validate audience matches trust domain (per transaction token spec)
 	// The audience for transaction tokens is always the trust domain
 	if req.Audience != "" && req.Audience != s.tokenService.TrustDomain() {
+		reasonCode = "policy_denied"
 		return nil, fmt.Errorf("requested audience %q does not match trust domain %q",
 			req.Audience, s.tokenService.TrustDomain())
 	}
@@ -140,21 +159,26 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		Scope:             req.Scope,
 	})
 	if err != nil {
+		reasonCode = auditReasonFromError(err, "internal_error")
 		return nil, internalGRPCError(err)
 	}
 
 	r, ok := results[requestedTokenType]
 	if !ok {
+		reasonCode = "internal_error"
 		return nil, status.Errorf(codes.Internal, "token service did not return requested token type %s", requestedTokenType)
 	}
 	if r.ExchangeErr != nil {
+		reasonCode = "policy_denied"
 		return nil, exchangeErrToGRPC(r.ExchangeErr)
 	}
 	if r.Token == nil {
+		reasonCode = "internal_error"
 		return nil, status.Errorf(codes.Internal, "token service returned no token for type %s", requestedTokenType)
 	}
 
 	// 9. Return response
+	reasonCode = ""
 	return &parsecv1.ExchangeResponse{
 		AccessToken:     r.Token.Value,
 		IssuedTokenType: string(requestedTokenType),

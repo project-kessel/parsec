@@ -6,9 +6,11 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
+	"github.com/project-kessel/parsec/internal/probe/audit"
 	"github.com/project-kessel/parsec/internal/probe/otel"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -107,6 +109,13 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 	}
 
 	switch cfg.Type {
+	case "audit":
+		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
+		if err != nil {
+			return nil, err
+		}
+		return p.newAuditObserver(cfg, lc)
+
 	case "logging":
 		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
 		if err != nil {
@@ -133,8 +142,27 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 		return p.buildCompositeObserver(cfg, parentLogCtx)
 
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: audit, logging, noop, metrics, composite)", cfg.Type)
 	}
+}
+
+func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	// Audit records are always structured JSON at production-visible levels.
+	// Writer is the raw sink, so parent console formatting and restrictive
+	// diagnostic levels cannot suppress or reshape security events.
+	logger := zerolog.New(logCtx.Writer).With().Timestamp().Logger().Level(zerolog.InfoLevel)
+	prefix := audit.DefaultEventPrefix
+	if cfg.EventPrefix != nil {
+		prefix = *cfg.EventPrefix
+	}
+	if !audit.ValidEventPrefix(prefix) {
+		return nil, fmt.Errorf("invalid audit event prefix %q: use only letters, digits, underscore, hyphen, or dot", prefix)
+	}
+	return audit.New(logger, audit.Metadata{
+		ServiceName:    "parsec",
+		ServiceVersion: buildinfo.Version,
+		TrustDomain:    p.config.TrustDomain,
+	}, audit.WithEventPrefix(prefix)), nil
 }
 
 func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {

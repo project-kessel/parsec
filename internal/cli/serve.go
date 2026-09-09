@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/config"
 	"github.com/project-kessel/parsec/internal/server"
 )
@@ -165,6 +166,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 7. Log startup information
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
+	obs.ProcessReady(server.ProcessInfo{
+		Version:     buildinfo.Version,
+		Commit:      buildinfo.Commit,
+		TrustDomain: provider.TrustDomain(),
+		GRPCAddress: grpcAddr,
+		HTTPAddress: httpAddr,
+	})
 	logEvent := bootstrapLog.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).
@@ -195,7 +203,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
 	}
 
-	if err := srv.Stop(ctx); err != nil {
+	if err := srv.Stop(shutdownCtx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}
 
