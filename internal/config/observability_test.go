@@ -13,6 +13,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -126,6 +129,41 @@ func TestNewLoggingObserver_ProducesOutput(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "data source fetch failed")
 	assert.Contains(t, buf.String(), `"datasource":"test-ds"`)
+}
+
+func TestNewAuditObserverAlwaysProducesJSONAtInfo(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := LoggerContext{
+		Logger: zerolog.New(&buf).Level(zerolog.ErrorLevel),
+		Writer: &buf,
+	}
+	p := NewProvider(&Config{TrustDomain: "td.example"})
+
+	obs, err := p.newAuditObserver(&ObservabilityConfig{Type: "audit"}, logCtx)
+	require.NoError(t, err)
+	ctx := request.WithID(context.Background(), "request-1")
+	_, probe := obs.AuthzCheckStarted(ctx)
+	probe.RequestCompleted(service.RequestCompletion{
+		Outcome:    service.AuditOutcomeSuccess,
+		HTTPStatus: 200,
+	})
+	probe.End()
+
+	assert.Contains(t, buf.String(), `"log_type":"parsec_request"`)
+	assert.Contains(t, buf.String(), `"event":"parsec_request"`)
+	assert.Contains(t, buf.String(), `"level":"info"`)
+}
+
+func TestAuditObserverEventPrefixValidation(t *testing.T) {
+	custom := "custom."
+	p := providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &custom})
+	_, err := p.Observer()
+	require.NoError(t, err)
+
+	invalid := "bad prefix/"
+	p = providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &invalid})
+	_, err = p.Observer()
+	require.ErrorContains(t, err, "invalid audit event prefix")
 }
 
 func TestProvider_Observer_CompositeLogging_FansOut(t *testing.T) {

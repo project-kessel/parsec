@@ -44,6 +44,9 @@ Override specific configuration values via command-line flags (highest precedenc
 # Override observability settings
 ./bin/parsec serve --observability-type=logging --observability-log-level=debug
 
+# Use 3scale-compatible audit event names instead of the default parsec_ prefix
+./bin/parsec serve --observability-type=audit --observability-event-prefix=parsec_
+
 # Override trust store type
 ./bin/parsec serve --trust-store-type=filtered_store
 ```
@@ -63,8 +66,9 @@ The conversion rule: replace dots (`.`) and underscores (`_`) with hyphens (`-`)
 - `--server-http-port` - HTTP server port (overrides `server.http_port`)
 - `--trust-domain` - Trust domain for issued tokens (overrides `trust_domain`)
 - `--trust-store-type` - Trust store type (overrides `trust_store.type`)
-- `--observability-type` - Observability type: logging, noop, composite
+- `--observability-type` - Observability type: audit, logging, noop, metrics, composite
 - `--observability-log-level` - Log level: debug, info, warn, error
+- `--observability-event-prefix` - Prefix for all audit event names (default: `parsec_`)
 
 View all available flags:
 ```bash
