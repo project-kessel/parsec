@@ -50,7 +50,7 @@ api:
 .PHONY: build
 # build
 build:
-	mkdir -p bin/ && ${GOENV} ${GO} build ${GOBUILDFLAGS} -ldflags "-X cmd.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
+	mkdir -p bin/ && ${GOENV} ${GO} build ${GOBUILDFLAGS} -ldflags "-X github.com/project-kessel/parsec/internal/buildinfo.Version=$(VERSION) -X github.com/project-kessel/parsec/internal/buildinfo.Commit=$(GIT_COMMIT)" -o ./bin/ ./cmd/parsec
 
 .PHONY: docker-build-push
 # build and push container image to a registry

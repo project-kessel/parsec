@@ -911,6 +911,22 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 	})
 }
 
+func TestExchangeUnsupportedGrantTypeAuditReason(t *testing.T) {
+	observer := &capturingExchangeObserver{}
+	server := NewExchangeServer(nil, nil, nil, CredentialSources{}, observer)
+
+	_, err := server.Exchange(context.Background(), &parsecv1.ExchangeRequest{GrantType: "client-secret-value"})
+	if err == nil {
+		t.Fatal("expected unsupported grant type error")
+	}
+	if observer.completion.ReasonCode != "grant_type_unsupported" {
+		t.Fatalf("reason code = %q, want grant_type_unsupported", observer.completion.ReasonCode)
+	}
+	if observer.completion.Outcome != service.AuditOutcomeDenied {
+		t.Fatalf("outcome = %q, want denied", observer.completion.Outcome)
+	}
+}
+
 func TestExchange_InvalidRequest(t *testing.T) {
 	ctx := context.Background()
 

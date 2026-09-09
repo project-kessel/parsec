@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync/atomic"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -54,6 +55,7 @@ type Server struct {
 	authzServer    *AuthzServer
 	exchangeServer *ExchangeServer
 	jwksServer     *JWKSServer
+	activeRequests atomic.Int64
 }
 
 // Config contains server configuration. Callers must supply pre-created
@@ -111,7 +113,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	// Create gRPC server
-	s.grpcServer = grpc.NewServer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(s.trackSecurityRequest))
 
 	// Register services
 	authv3.RegisterAuthorizationServer(s.grpcServer, s.authzServer)
@@ -143,6 +145,8 @@ func (s *Server) Start(ctx context.Context) error {
 	gwMux := runtime.NewServeMux(
 		runtime.WithMarshalerOption("application/x-www-form-urlencoded", NewFormMarshaler()),
 		runtime.WithErrorHandler(oauthHTTPErrorHandler),
+		runtime.WithIncomingHeaderMatcher(auditIncomingHeaderMatcher),
+		runtime.WithOutgoingHeaderMatcher(auditOutgoingHeaderMatcher),
 	)
 	// NOTE: insecure.NewCredentials() is used here for the internal grpc-gateway → gRPC server connection.
 	// This is intentional and safe because:
@@ -229,11 +233,13 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	select {
 	case err := <-errCh:
+		p.ShutdownCompleted(s.activeRequests.Load())
 		return err
 	case <-ctx.Done():
 		// Close HTTP and kick async gRPC Stop without waiting. errCh is
 		// buffered, so a stuck GracefulStop does not block this return.
 		s.forceStop()
+		p.ShutdownFailed(s.activeRequests.Load())
 		return ctx.Err()
 	}
 }
@@ -263,6 +269,15 @@ func (s *Server) forceStop() {
 	if s.grpcServer != nil {
 		go s.grpcServer.Stop()
 	}
+}
+
+func (s *Server) trackSecurityRequest(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	switch info.FullMethod {
+	case "/envoy.service.auth.v3.Authorization/Check", "/parsec.v1.TokenExchangeService/Exchange":
+		s.activeRequests.Add(1)
+		defer s.activeRequests.Add(-1)
+	}
+	return handler(ctx, req)
 }
 
 // grpcDialEndpoint builds a passthrough:/// endpoint suitable for grpc-gateway
