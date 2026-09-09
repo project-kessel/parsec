@@ -31,6 +31,8 @@ type CacheRefreshProbe interface {
 // Implementations should embed NoOpLifecycleObserver for forward compatibility
 // with new methods added to this interface.
 type LifecycleObserver interface {
+	// ProcessReady records that the service completed initialization and is ready.
+	ProcessReady(info ProcessInfo)
 	// GRPCServeFailed is a fire-and-forget event from an async goroutine.
 	GRPCServeFailed(err error)
 	// HTTPServeFailed is a fire-and-forget event from an async goroutine.
@@ -42,7 +44,18 @@ type LifecycleObserver interface {
 // StopProbe tracks server graceful shutdown.
 // Implementations should embed NoOpStopProbe for forward compatibility.
 type StopProbe interface {
+	ShutdownCompleted(interruptedRequests int64)
+	ShutdownFailed(interruptedRequests int64)
 	End()
+}
+
+// ProcessInfo contains only allowlisted, non-secret startup configuration.
+type ProcessInfo struct {
+	Version     string
+	Commit      string
+	TrustDomain string
+	GRPCAddress string
+	HTTPAddress string
 }
 
 // ServerObserver is the per-package aggregate for all server observer interfaces.
@@ -72,7 +85,9 @@ func (NoOpCacheRefreshProbe) End()                              {}
 // Embed this in concrete probe types for forward compatibility.
 type NoOpStopProbe struct{}
 
-func (NoOpStopProbe) End() {}
+func (NoOpStopProbe) ShutdownCompleted(int64) {}
+func (NoOpStopProbe) ShutdownFailed(int64)    {}
+func (NoOpStopProbe) End()                    {}
 
 // NoOpJWKSObserver is a no-op implementation of JWKSObserver.
 // Embed this in concrete observer types for forward compatibility.
@@ -90,8 +105,9 @@ func (NoOpJWKSObserver) CacheRefreshStarted(ctx context.Context) (context.Contex
 // Embed this in concrete observer types for forward compatibility.
 type NoOpLifecycleObserver struct{}
 
-func (NoOpLifecycleObserver) GRPCServeFailed(error) {}
-func (NoOpLifecycleObserver) HTTPServeFailed(error) {}
+func (NoOpLifecycleObserver) ProcessReady(ProcessInfo) {}
+func (NoOpLifecycleObserver) GRPCServeFailed(error)    {}
+func (NoOpLifecycleObserver) HTTPServeFailed(error)    {}
 func (NoOpLifecycleObserver) StopStarted(ctx context.Context) (context.Context, StopProbe) {
 	return ctx, NoOpStopProbe{}
 }
