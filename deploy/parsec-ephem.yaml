@@ -18,6 +18,7 @@ objects:
           log_level: info
           log_format: json
           observers:
+            - type: audit
             - type: logging
             - type: metrics
 

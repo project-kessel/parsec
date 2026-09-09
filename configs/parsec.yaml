@@ -13,6 +13,8 @@ observability:
   log_level: info
   log_format: json
   observers:
+    - type: audit
+      # Defaults to "parsec_"; set to "insights_" for 3scale-compatible names.
     - type: logging
     - type: metrics
 
