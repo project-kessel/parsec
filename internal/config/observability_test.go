@@ -154,6 +154,22 @@ func TestNewAuditObserverAlwaysProducesJSONAtInfo(t *testing.T) {
 	assert.Contains(t, buf.String(), `"level":"info"`)
 }
 
+func TestNewAuditObserverEmitsOneTimestamp(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := LoggerContext{Logger: zerolog.New(&buf), Writer: &buf}
+	p := NewProvider(&Config{TrustDomain: "td.example"})
+
+	obs, err := p.newAuditObserver(&ObservabilityConfig{Type: "audit"}, logCtx)
+	require.NoError(t, err)
+	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-time"))
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess})
+	probe.End()
+
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		require.Equal(t, 1, strings.Count(line, `"time":`))
+	}
+}
+
 func TestAuditObserverEventPrefixValidation(t *testing.T) {
 	custom := "custom."
 	p := providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &custom})
