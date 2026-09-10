@@ -150,7 +150,7 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 	// Audit records are always structured JSON at production-visible levels.
 	// Writer is the raw sink, so parent console formatting and restrictive
 	// diagnostic levels cannot suppress or reshape security events.
-	logger := zerolog.New(logCtx.Writer).With().Timestamp().Logger().Level(zerolog.InfoLevel)
+	logger := zerolog.New(logCtx.Writer).Level(zerolog.InfoLevel)
 	prefix := audit.DefaultEventPrefix
 	if cfg.EventPrefix != nil {
 		prefix = *cfg.EventPrefix

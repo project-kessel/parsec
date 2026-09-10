@@ -168,6 +168,7 @@ func TestAuditEmitsKeyLifecycleEvents(t *testing.T) {
 		require.Equal(t, "parsec_key_rotation", record["log_type"])
 		require.Equal(t, record["log_type"], record["event"])
 	}
+	require.Equal(t, "key_alias_create", records[2]["action"])
 	require.NotContains(t, output.String(), "secret-key-name")
 	require.NotContains(t, output.String(), "secret-namespace")
 }
