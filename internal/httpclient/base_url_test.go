@@ -8,15 +8,18 @@ func TestParseBaseURL(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		raw     string
-		wantErr bool
+		name         string
+		raw          string
+		requireHTTPS bool
+		wantErr      bool
 	}{
 		{name: "empty", raw: ""},
 		{name: "origin", raw: "https://entitlements.example.com"},
 		{name: "origin trailing slash", raw: "https://entitlements.example.com/"},
 		{name: "missing scheme", raw: "entitlements.example.com", wantErr: true},
 		{name: "http origin", raw: "http://entitlements.example.com"},
+		{name: "http origin requires https", raw: "http://entitlements.example.com", requireHTTPS: true, wantErr: true},
+		{name: "https origin requires https", raw: "https://entitlements.example.com", requireHTTPS: true},
 		{name: "ftp scheme", raw: "ftp://entitlements.example.com", wantErr: true},
 		{name: "file scheme", raw: "file:///etc/passwd", wantErr: true},
 		{name: "user info", raw: "https://user:password@entitlements.example.com", wantErr: true},
@@ -30,7 +33,7 @@ func TestParseBaseURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := ParseBaseURL(tt.raw)
+			_, err := ParseBaseURL(tt.raw, tt.requireHTTPS)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected error, got nil")
 			}

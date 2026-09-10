@@ -81,7 +81,8 @@ func resolveClientSpec(cfg HTTPClientSpec) (httpclient.ClientSpec, error) {
 	var spec httpclient.ClientSpec
 
 	if cfg.BaseURL != "" {
-		if _, err := httpclient.ParseBaseURL(cfg.BaseURL); err != nil {
+		requireHTTPS := cfg.HTTPAuth != nil
+		if _, err := httpclient.ParseBaseURL(cfg.BaseURL, requireHTTPS); err != nil {
 			return spec, err
 		}
 		spec.BaseURL = cfg.BaseURL

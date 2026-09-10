@@ -160,6 +160,73 @@ func TestNewHTTPClientRegistry_BaseURLUserInfoRejected(t *testing.T) {
 	}
 }
 
+func TestNewHTTPClientRegistry_AuthenticatedBaseURLHTTPRejected(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{
+			Name: "bad",
+			HTTPClientSpec: HTTPClientSpec{
+				BaseURL: "http://host.example",
+				HTTPAuth: &HTTPAuthConfig{
+					Type:  "bearer",
+					Token: "secret",
+				},
+			},
+		},
+	}
+
+	_, err := NewHTTPClientRegistry(cfgs, nil)
+	if err == nil {
+		t.Fatal("expected error for http base_url with http_auth")
+	}
+}
+
+func TestNewHTTPClientRegistry_AuthenticatedBaseURLHTTPSAllowed(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{
+			Name: "ok",
+			HTTPClientSpec: HTTPClientSpec{
+				BaseURL: "https://host.example",
+				HTTPAuth: &HTTPAuthConfig{
+					Type:  "bearer",
+					Token: "secret",
+				},
+			},
+		},
+	}
+
+	registry, err := NewHTTPClientRegistry(cfgs, nil)
+	if err != nil {
+		t.Fatalf("NewHTTPClientRegistry() error: %v", err)
+	}
+
+	got, err := registry.BaseURL("ok")
+	if err != nil {
+		t.Fatalf("BaseURL: %v", err)
+	}
+	if got != "https://host.example" {
+		t.Errorf("BaseURL = %q, want %q", got, "https://host.example")
+	}
+}
+
+func TestNewHTTPClientRegistry_UnauthenticatedBaseURLHTTPAllowed(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{Name: "plain", HTTPClientSpec: HTTPClientSpec{BaseURL: "http://host.example"}},
+	}
+
+	registry, err := NewHTTPClientRegistry(cfgs, nil)
+	if err != nil {
+		t.Fatalf("NewHTTPClientRegistry() error: %v", err)
+	}
+
+	got, err := registry.BaseURL("plain")
+	if err != nil {
+		t.Fatalf("BaseURL: %v", err)
+	}
+	if got != "http://host.example" {
+		t.Errorf("BaseURL = %q, want %q", got, "http://host.example")
+	}
+}
+
 func TestNewHTTPClientRegistry_StoresBaseURL(t *testing.T) {
 	cfgs := []HTTPClientConfig{
 		{Name: "entitlements", HTTPClientSpec: HTTPClientSpec{

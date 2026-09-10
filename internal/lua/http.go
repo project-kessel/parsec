@@ -61,7 +61,7 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		opt(&cfg)
 	}
 
-	if _, err := httpclient.ParseBaseURL(cfg.baseURL); err != nil {
+	if _, err := httpclient.ParseBaseURL(cfg.baseURL, false); err != nil {
 		return nil, err
 	}
 
@@ -89,7 +89,7 @@ func (s *HTTPService) resolveRequestURL(raw string) (string, error) {
 	if s.baseURL == "" {
 		return "", fmt.Errorf("relative url %q requires a configured base_url", raw)
 	}
-	base, err := httpclient.ParseBaseURL(s.baseURL)
+	base, err := httpclient.ParseBaseURL(s.baseURL, false)
 	if err != nil {
 		return "", err
 	}

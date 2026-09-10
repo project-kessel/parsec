@@ -11,7 +11,10 @@ import (
 // with no path, or scheme + host + "/" only. Any other path, query, or
 // fragment is rejected so relative Lua URLs join predictably as {base}/path.
 // Scheme must be http or https; user info (user:password@) is not allowed.
-func ParseBaseURL(raw string) (*url.URL, error) {
+// When requireHTTPS is true, http:// origins are rejected so credential-bearing
+// transports (BearerTransport, HeadersTransport) never resolve relative URLs to
+// plaintext HTTP.
+func ParseBaseURL(raw string, requireHTTPS bool) (*url.URL, error) {
 	if raw == "" {
 		return nil, nil
 	}
@@ -24,7 +27,11 @@ func ParseBaseURL(raw string) (*url.URL, error) {
 		return nil, fmt.Errorf("invalid base_url %q: must include scheme and host", raw)
 	}
 	switch strings.ToLower(parsed.Scheme) {
-	case "http", "https":
+	case "http":
+		if requireHTTPS {
+			return nil, fmt.Errorf("invalid base_url %q: must use https when http_auth is configured", raw)
+		}
+	case "https":
 	default:
 		return nil, fmt.Errorf("invalid base_url %q: scheme must be http or https", raw)
 	}
