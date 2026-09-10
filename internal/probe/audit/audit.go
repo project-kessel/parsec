@@ -538,7 +538,11 @@ func (p *auditKMSProbe) emit(action string, outcome service.AuditOutcome) {
 func (p *auditKMSProbe) KeyCreated()           { p.emit("key_create", service.AuditOutcomeSuccess) }
 func (p *auditKMSProbe) CreateKeyFailed(error) { p.emit("key_create", service.AuditOutcomeFailure) }
 func (p *auditKMSProbe) AliasChanged(created bool) {
-	p.emit("key_alias_change", service.AuditOutcomeSuccess)
+	action := "key_alias_update"
+	if created {
+		action = "key_alias_create"
+	}
+	p.emit(action, service.AuditOutcomeSuccess)
 }
 func (p *auditKMSProbe) AliasCheckFailed(error) {
 	p.emit("key_alias_change", service.AuditOutcomeFailure)
