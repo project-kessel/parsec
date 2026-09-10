@@ -84,6 +84,7 @@ func TestPropagateAuthzRequestID(t *testing.T) {
 	response := (&AuthzServer{}).okResponse(nil, nil)
 	propagateAuthzRequestID(response, "request-123")
 	require.Equal(t, requestIDHeader, response.GetOkResponse().GetHeaders()[0].GetHeader().GetKey())
+	require.Equal(t, corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD, response.GetOkResponse().GetHeaders()[0].GetAppendAction())
 	require.Equal(t, "request-123", response.GetOkResponse().GetHeaders()[0].GetHeader().GetValue())
 }
 
