@@ -149,9 +149,17 @@ func TestNewAuditObserverAlwaysProducesJSONAtInfo(t *testing.T) {
 	})
 	probe.End()
 
-	assert.Contains(t, buf.String(), `"log_type":"parsec_request"`)
-	assert.Contains(t, buf.String(), `"event":"parsec_request"`)
-	assert.Contains(t, buf.String(), `"level":"info"`)
+	var record map[string]any
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.NotEmpty(t, lines)
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
+	assert.Equal(t, "parsec_request", record["log_type"])
+	assert.Equal(t, "parsec_request", record["event"])
+	assert.Equal(t, "info", record["level"])
+	assert.Equal(t, "success", record["outcome"])
+	response, ok := record["response"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(200), response["http_status"])
 }
 
 func TestNewAuditObserverEmitsOneTimestamp(t *testing.T) {
