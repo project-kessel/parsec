@@ -156,9 +156,7 @@ isServiceAccountToken(subject.claims) ? {
       "identity": {
         "auth_type": "jwt-auth",
         "account_number": datasource("cross_account").target_account_number,
-        "org_id": datasource("cross_account").target_org_id != "" ? datasource("cross_account").target_org_id :
-                  (has(subject.claims.organization) && has(subject.claims.organization.id) ?
-                   subject.claims.organization.id : ""),
+        "org_id": datasource("cross_account").target_org_id,
         "employee_account_number": datasource("cross_account").employee_account_number,
         "employee_org_id": datasource("cross_account").employee_org_id,
         "type": "User",
@@ -177,9 +175,7 @@ isServiceAccountToken(subject.claims) ? {
           "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : ""
         },
         "internal": {
-          "org_id": datasource("cross_account").target_org_id != "" ? datasource("cross_account").target_org_id :
-                    (has(subject.claims.organization) && has(subject.claims.organization.id) ?
-                     subject.claims.organization.id : ""),
+          "org_id": datasource("cross_account").target_org_id,
           "cross_access": true,
           "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
         }
@@ -234,11 +230,7 @@ isServiceAccountToken(subject.claims) ? {
         "identity": {
           "auth_type": "jwt-auth",
           "account_number": datasource("cross_account").target_account_number,
-          "org_id": datasource("cross_account").target_org_id != "" ? datasource("cross_account").target_org_id :
-                    (has(subject.claims.organization) && has(subject.claims.organization.id) ?
-                     subject.claims.organization.id :
-                     (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) :
-                      (has(subject.claims.account_id) ? safeToString(subject.claims.account_id) : ""))),
+          "org_id": datasource("cross_account").target_org_id,
           "employee_account_number": datasource("cross_account").employee_account_number,
           "employee_org_id": datasource("cross_account").employee_org_id,
           "type": "User",
@@ -262,11 +254,7 @@ isServiceAccountToken(subject.claims) ? {
                        (has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : "")
           },
           "internal": {
-            "org_id": datasource("cross_account").target_org_id != "" ? datasource("cross_account").target_org_id :
-                      (has(subject.claims.organization) && has(subject.claims.organization.id) ?
-                       subject.claims.organization.id :
-                       (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) :
-                        (has(subject.claims.account_id) ? safeToString(subject.claims.account_id) : ""))),
+            "org_id": datasource("cross_account").target_org_id,
             "cross_access": true,
             "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
           }
@@ -329,10 +317,7 @@ isServiceAccountToken(subject.claims) ? {
           "identity": {
             "auth_type": "jwt-auth",
             "account_number": datasource("cross_account").target_account_number,
-            "org_id": datasource("cross_account").target_org_id != "" ? datasource("cross_account").target_org_id :
-                      (has(subject.claims.organization) && has(subject.claims.organization.id) ?
-                       subject.claims.organization.id :
-                       (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "")),
+            "org_id": datasource("cross_account").target_org_id,
             "employee_account_number": datasource("cross_account").employee_account_number,
             "employee_org_id": datasource("cross_account").employee_org_id,
             "type": "User",
@@ -356,10 +341,7 @@ isServiceAccountToken(subject.claims) ? {
                          (has(subject.claims.sub) ? safeToString(subject.claims.sub) : "")
             },
             "internal": {
-              "org_id": datasource("cross_account").target_org_id != "" ? datasource("cross_account").target_org_id :
-                        (has(subject.claims.organization) && has(subject.claims.organization.id) ?
-                         subject.claims.organization.id :
-                         (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) : "")),
+              "org_id": datasource("cross_account").target_org_id,
               "cross_access": true,
               "auth_time": has(subject.claims.iat) ? int(subject.claims.iat) * 1000 : now_ms()
             }
