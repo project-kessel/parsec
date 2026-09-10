@@ -25,6 +25,13 @@
 --   { "active": true, "target_account_number", "target_org_id",
 --     "employee_account_number", "employee_org_id" } — approved (AC1)
 --
+-- On success, target_account_number and target_org_id come from the matched RBAC
+-- record (target_account / target_org), not directly from cookies. Requests are
+-- denied when either cookie is missing or does not match that record (3scale parity).
+--
+-- Optional top-level audit table on the Lua return (not in JSON data) carries AC8
+-- audit fields for generic FetchAudit probe handling in Go.
+--
 -- fetch() returns nil only when JSON encoding fails (unexpected).
 
 local COOKIE_ACCOUNT = "cross_access_account_number"
@@ -203,14 +210,35 @@ local function email_allowed(email)
   return string.sub(email, -#suffix) == suffix
 end
 
-local function encode_result(payload)
+local function encode_result(payload, audit)
   local encoded, err = json.encode(payload)
   if encoded == nil then return nil end
-  return { data = encoded, content_type = "application/json" }
+  local out = { data = encoded, content_type = "application/json" }
+  if audit ~= nil then
+    out.audit = audit
+  end
+  return out
 end
 
 local function inactive()
   return encode_result({ active = false })
+end
+
+local function record_field(record, key)
+  if record == nil then return "" end
+  local v = record[key]
+  if v == nil then return "" end
+  return tostring(v)
+end
+
+local function cross_account_audit(outcome, claims, target_account, target_org)
+  return {
+    event = "cross_account_" .. outcome,
+    outcome = outcome,
+    employee_user_id = resolve_user_id(claims),
+    target_account_number = target_account,
+    target_org_id = target_org,
+  }
 end
 
 local function resolve_rbac_url(user_id, target_value, query_by)
@@ -230,7 +258,7 @@ local function resolve_rbac_url(user_id, target_value, query_by)
   return path .. query
 end
 
-local function rbac_has_approved_request(claims, target_value, query_by)
+local function rbac_find_approved_record(claims, target_value, query_by)
   local api_url = resolve_rbac_url(resolve_user_id(claims), target_value, query_by)
   local identity_b64 = encode_identity_header(claims)
   if identity_b64 == "" then
@@ -251,7 +279,7 @@ local function rbac_has_approved_request(claims, target_value, query_by)
   end
 
   if response.status == 403 or response.status == 404 then
-    return false, "rbac_denied"
+    return nil, "rbac_denied"
   end
 
   if response.status ~= 200 then
@@ -269,17 +297,37 @@ local function rbac_has_approved_request(claims, target_value, query_by)
 
   local data = decoded.data
   if data == nil then
-    return false, "rbac_denied"
+    return nil, "rbac_denied"
   end
   if type(data) ~= "table" then
     return nil, "infra"
   end
 
-  if #data > 0 then
-    return true, nil
+  if #data == 0 then
+    return nil, "rbac_denied"
   end
 
-  return false, "rbac_denied"
+  local record = data[1]
+  if type(record) ~= "table" then
+    return nil, "infra"
+  end
+
+  local target_account = record_field(record, "target_account")
+  local target_org = record_field(record, "target_org")
+  if target_account == "" or target_org == "" then
+    return nil, "rbac_denied"
+  end
+
+  return {
+    target_account_number = target_account,
+    target_org_id = target_org,
+  }, nil
+end
+
+local function cookies_match_record(target_account, target_org, record)
+  if record == nil then return false end
+  return target_account == record.target_account_number
+    and target_org == record.target_org_id
 end
 
 function fetch(input)
@@ -294,17 +342,25 @@ function fetch(input)
   end
 
   if not resolve_is_internal(claims) then
-    return encode_result({ error = "forbidden" })
+    return encode_result({ error = "forbidden" },
+      cross_account_audit("forbidden", claims, target_account, target_org))
   end
 
   local email = resolve_email(claims)
   if not email_allowed(email) then
-    return encode_result({ error = "forbidden" })
+    return encode_result({ error = "forbidden" },
+      cross_account_audit("forbidden", claims, target_account, target_org))
   end
 
   local user_id = resolve_user_id(claims)
   if user_id == "" then
-    return encode_result({ error = "infra" })
+    return encode_result({ error = "infra" },
+      cross_account_audit("infra", claims, target_account, target_org))
+  end
+
+  if target_account == "" or target_org == "" then
+    return encode_result({ error = "rbac_denied" },
+      cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
 
   local query_by = config.get("cross_access_query_by", "account")
@@ -315,27 +371,29 @@ function fetch(input)
     target_value = target_org
   end
 
-  if target_value == "" then
-    return encode_result({ error = "rbac_denied" })
-  end
-
-  local approved, err_kind = rbac_has_approved_request(claims, target_value, query_by)
+  local record, err_kind = rbac_find_approved_record(claims, target_value, query_by)
   if err_kind == "infra" then
-    return encode_result({ error = "infra" })
+    return encode_result({ error = "infra" },
+      cross_account_audit("infra", claims, target_account, target_org))
   end
-  if not approved then
-    return encode_result({ error = "rbac_denied" })
+  if record == nil then
+    return encode_result({ error = "rbac_denied" },
+      cross_account_audit("rbac_denied", claims, target_account, target_org))
+  end
+  if not cookies_match_record(target_account, target_org, record) then
+    return encode_result({ error = "rbac_denied" },
+      cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
 
   local employee_account, employee_org = resolve_employee_account_org(claims)
 
   return encode_result({
     active = true,
-    target_account_number = target_account,
-    target_org_id = target_org,
+    target_account_number = record.target_account_number,
+    target_org_id = record.target_org_id,
     employee_account_number = employee_account,
     employee_org_id = employee_org
-  })
+  }, cross_account_audit("approved", claims, record.target_account_number, record.target_org_id))
 end
 
 function fetch_cache_key(input)
