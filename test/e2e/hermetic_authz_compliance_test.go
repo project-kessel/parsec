@@ -12,6 +12,7 @@ import (
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/issuer"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
@@ -21,7 +22,8 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-const testComplianceAPIURL = "https://export-compliance.example.internal/v1/compliance"
+const testComplianceBaseURL = "https://export-compliance.example.internal"
+const testComplianceAPIURL = testComplianceBaseURL + "/v1/compliance"
 
 // TestHermeticAuthzCompliance covers RHCLOUD-49359: export compliance check
 // via Lua data source + redhat_identity.cel.
@@ -73,9 +75,9 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 			Name:   "export_compliance",
 			Script: string(luaScript),
 			ConfigSource: luaservices.NewMapConfigSource(map[string]any{
-				"compliance_api": testComplianceAPIURL,
+				"compliance_api": "/v1/compliance",
 			}),
-			HTTPClient: client,
+			HTTP: httpclient.LuaClient{Client: client, BaseURL: testComplianceBaseURL},
 		})
 		if err != nil {
 			t.Fatalf("compliance DS: %v", err)

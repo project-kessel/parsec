@@ -120,6 +120,7 @@ cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
 | `Name` | `string` | Yes | Unique name for this data source |
 | `Script` | `string` | Yes | Lua script with `fetch` function |
 | `ConfigSource` | `lua.ConfigSource` | No | Configuration source for the script |
+| `HTTP` | `httpclient.LuaClient` | No | HTTP client and optional base URL for relative Lua URLs |
 | `HTTPTimeout` | `time.Duration` | No | HTTP request timeout (default: 30s) |
 | `HTTPRequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests |
 
@@ -130,6 +131,7 @@ cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
 | `Name` | `string` | Yes | Unique name for this data source |
 | `Script` | `string` | Yes | Lua script with `fetch` and cache key functions |
 | `ConfigSource` | `lua.ConfigSource` | No | Configuration source for the script |
+| `HTTP` | `httpclient.LuaClient` | No | HTTP client and optional base URL for relative Lua URLs |
 | `HTTPTimeout` | `time.Duration` | No | HTTP request timeout (default: 30s) |
 | `HTTPRequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests |
 
@@ -423,8 +425,11 @@ end
 ## Shipped scripts
 
 [`configs/scripts/export_compliance.lua`](../../configs/scripts/export_compliance.lua)
-builds a minimal `x-rh-identity` and GETs a configured compliance URL. Wire it
-from CEL with `datasource("export_compliance")`, gated on
+builds a minimal `x-rh-identity` and GETs the compliance endpoint. Set
+`compliance_api` to a path (e.g. `/v1/compliance`) when the named HTTP client
+has `base_url`, or to a full URL (contains `://`) for env overlay via
+`PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API`.
+Wire it from CEL with `datasource("export_compliance")`, gated on
 `request.additional.context_extensions.export_compliance` (opt-out: skip only
 when the value is `"false"`; absent key means on). `datasource()` is null when
 the source is not registered, so missing config is fail-safe.

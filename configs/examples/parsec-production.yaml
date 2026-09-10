@@ -42,6 +42,11 @@ trust_store:
       actor.trust_domain == "prod.example.com" && 
       actor.claims.verified == true
 
+http_clients:
+  - name: entitlements
+    timeout: "5s"
+    base_url: "https://entitlements.internal.example.com"
+
 # Data sources with distributed caching
 data_sources:
   # User entitlements from central authorization service
@@ -59,19 +64,19 @@ data_sources:
       group_name: "entitlements-cache"
       cache_size: 268435456  # 256 MB
 
-  # Export compliance check (RHCLOUD-49359).
+  # Export compliance check (RHCLOUD-49359 / RHCLOUD-50834).
   # Opt-out via Envoy context_extensions.export_compliance=false.
   # Default (absent/"true"): check on, consistent with auth_sso_jwt.
-  # Fail-open: any error allows through. URL from namespace var
-  # (RHCLOUD-50414): PARSEC_COMPLIANCE_API.
+  # Fail-open: any error allows through. compliance_api is a path when
+  # http_clients.entitlements.base_url is set (overlay via
+  # PARSEC_HTTP_CLIENTS__0__BASE_URL) or a full URL via
+  # PARSEC_DATA_SOURCES__1__CONFIG__COMPLIANCE_API.
   - name: export_compliance
     type: lua
     script_file: /etc/parsec/scripts/export_compliance.lua
+    http_client: entitlements
     config:
-      compliance_api:
-        env: "PARSEC_COMPLIANCE_API"
-    http:
-      timeout: 5s
+      compliance_api: "/v1/compliance"
     caching:
       type: distributed
       ttl: 24h

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
@@ -48,13 +49,13 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPClient: &http.Client{
+		HTTP: httpclient.LuaClient{Client: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
 			}),
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("failed to create data source: %v", err)
@@ -135,13 +136,13 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPClient: &http.Client{
+		HTTP: httpclient.LuaClient{Client: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
 			}),
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("failed to create data source: %v", err)
@@ -226,13 +227,13 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPClient: &http.Client{
+		HTTP: httpclient.LuaClient{Client: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
 			}),
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("failed to create data source: %v", err)
@@ -319,13 +320,13 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPClient: &http.Client{
+		HTTP: httpclient.LuaClient{Client: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
 			}),
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("failed to create data source: %v", err)
@@ -368,9 +369,9 @@ end
 	ds, err := NewLuaDataSource(LuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPClient: &http.Client{
+		HTTP: httpclient.LuaClient{Client: &http.Client{
 			Timeout: 5 * time.Second,
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("failed to create data source: %v", err)
@@ -437,13 +438,13 @@ end
 	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
 		Name:   "test",
 		Script: script,
-		HTTPClient: &http.Client{
+		HTTP: httpclient.LuaClient{Client: &http.Client{
 			Timeout: 5 * time.Second,
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: provider,
 				Strict:   true,
 			}),
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("failed to create data source: %v", err)
