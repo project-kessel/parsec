@@ -2,11 +2,48 @@
 
 **JIRA**: https://redhat.atlassian.net/browse/RHCLOUD-47320
 **PR**: https://github.com/project-kessel/parsec/pull/206
-**Status**: Ready for review (parsec repo complete; app-interface follow-up required)
+**Status**: Review feedback addressed locally — ready for re-review on [#206](https://github.com/project-kessel/parsec/pull/206) (not pushed). App-interface follow-up still required after merge.
+
+## PR Review Feedback (2026-09-10)
+
+Latest review on [#206](https://github.com/project-kessel/parsec/pull/206) from
+**@coderbydesign** (2026-09-10) and **CodeRabbit** (2026-09-09). Treat security
+items as **blocking** until fixed and covered by tests.
+
+### Blocking — security / 3scale parity
+
+| # | Source | File | Issue | Required fix |
+|---|--------|------|-------|--------------|
+| S1 | CodeRabbit 🔴 | `cross_account.lua` L335–341, `redhat_identity.cel` L159–161 | **Authorization bypass (IDOR)** | ✅ Fixed in `d549f48` + `e494d6a` |
+| S2 | @coderbydesign | `cross_account.lua` L281–283 | **Defense-in-depth gap vs 3scale L548** | ✅ Fixed in `d549f48` + `addb672` |
+
+### Must-do — AC8 audit logging
+
+| # | Source | Issue | Required fix |
+|---|--------|-------|--------------|
+| A1 | @coderbydesign (review summary) | No audit logging for **denied**, **RBAC-denied**, or **granted** cross-account attempts, unlike 3scale. | ✅ `FetchAudit` probe + `cross_account.lua` audit table (`c130661`) |
+
+### Should-do — review questions (respond or fix)
+
+| # | Source | File | Question / concern | Plan action |
+|---|--------|------|-------------------|-------------|
+| Q1 | @coderbydesign | `redhat_identity.cel` L158 | Asymmetry resolved — both fields now come from validated RBAC-bound DS output only. | ✅ Done |
+| Q2 | @coderbydesign | `redhat_identity.cel` L148 | `datasource()` is **memoized per CEL evaluation** (`internal/cel/mapper_input.go` `lib.cache`; see `internal/cel/README.md`). Repeated `datasource("cross_account")` in one mapper eval invokes RBAC once; DS-level cache (AC9) applies on subsequent requests. | ✅ Documented — no code change |
+| Q3 | @coderbydesign | `cross_account.lua` `fetch_cache_key` | 3scale does not cache RBAC; parsec caches per AC9 (5m dev / distributed prod). **Intentional** behavior change — document fail-open window on revocation in PR reply; tune TTL with platform if needed. | Open for PR reply / app-interface |
+| Q4 | CodeRabbit | `cross_account.lua` L230–233 | Redundant `://` branch | ✅ Fixed in `5ce35f3` |
+
+### Non-blocking — automated review
+
+| Source | Item | Notes |
+|--------|------|-------|
+| CodeRabbit | Merge risk 🟠 High | Same root cause as S1/S2 — fix before merge. |
+| Codecov | Patch coverage 14% on `fixtures.go`, `provider.go`, `jwks_fixture.go` | Fixture helpers for local/e2e JWT signing; add tests if touching those files again. |
+| CodeRabbit | Docstring coverage 8% on touched Go functions | Low priority unless CI gates on it. |
 
 ## Remaining Work (before merge)
 
-Single PR on `parsec-CAR`. Core feature is implemented and hermetically tested.
+Single PR on `parsec-CAR`. Core flow is implemented and hermetically tested, but
+**PR review items above must be resolved** before merge.
 Production rollout still requires **app-interface** secret updates (separate repo).
 
 ### Must-do (blocking merge in parsec repo)
@@ -26,7 +63,11 @@ Production rollout still requires **app-interface** secret updates (separate rep
 - [x] E2E: service-account path does not invoke cross-account
 - [x] E2E: compliance runs on original identity before cross-account swap
 - [ ] Confirm `employee_account_number` / `employee_org_id` placement vs 3scale `x-rh-identity` shape (currently at identity root in CEL; matches JIRA wording)
-- [ ] AC8 audit: verify Lua DS observer logs distinguish success / forbidden / rbac_denied / infra (relies on existing `LuaObserver`; no new probe fields added)
+- [x] **AC8 audit** (blocking per @coderbydesign): `FetchAudit` probe + cross_account audit table on forbidden / rbac_denied / approved / infra
+- [x] **S1/S2**: bind target identity to RBAC record; deny cookie/RBAC mismatch; regression tests added
+- [x] **Q2**: CEL `datasource("cross_account")` memoized per evaluation (`mapper_input.go` cache)
+- [ ] **Q3**: confirm RBAC cache TTL vs 3scale no-cache behavior; document fail-open window on revocation (PR reply)
+- [x] **Q4**: remove redundant `resolve_rbac_url` branch
 
 ### Deploy follow-up (separate repo — required before prod enforcement)
 
@@ -85,7 +126,7 @@ compliance) — compliance must run on the **original** employee identity
 - [ ] AC6: Configurable bypass for `is_internal` flag check (email
   `@redhat.com` still required)
 - [ ] AC7: Configurable toggle between account-number and org-id RBAC queries
-- [ ] AC8: Audit logging for all cross-account attempts (success and failure)
+- [ ] AC8: Audit logging for all cross-account attempts (success and failure) — **implemented** via `FetchAudit` + Lua audit table; verify in stage logs after deploy
 - [ ] AC9: Cache RBAC results keyed on employee identity + target cookie values
 
 **JWT-auth User paths only** (console / rhsm / portal jwt-auth branches).
@@ -275,6 +316,9 @@ Work starts from `origin/main`. **Do not** build on commit `5ec349d`.
 - Call RBAC `GET {rbac_path}` with `query_by=user_id`, employee user id,
   `approved_only=true`, and `account=` or `org_id=` per
   `cross_access_query_by` config
+- **PR review fix (S1/S2)**: parse first approved RBAC record from `data[]` and
+  bind `target_account_number` / `target_org_id` from that record; deny when
+  cookies disagree with the record (3scale auth.lua L548 parity)
 - Return structured result table (see Approach); `nil` on infrastructure failure
 - `fetch_cache_key`: employee `sub`/`user_id` + target cookie values (AC9)
 
@@ -422,6 +466,8 @@ Per `docs/testing.md`: hermetic, no I/O, prefer fakes/fixtures over mocks.
 | `TestCrossAccountLua_NonInternal` | `internal/datasource` | AC2 — forbidden |
 | `TestCrossAccountLua_RBACDenied` | `internal/datasource` | AC3 — rbac_denied |
 | `TestCrossAccountLua_RBACApproved` | `internal/datasource` | AC1 — target + employee fields |
+| `TestCrossAccountLua_RBACRecordMismatch` | `internal/datasource` | S1/S2 — approved RBAC record but cookie org/account mismatch → deny |
+| `TestCrossAccountLua_AccountCookieOnlyEmptyOrg` | `internal/datasource` | S1 — account cookie only, empty org cookie → deny (no employee org fallback) |
 | `TestCrossAccountLua_RBACUnavailable` | `internal/datasource` | AC5 — nil fetch |
 | `TestCrossAccountLua_CacheKey` | `internal/datasource` | AC9 — employee + cookies |
 | `TestCrossAccountLua_BypassIsInternal` | `internal/datasource` | AC6 — email-only path |
@@ -454,19 +500,27 @@ DataSourceObserver (existing)
 
 ### Audit attributes (AC8)
 
-Ensure cross-account outcomes are distinguishable in logs/metrics via existing
-probe fields:
+> **PR review (2026-09-10)**: @coderbydesign — audit logging for denied /
+> RBAC-denied / granted is **not** present today; 3scale logs these explicitly.
+> Generic `LuaFetchProbe` "fetch completed" is insufficient for AC8.
+
+Target audit fields (align with 3scale):
 
 | Outcome | Log level | Attributes |
 |---------|-----------|------------|
 | Success (`active:true`) | Info | `data_source=cross_account`, `result=approved`, employee id, target account/org |
-| Forbidden | Info | `result=forbidden` |
-| RBAC denied | Info | `result=rbac_denied` |
+| Forbidden | Info | `result=forbidden`, employee id, cookie values present |
+| RBAC denied | Info | `result=rbac_denied`, employee id, target query value |
 | Infrastructure failure | Error | `result=infra_error`, wrapped HTTP status |
 
-Implement via Lua script comments + probe messages already emitted by
-`LuaDataSource.Fetch` — extend probe only if current logs lack target cookie
-values (prefer structured log in logging observer config, not new Go types).
+**Implementation options** (pick one in follow-up commit):
+
+1. Extend `LuaObserver` / fetch probe with outcome + target fields from Lua
+   return path (preferred if no new Go types).
+2. Structured log calls from Lua if supported by runtime.
+3. Dedicated cross-account audit hook in logging observer config.
+
+Also log **deny-on-mismatch** when RBAC record does not match cookies (S1/S2 fix).
 
 ### Injection
 
@@ -480,6 +534,8 @@ Existing `LuaDataSourceConfig.Observer` — wire through registry construction
 - [x] Credential handling: cross-account cookies are **not** credential sources — do not add to `CredentialContext` identity fields
 - [x] JWT-auth only: CEL branch gating excludes cert-auth, service accounts, registry-auth
 - [x] Fail-closed on RBAC infra failure (500), fail-safe on missing DS (no check)
+- [x] **Review gap (S1/S2)**: bind approved target to RBAC record; reject cookie/RBAC mismatch and empty cookies
+- [ ] **Review gap (Q3)**: RBAC result caching (AC9) may fail-open on revocation during TTL — confirm vs 3scale no-cache in PR reply
 
 ## Maintainability
 
@@ -564,7 +620,7 @@ See Step 4 YAML snippet above.
 - [x] Every AC maps to implementation steps / tests
 - [x] Naming follows parsec conventions
 - [x] No new Go interfaces — NoOp N/A
-- [x] Observability via existing LuaObserver (AC8 called out)
+- [x] Observability via FetchAudit probe for AC8 audit fields (Lua audit table)
 - [x] Test cases listed per AC
 - [x] Security section addressed
 - [x] Documentation steps included
@@ -580,10 +636,13 @@ See Step 4 YAML snippet above.
 | 1 | Exact RBAC base URL, path, and auth headers for stage/prod | **Open** | Full `rbac_path` in CAR configs until #201; then `base_url` + relative path |
 | 2 | Org-id query param name (`org_id` vs `target_org`) | **Open** | Read insights-rbac OpenAPI or 3scale Lua |
 | 3 | Placement of `employee_account_number` / `employee_org_id` in identity JSON | **Open** | Confirm 3scale `x-rh-identity` shape |
-| 4 | Cache TTL (JIRA requires caching; no duration specified) | **Open** | Propose 5m in-memory dev / distributed prod; align with RBAC SLA |
-| 5 | Unsigned-json BOP User path — cross-account allowed? | **Resolved** | **No** — JWT browser flow only per JIRA |
-| 6 | CEL verbosity (3 duplicated guard blocks) | **Open** | Accept duplication (compliance precedent) or extract shared CEL file later |
-| 7 | Commit `5ec349d` on `rhcloud-47320-clean` | **Resolved** | Revert in Step 1 |
+| 4 | Cache TTL (JIRA requires caching; no duration specified) | **Open — PR Q3** | 3scale does not cache RBAC; parsec uses 5m. Confirm TTL with platform; document revocation fail-open window |
+| 6 | CEL `datasource()` memoization per evaluation | **Resolved — PR Q2** | `mapper_input.go` caches per eval; one RBAC fetch per authz request |
+| 7 | AC8 explicit audit logs vs generic Lua fetch probe | **Resolved — PR A1** | `FetchAudit` + cross_account audit fields |
+| 8 | RBAC record must match cookie target (3scale L548 parity) | **Resolved — PR S2** | `rbac_find_approved_record` + cookie match tests |
+| 9 | Unsigned-json BOP User path — cross-account allowed? | **Resolved** | **No** — JWT browser flow only per JIRA |
+| 10 | CEL verbosity (3 duplicated guard blocks) | **Open** | Accept duplication (compliance precedent) or extract shared CEL file later |
+| 11 | Commit `5ec349d` on `rhcloud-47320-clean` | **Resolved** | Revert in Step 1 |
 
 ## Review Log
 
@@ -591,3 +650,6 @@ See Step 4 YAML snippet above.
 |------|----------|----------|--------------|
 | 2026-09-07 | — | Plan created from JIRA + prior commit review | Initial draft |
 | 2026-09-08 | Adam | Dropped duplicate base_url impl; full rbac_path URLs until #201 | CAR defers RHCLOUD-50834 to follow-on PR |
+| 2026-09-09 | CodeRabbit ([#206](https://github.com/project-kessel/parsec/pull/206)) | 🔴 Critical: bind target identity to RBAC record; deny cookie mismatch; require `target_org_id`; remove CEL org fallback. 🟠 Major: reject account-only cookie path. Nit: redundant `://` in `resolve_rbac_url`. | Plan updated — fixes pending |
+| 2026-09-10 | @coderbydesign ([#206](https://github.com/project-kessel/parsec/pull/206)) | No audit logging (AC8) vs 3scale. RBAC `#data > 0` weaker than 3scale L548 — add test. Questions: account_number vs org_id conditional asymmetry; CEL DS memoization; RBAC cache TTL vs 3scale no-cache. Overall on right track. | Plan updated — PR Review Feedback section added |
+| 2026-09-10 | Implementation | Addressed S1/S2, A1, Q4 locally (6 commits on `parsec-CAR`, not pushed) | `5ce35f3`..`c130661` |
