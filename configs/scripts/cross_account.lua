@@ -227,9 +227,6 @@ local function resolve_rbac_url(user_id, target_value, query_by)
     .. "&" .. param_name .. "=" .. url.encode(target_value)
     .. "&approved_only=" .. url.encode(tostring(approved_only))
 
-  if string.find(path, "://", 1, true) then
-    return path .. query
-  end
   return path .. query
 end
 
