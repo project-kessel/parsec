@@ -21,6 +21,7 @@ import (
 const rbacBaseURL = "https://rbac.example.internal"
 const rbacListPath = "/api/rbac/v1/cross-account-requests/"
 const rbacListURL = rbacBaseURL + rbacListPath
+const rbacApprovedBody = `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`
 
 func loadCrossAccountScript(t *testing.T) string {
 	t.Helper()
@@ -191,7 +192,7 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 					gotIdentityHeader = req.Header.Get("x-rh-identity")
 					return &httpfixture.Fixture{
 						StatusCode: 200,
-						Body:       `{"data":[{"status":"approved"}]}`,
+						Body:       rbacApprovedBody,
 					}
 				}
 				return nil
@@ -286,7 +287,7 @@ func TestCrossAccountLua_BypassIsInternalWithRedhatEmail(t *testing.T) {
 				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
 					return &httpfixture.Fixture{
 						StatusCode: 200,
-						Body:       `{"data":[{"status":"approved"}]}`,
+						Body:       rbacApprovedBody,
 					}
 				}
 				return nil
@@ -324,7 +325,7 @@ func TestCrossAccountLua_QueryByOrgID(t *testing.T) {
 					gotURL = req.URL.String()
 					return &httpfixture.Fixture{
 						StatusCode: 200,
-						Body:       `{"data":[{"status":"approved"}]}`,
+						Body:       rbacApprovedBody,
 					}
 				}
 				return nil
@@ -344,6 +345,68 @@ func TestCrossAccountLua_QueryByOrgID(t *testing.T) {
 	}
 	if !strings.Contains(gotURL, "org_id=target-org") {
 		t.Fatalf("unexpected RBAC URL: %s", gotURL)
+	}
+}
+
+func TestCrossAccountLua_AccountCookieOnlyEmptyOrg(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	var rbacCalls int
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
+					rbacCalls++
+				}
+				return nil
+			}),
+			Strict: false,
+		}),
+	}
+	ds := newCrossAccountDS(t, script, client, nil)
+
+	input := internalEmployeeSubject()
+	input.RequestAttributes.Headers["cookie"] = "cross_access_account_number=999999"
+
+	result, err := ds.Fetch(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "rbac_denied" {
+		t.Fatalf("error=%v, want rbac_denied", payload["error"])
+	}
+	if rbacCalls != 0 {
+		t.Fatalf("RBAC called %d times, want 0 when org cookie missing", rbacCalls)
+	}
+}
+
+func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
+					return &httpfixture.Fixture{
+						StatusCode: 200,
+						Body:       `{"data":[{"status":"approved","target_account":"999999","target_org":"wrong-org"}]}`,
+					}
+				}
+				return nil
+			}),
+			Strict: true,
+		}),
+	}
+	ds := newCrossAccountDS(t, script, client, nil)
+
+	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "rbac_denied" {
+		t.Fatalf("error=%v, want rbac_denied when cookie org differs from RBAC record", payload["error"])
 	}
 }
 

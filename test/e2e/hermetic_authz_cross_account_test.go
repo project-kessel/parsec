@@ -228,7 +228,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 						return fix
 					}
 					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved"}]}`}
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`}
 					}
 					return nil
 				}),
@@ -277,7 +277,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 		authz := newAuthz(true, false, client)
 		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
-		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999"))
+		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
 		if err != nil {
 			t.Fatalf("Check: %v", err)
 		}
@@ -347,7 +347,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 						}
 					}
 					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved"}]}`}
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`}
 					}
 					return nil
 				}),
