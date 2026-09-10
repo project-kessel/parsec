@@ -3,8 +3,11 @@ package lua
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -561,5 +564,632 @@ func TestHTTPService_Request_WithHeaders(t *testing.T) {
 	L.Pop(1)
 	if result != "ok" {
 		t.Errorf("body=%q, want 'ok'", result)
+	}
+}
+
+func TestResolveRequestURL(t *testing.T) {
+	t.Parallel()
+
+	base := "https://entitlements.example.com"
+	svc := &HTTPService{
+		ctx:     context.Background(),
+		client:  &http.Client{},
+		baseURL: base,
+	}
+
+	tests := []struct {
+		name    string
+		svc     *HTTPService
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{
+			name: "absolute unchanged",
+			svc:  svc,
+			raw:  "https://other.example/v1/data",
+			want: "https://other.example/v1/data",
+		},
+		{
+			name: "relative joined",
+			svc:  svc,
+			raw:  "/v1/compliance",
+			want: "https://entitlements.example.com/v1/compliance",
+		},
+		{
+			name: "relative with query",
+			svc:  svc,
+			raw:  "/v1/compliance?x=1",
+			want: "https://entitlements.example.com/v1/compliance?x=1",
+		},
+		{
+			name:    "relative without base",
+			svc:     &HTTPService{ctx: context.Background(), client: &http.Client{}},
+			raw:     "/v1/compliance",
+			wantErr: "requires a configured base_url",
+		},
+		{
+			name:    "protocol relative rejected",
+			svc:     svc,
+			raw:     "//attacker.example/path",
+			wantErr: "with host but no scheme",
+		},
+		{
+			name:    "invalid url parse",
+			svc:     svc,
+			raw:     "http://%zz",
+			wantErr: "invalid url",
+		},
+		{
+			name:    "invalid stored base url",
+			svc:     &HTTPService{ctx: context.Background(), client: &http.Client{}, baseURL: "ftp://host.example"},
+			raw:     "/v1/compliance",
+			wantErr: "scheme must be http or https",
+		},
+		{
+			name:    "stored base url with user info",
+			svc:     &HTTPService{ctx: context.Background(), client: &http.Client{}, baseURL: "https://user:pass@host.example"},
+			raw:     "/v1/compliance",
+			wantErr: "must not include user info",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := tt.svc.resolveRequestURL(tt.raw)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %q, want substring %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveRequestURL(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHTTPService_WithRequestOptions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer auto-added-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("unauthorized"))
+			return
+		}
+
+		customHeader := r.Header.Get("X-Custom")
+		if customHeader != "from-lua" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("missing custom header"))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("authenticated"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	service, err := NewHTTPService(context.Background(), client,
+		WithRequestOptions(func(req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer auto-added-token")
+			return nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create http service: %v", err)
+	}
+	service.Register(L)
+
+	script := `
+		local headers = {["X-Custom"] = "from-lua"}
+		local response = http.get("` + server.URL + `", headers)
+		return response.status .. ":" .. response.body
+	`
+
+	if err := L.DoString(script); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	result := L.Get(-1)
+	L.Pop(1)
+
+	expected := "200:authenticated"
+	if lua.LVAsString(result) != expected {
+		t.Errorf("result = %q, want %q", lua.LVAsString(result), expected)
+	}
+}
+
+func TestHTTPService_RequestOptionsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	service, err := NewHTTPService(context.Background(), client,
+		WithRequestOptions(func(req *http.Request) error {
+			return http.ErrServerClosed
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create http service: %v", err)
+	}
+	service.Register(L)
+
+	script := `
+		local response, err = http.get("` + server.URL + `")
+		if response == nil and err ~= nil then
+			return "error"
+		end
+		return "no-error"
+	`
+
+	if err := L.DoString(script); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	result := L.Get(-1)
+	L.Pop(1)
+
+	if lua.LVAsString(result) != "error" {
+		t.Errorf("expected error when request options returns error")
+	}
+}
+
+func TestHTTPService_RequestOptionsModifyURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("api_key") != "secret123" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("missing api key"))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	service, err := NewHTTPService(context.Background(), client,
+		WithRequestOptions(func(req *http.Request) error {
+			q := req.URL.Query()
+			q.Add("api_key", "secret123")
+			req.URL.RawQuery = q.Encode()
+			return nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create http service: %v", err)
+	}
+	service.Register(L)
+
+	script := `
+		local response = http.get("` + server.URL + `/api/data")
+		return response.status .. ":" .. response.body
+	`
+
+	if err := L.DoString(script); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	result := L.Get(-1)
+	L.Pop(1)
+
+	expected := "200:success"
+	if lua.LVAsString(result) != expected {
+		t.Errorf("result = %q, want %q", lua.LVAsString(result), expected)
+	}
+}
+
+func TestHTTPService_RequestOptionsAllMethods(t *testing.T) {
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		callCount++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	service, err := NewHTTPService(context.Background(), client,
+		WithRequestOptions(func(req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer token")
+			return nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create http service: %v", err)
+	}
+	service.Register(L)
+
+	script := `
+		local response = http.get("` + server.URL + `")
+		return response.status
+	`
+	if err := L.DoString(script); err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	status := L.ToInt(-1)
+	L.Pop(1)
+	if status != 200 {
+		t.Errorf("GET status = %d, want 200", status)
+	}
+
+	script = `
+		local response = http.post("` + server.URL + `", "data")
+		return response.status
+	`
+	if err := L.DoString(script); err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	status = L.ToInt(-1)
+	L.Pop(1)
+	if status != 200 {
+		t.Errorf("POST status = %d, want 200", status)
+	}
+
+	script = `
+		local response = http.request("PUT", "` + server.URL + `", "data")
+		return response.status
+	`
+	if err := L.DoString(script); err != nil {
+		t.Fatalf("PUT failed: %v", err)
+	}
+	status = L.ToInt(-1)
+	L.Pop(1)
+	if status != 200 {
+		t.Errorf("PUT status = %d, want 200", status)
+	}
+
+	if callCount != 3 {
+		t.Errorf("expected 3 successful calls, got %d", callCount)
+	}
+}
+
+func TestHTTPService_ParseHeadersNonTableIgnored(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response = http.get("` + server.URL + `", "not-a-table")
+		return response.body
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want empty when headers arg is not a table", gotAuth)
+	}
+	if lua.LVAsString(L.Get(-1)) != "ok" {
+		t.Errorf("body = %q, want ok", lua.LVAsString(L.Get(-1)))
+	}
+}
+
+func TestHTTPService_ParseHeadersIgnoresNonStringKeys(t *testing.T) {
+	var gotCustom string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustom = r.Header.Get("X-Custom")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local headers = {[123] = "ignored", ["X-Custom"] = "value"}
+		local response = http.get("` + server.URL + `", headers)
+		return response.body
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if gotCustom != "value" {
+		t.Errorf("X-Custom = %q, want value", gotCustom)
+	}
+}
+
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("simulated read failure")
+}
+
+type badBodyTransport struct{}
+
+func (badBodyTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(errorReader{}),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func TestHTTPService_ResponseBodyReadError(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: badBodyTransport{},
+	})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response = http.get("https://example.invalid/data")
+		if response.body ~= "" then
+			return "body:" .. response.body
+		end
+		if response.error == nil or response.error == "" then
+			return "missing-error"
+		end
+		return "error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "error" {
+		t.Errorf("result = %q, want error", lua.LVAsString(L.Get(-1)))
+	}
+}
+
+func TestHTTPService_Post_RelativeWithoutBaseURLErrors(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.post("/v1/compliance", "body")
+		if response == nil and err ~= nil and err ~= "" then
+			return "error"
+		end
+		return "no-error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "error" {
+		t.Error("expected error for relative POST without base_url")
+	}
+	if hits != 0 {
+		t.Errorf("server hit %d times, want 0", hits)
+	}
+}
+
+func TestHTTPService_Request_RelativeWithoutBaseURLErrors(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.request("PUT", "/v1/compliance", "data")
+		if response == nil and err ~= nil and err ~= "" then
+			return "error"
+		end
+		return "no-error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "error" {
+		t.Error("expected error for relative request without base_url")
+	}
+	if hits != 0 {
+		t.Errorf("server hit %d times, want 0", hits)
+	}
+}
+
+func TestHTTPService_Get_InvalidURLErrors(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.get("http://%zz")
+		if response == nil and err ~= nil and err ~= "" then
+			return "error"
+		end
+		return "no-error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "error" {
+		t.Error("expected error for malformed absolute URL")
+	}
+}
+
+func TestHTTPService_Post_InvalidURLErrors(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.post("http://%zz", "body")
+		if response == nil and err ~= nil and err ~= "" then
+			return "error"
+		end
+		return "no-error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "error" {
+		t.Error("expected error for malformed absolute URL on POST")
+	}
+}
+
+func TestHTTPService_Request_InvalidURLErrors(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.request("PUT", "http://%zz", "body")
+		if response == nil and err ~= nil and err ~= "" then
+			return "error"
+		end
+		return "no-error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "error" {
+		t.Error("expected error for malformed absolute URL on request")
+	}
+}
+
+func TestHTTPService_Request_InvalidMethodErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response, err = http.request("BAD METHOD", "` + server.URL + `", "body")
+		if response == nil and err ~= nil and err ~= "" then
+			return "error"
+		end
+		return "no-error"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "error" {
+		t.Error("expected error for invalid HTTP method")
+	}
+}
+
+func TestHTTPService_ResponseHeadersEmptyValuesSkipped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["X-Empty"] = []string{}
+		w.Header().Set("X-Present", "yes")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	L := lua.NewState()
+	defer L.Close()
+
+	svc, err := NewHTTPService(context.Background(), &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("NewHTTPService: %v", err)
+	}
+	svc.Register(L)
+
+	if err := L.DoString(`
+		local response = http.get("` + server.URL + `")
+		local empty = response.headers["X-Empty"]
+		local present = response.headers["X-Present"]
+		if empty == nil and present == "yes" then
+			return "ok"
+		end
+		return "bad"
+	`); err != nil {
+		t.Fatalf("script execution failed: %v", err)
+	}
+
+	if lua.LVAsString(L.Get(-1)) != "ok" {
+		t.Error("expected empty header values to be omitted from response table")
 	}
 }

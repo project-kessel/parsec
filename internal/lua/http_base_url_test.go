@@ -299,6 +299,20 @@ func TestNewHTTPService_BaseURLWithPathRejected(t *testing.T) {
 	}
 }
 
+func TestNewHTTPService_NonHTTPSchemeRejected(t *testing.T) {
+	_, err := NewHTTPService(context.Background(), &http.Client{}, WithBaseURL("ftp://host.example"))
+	if err == nil {
+		t.Fatal("expected error for non-http(s) base_url, got nil")
+	}
+}
+
+func TestNewHTTPService_BaseURLUserInfoRejected(t *testing.T) {
+	_, err := NewHTTPService(context.Background(), &http.Client{}, WithBaseURL("https://user:pass@host.example"))
+	if err == nil {
+		t.Fatal("expected error for base_url with user info, got nil")
+	}
+}
+
 func TestHTTPService_Get_RelativeWithBaseURLTrailingSlash(t *testing.T) {
 	var gotURL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

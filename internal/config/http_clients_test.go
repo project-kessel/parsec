@@ -138,6 +138,28 @@ func TestNewHTTPClientRegistry_BaseURLWithPathRejected(t *testing.T) {
 	}
 }
 
+func TestNewHTTPClientRegistry_BaseURLNonHTTPSchemeRejected(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{Name: "bad", HTTPClientSpec: HTTPClientSpec{BaseURL: "ftp://host.example"}},
+	}
+
+	_, err := NewHTTPClientRegistry(cfgs, nil)
+	if err == nil {
+		t.Fatal("expected error for base_url with non-http(s) scheme")
+	}
+}
+
+func TestNewHTTPClientRegistry_BaseURLUserInfoRejected(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{Name: "bad", HTTPClientSpec: HTTPClientSpec{BaseURL: "https://user:pass@host.example"}},
+	}
+
+	_, err := NewHTTPClientRegistry(cfgs, nil)
+	if err == nil {
+		t.Fatal("expected error for base_url with user info")
+	}
+}
+
 func TestNewHTTPClientRegistry_StoresBaseURL(t *testing.T) {
 	cfgs := []HTTPClientConfig{
 		{Name: "entitlements", HTTPClientSpec: HTTPClientSpec{
