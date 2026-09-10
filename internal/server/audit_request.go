@@ -93,7 +93,10 @@ func propagateAuthzRequestID(response *authv3.CheckResponse, id string) {
 	if response == nil || id == "" {
 		return
 	}
-	header := &corev3.HeaderValueOption{Header: &corev3.HeaderValue{Key: requestIDHeader, Value: id}}
+	header := &corev3.HeaderValueOption{
+		Header:       &corev3.HeaderValue{Key: requestIDHeader, Value: id},
+		AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
+	}
 	if ok := response.GetOkResponse(); ok != nil {
 		ok.Headers = append(ok.Headers, header)
 		return
