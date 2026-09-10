@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -63,10 +64,22 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 }
 
 // Check implements the ext_authz check endpoint
-func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
+func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (response *authv3.CheckResponse, returnErr error) {
+	var headers map[string]string
+	if req != nil {
+		headers = req.GetAttributes().GetRequest().GetHttp().GetHeaders()
+	}
+	ctx = contextWithRequestID(ctx, headers, nil)
+
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
-	defer p.End()
+	reasonCode := "internal_error"
+	var auditTokenTypes []service.TokenType
+	defer func() {
+		propagateAuthzRequestID(response, request.ID(ctx))
+		p.RequestCompleted(authzRequestCompletion(response, reasonCode, auditTokenTypes))
+		p.End()
+	}()
 
 	// 1. Build request attributes
 	reqAttrs := s.buildRequestAttributes(req)
@@ -75,6 +88,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	// 2. Authenticate actor from gRPC context
 	actorResult, actorExt, err := authenticateActorWithExtraction(ctx, s.credentialSources, s.trustStore, p)
 	if err != nil {
+		reasonCode = "credential_invalid"
 		return s.denyResponse(codes.Unauthenticated,
 			fmt.Sprintf("%v", err)), nil
 	}
@@ -94,12 +108,14 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 	cc, err := CredentialContextFromCheckRequest(req)
 	if err != nil {
+		reasonCode = "credential_malformed"
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
 	subjectExt, err = s.credentialSources.Extract(ctx, cc)
 	if err != nil {
+		reasonCode = "credential_malformed"
 		p.SubjectCredentialExtractionFailed(err)
 		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
@@ -113,12 +129,17 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 		filteredStore, filterErr := s.trustStore.ForActor(ctx, actorResult, reqAttrs)
 		if filterErr != nil {
+			reasonCode = auditReasonFromError(filterErr, "scheme_not_allowed")
 			return s.denyResponse(codes.PermissionDenied,
 				fmt.Sprintf("failed to filter trust store: %v", filterErr)), nil
 		}
 
 		result, validationErr := filteredStore.Validate(ctx, subjectExt.Credential)
 		if validationErr != nil {
+			reasonCode = "credential_invalid"
+			if errors.Is(validationErr, trust.ErrExpiredToken) {
+				reasonCode = "credential_expired"
+			}
 			p.SubjectValidationFailed(validationErr)
 			return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", validationErr)), nil
 		}
@@ -133,6 +154,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		Request: reqAttrs,
 	})
 	if err != nil {
+		reasonCode = auditReasonFromError(err, "internal_error")
 		p.PolicyEvaluationFailed(err)
 		return s.denyResponse(codes.Internal,
 			fmt.Sprintf("policy evaluation failed: %v", err)), nil
@@ -141,14 +163,17 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	// 5. Handle policy decision
 	switch decision.Action {
 	case AuthzCheckDeny:
+		reasonCode = auditReasonFromText(decision.Reason, "policy_denied")
 		p.PolicyDecisionDeny(decision.Reason)
 		denyCode := codes.PermissionDenied
 		if subjectPrin.Anonymous {
 			denyCode = codes.Unauthenticated
+			reasonCode = "credential_missing"
 		}
 		return s.denyResponse(denyCode, decision.Reason), nil
 
 	case AuthzCheckAllowWithoutIssue:
+		reasonCode = ""
 		p.PolicyDecisionAllowWithoutIssue(decision.Reason)
 		rewrite, remove := removeCredentialPresentation(subjectExt, cc.Cookies)
 		return s.okResponse(rewrite, remove), nil
@@ -156,9 +181,11 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	case AuthzCheckIssue:
 		p.PolicyDecisionIssue(len(decision.TokenTypes), decision.Scope, decision.Reason)
 		rewrite, remove := removeCredentialPresentation(subjectExt, cc.Cookies)
-		return s.issueResponse(ctx, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
+		response, auditTokenTypes, reasonCode, returnErr = s.issueResponse(ctx, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
+		return response, returnErr
 
 	default:
+		reasonCode = "internal_error"
 		return s.denyResponse(codes.Internal,
 			fmt.Sprintf("unknown policy action: %s", decision.Action)), nil
 	}
@@ -173,7 +200,7 @@ func (s *AuthzServer) issueResponse(
 	reqAttrs *request.RequestAttributes,
 	credHeaders []*corev3.HeaderValueOption,
 	headersToRemove []string,
-) (*authv3.CheckResponse, error) {
+) (*authv3.CheckResponse, []service.TokenType, string, error) {
 	tokenTypes := make([]service.TokenType, len(decision.TokenTypes))
 	for i, spec := range decision.TokenTypes {
 		tokenTypes[i] = spec.Type
@@ -187,9 +214,10 @@ func (s *AuthzServer) issueResponse(
 		Scope:             decision.Scope,
 	})
 	if err != nil {
-		return s.denyResponseWithHTTPStatus(codes.Internal,
+		response := s.denyResponseWithHTTPStatus(codes.Internal,
 			typev3.StatusCode_InternalServerError,
-			fmt.Sprintf("failed to issue tokens: %v", err)), nil
+			fmt.Sprintf("failed to issue tokens: %v", err))
+		return response, nil, "token_issuance_failed", nil
 	}
 
 	// Any token-type denial denies the entire ext_authz request.
@@ -197,7 +225,8 @@ func (s *AuthzServer) issueResponse(
 	for _, spec := range decision.TokenTypes {
 		if r, ok := results[spec.Type]; ok && r.ExchangeErr != nil {
 			grpcCode, httpStatus, msg := exchangeErrToAuthzDenial(r.ExchangeErr)
-			return s.denyResponseWithHTTPStatus(grpcCode, httpStatus, msg), nil
+			response := s.denyResponseWithHTTPStatus(grpcCode, httpStatus, msg)
+			return response, nil, "token_issuance_denied", nil
 		}
 	}
 
@@ -208,9 +237,10 @@ func (s *AuthzServer) issueResponse(
 		if !ok || r.Token == nil {
 			// Fail closed: never return OK without every requested token.
 			// A missing/nil token with no ExchangeErr is a programmer error.
-			return s.denyResponseWithHTTPStatus(codes.Internal,
+			response := s.denyResponseWithHTTPStatus(codes.Internal,
 				typev3.StatusCode_InternalServerError,
-				fmt.Sprintf("token service returned no token for type %s", spec.Type)), nil
+				fmt.Sprintf("token service returned no token for type %s", spec.Type))
+			return response, nil, "token_issuance_failed", nil
 		}
 		headers = append(headers, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
@@ -221,7 +251,7 @@ func (s *AuthzServer) issueResponse(
 		})
 	}
 
-	return s.okResponse(headers, headersToRemove), nil
+	return s.okResponse(headers, headersToRemove), tokenTypes, "", nil
 }
 
 // removeCredentialPresentation builds the Envoy header mutations needed to

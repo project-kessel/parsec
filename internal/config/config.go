@@ -454,8 +454,8 @@ type FixtureResponse struct {
 // ObservabilityConfig configures application observability
 type ObservabilityConfig struct {
 	// Type selects the observer implementation
-	// Options: "logging", "noop", "metrics", "composite"
-	Type string `koanf:"type" usage:"observer type: logging, noop, metrics, composite"`
+	// Options: "audit", "logging", "noop", "metrics", "composite"
+	Type string `koanf:"type" usage:"observer type: audit, logging, noop, metrics, composite"`
 
 	// LogLevel sets the default log level for logging observer
 	// Options: "debug", "info", "warn", "error"
@@ -466,6 +466,10 @@ type ObservabilityConfig struct {
 	// Options: "json", "text"
 	// Default: "json"
 	LogFormat string `koanf:"log_format" usage:"log format: json, text"`
+
+	// EventPrefix is prepended to every audit event name. When omitted, audit
+	// events use "parsec_". Set it to an empty string to disable prefixing.
+	EventPrefix *string `koanf:"event_prefix" usage:"audit event-name prefix (default: parsec_)"`
 
 	// Event-specific logging configuration
 	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`
