@@ -58,6 +58,17 @@ func (p *loggingLuaFetchProbe) FetchCompletedNil() {
 	p.logger.Debug().Msg("lua fetch completed with nil result")
 }
 
+func (p *loggingLuaFetchProbe) FetchAudit(fields map[string]string) {
+	if len(fields) == 0 {
+		return
+	}
+	e := p.logger.Info()
+	for k, v := range fields {
+		e = e.Str(k, v)
+	}
+	e.Msg("lua fetch audit")
+}
+
 func (p *loggingLuaFetchProbe) ResultConversionFailed(err error) {
 	p.logger.Error().Err(err).Msg("lua result table conversion failed")
 }

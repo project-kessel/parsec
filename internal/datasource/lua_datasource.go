@@ -179,7 +179,12 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 		return nil, fmt.Errorf("fetch function must return a table or nil, got %s", ret.Type())
 	}
 
-	result, err := ds.luaTableToResult(ret.(*lua.LTable))
+	resultTable := ret.(*lua.LTable)
+	if auditField := resultTable.RawGetString("audit"); auditField.Type() == lua.LTTable {
+		p.FetchAudit(luaTableToStringMap(auditField.(*lua.LTable)))
+	}
+
+	result, err := ds.luaTableToResult(resultTable)
 	if err != nil {
 		p.ResultConversionFailed(err)
 		return nil, err
@@ -340,6 +345,17 @@ func luaTableToTrustResult(tbl *lua.LTable) *trust.Result {
 		result.Claims = luaTableToMap(claimsLV.(*lua.LTable))
 	}
 
+	return result
+}
+
+// luaTableToStringMap converts a Lua table with string values to a Go map.
+func luaTableToStringMap(tbl *lua.LTable) map[string]string {
+	result := make(map[string]string)
+	tbl.ForEach(func(k, v lua.LValue) {
+		if k.Type() == lua.LTString && v.Type() == lua.LTString {
+			result[k.String()] = v.String()
+		}
+	})
 	return result
 }
 
