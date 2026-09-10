@@ -44,6 +44,7 @@ type HTTPService struct {
 	client         *http.Client
 	requestOptions RequestOptions
 	baseURL        string // empty = absolute Lua URLs only; stored origin string
+	requireHTTPS   bool   // true when transport or RequestOptions inject credentials
 }
 
 // NewHTTPService creates a new HTTP service. ctx is required and propagated
@@ -61,7 +62,8 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		opt(&cfg)
 	}
 
-	if _, err := httpclient.ParseBaseURL(cfg.baseURL, false); err != nil {
+	requireHTTPS := cfg.requestOptions != nil || httpclient.UsesCredentialTransport(client)
+	if _, err := httpclient.ParseBaseURL(cfg.baseURL, requireHTTPS); err != nil {
 		return nil, err
 	}
 
@@ -70,6 +72,7 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		client:         client,
 		requestOptions: cfg.requestOptions,
 		baseURL:        cfg.baseURL,
+		requireHTTPS:   requireHTTPS,
 	}, nil
 }
 
@@ -89,7 +92,7 @@ func (s *HTTPService) resolveRequestURL(raw string) (string, error) {
 	if s.baseURL == "" {
 		return "", fmt.Errorf("relative url %q requires a configured base_url", raw)
 	}
-	base, err := httpclient.ParseBaseURL(s.baseURL, false)
+	base, err := httpclient.ParseBaseURL(s.baseURL, s.requireHTTPS)
 	if err != nil {
 		return "", err
 	}

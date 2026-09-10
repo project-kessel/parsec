@@ -8,6 +8,8 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/project-kessel/parsec/internal/httpclient"
 )
 
 func TestHTTPService_Get_RelativeWithBaseURL(t *testing.T) {
@@ -310,6 +312,36 @@ func TestNewHTTPService_BaseURLUserInfoRejected(t *testing.T) {
 	_, err := NewHTTPService(context.Background(), &http.Client{}, WithBaseURL("https://user:pass@host.example"))
 	if err == nil {
 		t.Fatal("expected error for base_url with user info, got nil")
+	}
+}
+
+func TestNewHTTPService_AuthenticatedClientHTTPBaseURLRejected(t *testing.T) {
+	client := &http.Client{
+		Transport: &httpclient.BearerTransport{Token: "secret", Base: http.DefaultTransport},
+	}
+	_, err := NewHTTPService(context.Background(), client, WithBaseURL("http://host.example"))
+	if err == nil {
+		t.Fatal("expected error for http base_url with credential transport, got nil")
+	}
+}
+
+func TestNewHTTPService_RequestOptionsHTTPBaseURLRejected(t *testing.T) {
+	_, err := NewHTTPService(context.Background(), &http.Client{},
+		WithBaseURL("http://host.example"),
+		WithRequestOptions(func(req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer token")
+			return nil
+		}),
+	)
+	if err == nil {
+		t.Fatal("expected error for http base_url with request options, got nil")
+	}
+}
+
+func TestNewHTTPService_UnauthenticatedHTTPBaseURLAllowed(t *testing.T) {
+	_, err := NewHTTPService(context.Background(), &http.Client{}, WithBaseURL("http://host.example"))
+	if err != nil {
+		t.Fatalf("unexpected error for http base_url without credentials: %v", err)
 	}
 }
 

@@ -225,6 +225,26 @@ func (t *instrumentedTransport) RoundTrip(req *http.Request) (*http.Response, er
 	return resp, nil
 }
 
+// UsesCredentialTransport reports whether the client's transport chain injects
+// HTTP-layer credentials (bearer token or fixed headers).
+func UsesCredentialTransport(client *http.Client) bool {
+	if client == nil {
+		return false
+	}
+	return transportUsesCredentials(client.Transport)
+}
+
+func transportUsesCredentials(rt http.RoundTripper) bool {
+	switch t := rt.(type) {
+	case *BearerTransport, *HeadersTransport:
+		return true
+	case *instrumentedTransport:
+		return transportUsesCredentials(t.base)
+	default:
+		return false
+	}
+}
+
 // BearerTransport injects a static Authorization: Bearer header into every request.
 type BearerTransport struct {
 	Token string

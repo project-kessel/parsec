@@ -19,6 +19,32 @@ import (
 	"time"
 )
 
+func TestUsesCredentialTransport(t *testing.T) {
+	t.Parallel()
+
+	plain := &http.Client{Transport: http.DefaultTransport}
+	if UsesCredentialTransport(plain) {
+		t.Error("expected plain client to have no credential transport")
+	}
+	if UsesCredentialTransport(nil) {
+		t.Error("expected nil client to have no credential transport")
+	}
+
+	bearer := &http.Client{
+		Transport: &BearerTransport{Token: "t", Base: http.DefaultTransport},
+	}
+	if !UsesCredentialTransport(bearer) {
+		t.Error("expected bearer client to use credential transport")
+	}
+
+	headers := &http.Client{
+		Transport: &HeadersTransport{Headers: map[string]string{"x-api-key": "k"}, Base: http.DefaultTransport},
+	}
+	if !UsesCredentialTransport(headers) {
+		t.Error("expected headers client to use credential transport")
+	}
+}
+
 func TestBearerTransport_InjectsAuthHeader(t *testing.T) {
 	var capturedAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
