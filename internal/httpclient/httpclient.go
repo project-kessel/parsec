@@ -226,7 +226,9 @@ func (t *instrumentedTransport) RoundTrip(req *http.Request) (*http.Response, er
 }
 
 // UsesCredentialTransport reports whether the client's transport chain injects
-// HTTP-layer credentials (bearer token or fixed headers).
+// HTTP-layer credentials (bearer token or fixed headers). If a new
+// credential-injecting transport type is added (e.g., OAuth2Transport), it
+// would bypass the HTTPS requirement unless the switch is updated.
 func UsesCredentialTransport(client *http.Client) bool {
 	if client == nil {
 		return false

@@ -42,6 +42,7 @@ trust_store:
       actor.trust_domain == "prod.example.com" && 
       actor.claims.verified == true
 
+# Named HTTP clients with base_url for shared host resolution.
 http_clients:
   - name: entitlements
     timeout: "5s"
