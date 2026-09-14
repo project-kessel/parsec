@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/request"
@@ -52,7 +53,7 @@ func newComplianceDS(t *testing.T, script string, client *http.Client) *LuaDataS
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
 			"compliance_api": complianceAPIURL,
 		}),
-		HTTPClient: client,
+		HTTP: httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
@@ -68,7 +69,7 @@ func newCacheableComplianceDS(t *testing.T, script string, client *http.Client) 
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
 			"compliance_api": complianceAPIURL,
 		}),
-		HTTPClient: client,
+		HTTP: httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
 		t.Fatalf("NewCacheableLuaDataSource: %v", err)
@@ -137,6 +138,56 @@ func TestExportComplianceLua_Fetch_Pass(t *testing.T) {
 	}
 	if gotAcceptHeader != "application/json;charset=UTF-8" {
 		t.Errorf("Accept = %q, want application/json;charset=UTF-8", gotAcceptHeader)
+	}
+}
+
+func TestExportComplianceLua_Fetch_PathWithBaseURL(t *testing.T) {
+	script := loadExportComplianceScript(t)
+
+	provider := httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+		if req.Method != http.MethodGet || req.URL.String() != complianceAPIURL {
+			return nil
+		}
+		return &httpfixture.Fixture{
+			StatusCode: 200,
+			Headers:    map[string]string{"Content-Type": "application/json"},
+			Body:       `{"result_code":"","synthetic":false}`,
+		}
+	})
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: provider,
+			Strict:   true,
+		}),
+	}
+
+	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+		Name:   "export_compliance",
+		Script: script,
+		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
+			"compliance_api": "/v1/compliance",
+		}),
+		HTTP: httpclient.LuaClient{Client: client, BaseURL: "https://export-compliance.example.internal"},
+	})
+	if err != nil {
+		t.Fatalf("NewLuaDataSource: %v", err)
+	}
+
+	result, err := ds.Fetch(context.Background(), consoleSubjectForCompliance())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if data["synthetic"] != false {
+		t.Errorf("synthetic = %v, want false", data["synthetic"])
 	}
 }
 
@@ -411,7 +462,7 @@ func TestExportComplianceLua_MissingConfig(t *testing.T) {
 		Name:         "export_compliance",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(nil),
-		HTTPClient:   http.DefaultClient,
+		HTTP:         httpclient.LuaClient{Client: http.DefaultClient},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
@@ -419,6 +470,47 @@ func TestExportComplianceLua_MissingConfig(t *testing.T) {
 
 	result, err := ds.Fetch(context.Background(), consoleSubjectForCompliance())
 	assertFailOpenNil(t, result, err)
+}
+
+func TestExportComplianceLua_Fetch_FullComplianceAPIOverridesPath(t *testing.T) {
+	script := loadExportComplianceScript(t)
+
+	provider := httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+		if req.Method != http.MethodGet || req.URL.String() != complianceAPIURL {
+			return nil
+		}
+		return &httpfixture.Fixture{
+			StatusCode: 200,
+			Body:       `{"result_code":""}`,
+		}
+	})
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: provider,
+			Strict:   true,
+		}),
+	}
+
+	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+		Name:   "export_compliance",
+		Script: script,
+		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
+			"compliance_api": complianceAPIURL,
+		}),
+		HTTP: httpclient.LuaClient{Client: client, BaseURL: "https://unused.example"},
+	})
+	if err != nil {
+		t.Fatalf("NewLuaDataSource: %v", err)
+	}
+
+	result, err := ds.Fetch(context.Background(), consoleSubjectForCompliance())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result from absolute compliance_api")
+	}
 }
 
 // TestExportComplianceLua_RHSMTokenShape verifies rhsm-style claims (sub, org_id) are supported

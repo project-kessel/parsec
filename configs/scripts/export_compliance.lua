@@ -6,8 +6,9 @@
 -- (same as auth_sso_jwt). SSO User jwt-auth only; CEL skips other auth types.
 --
 -- Config:
---   compliance_api (required) — full GET URL, e.g.
---     https://export-compliance.example.internal/v1/compliance
+--   compliance_api — full URL (contains "://") or a path such as /v1/compliance.
+--     Paths resolve against the HTTP client's base_url when set. Default path:
+--     /v1/compliance. Env overlay: PARSEC_DATA_SOURCES__N__CONFIG__COMPLIANCE_API.
 --
 -- Behavior (fail-open):
 --   - Any error, non-200 response, malformed JSON, or missing username returns
@@ -31,6 +32,15 @@
 --   - CEL must call datasource("export_compliance") before cross-account logic.
 
 local BYPASS_HEADER = "x-rh-insights-gateway-use-compliance-cache"
+local DEFAULT_COMPLIANCE_PATH = "/v1/compliance"
+
+local function resolve_compliance_url()
+  local api = config.get("compliance_api")
+  if api == nil or api == "" then
+    return DEFAULT_COMPLIANCE_PATH
+  end
+  return api
+end
 
 local function claim_str(claims, key)
   if claims == nil then return "" end
@@ -117,11 +127,7 @@ local function cache_bypass(input)
 end
 
 function fetch(input)
-  local api = config.get("compliance_api")
-  if api == nil or api == "" then
-    -- Missing config is a misconfiguration; fail-open to avoid blocking all traffic.
-    return fail_open()
-  end
+  local api = resolve_compliance_url()
 
   local username = resolve_username(input)
   if username == "" then
