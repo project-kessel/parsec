@@ -108,11 +108,11 @@ func TestLoggingLuaDataSourceObserver_FetchAudit(t *testing.T) {
 	obs := NewLoggingLuaDataSourceObserver(testLogger(&buf), WithClock(testClock()))
 	_, p := obs.LuaFetchStarted(context.Background(), "cross_account")
 	p.FetchAudit(map[string]string{
-		"event":                "cross_account_approved",
-		"outcome":              "approved",
-		"employee_user_id":     "emp-1",
+		"event":                 "cross_account_approved",
+		"outcome":               "approved",
+		"employee_user_id":      "emp-1",
 		"target_account_number": "999999",
-		"target_org_id":        "target-org",
+		"target_org_id":         "target-org",
 	})
 	assertLog(t, buf.String(), "info", "lua fetch audit",
 		`"datasource":"cross_account"`, `"outcome":"approved"`, `"employee_user_id":"emp-1"`)
