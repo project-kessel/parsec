@@ -74,6 +74,9 @@ objects:
                 mountPath: "/etc/parsec/scripts/export_compliance.lua"
                 subPath: export_compliance.lua
               - name: config-volume
+                mountPath: "/etc/parsec/scripts/cross_account.lua"
+                subPath: cross_account.lua
+              - name: config-volume
                 mountPath: "/etc/parsec/scripts/bop_user.lua"
                 subPath: bop_user.lua
               - name: config-volume
