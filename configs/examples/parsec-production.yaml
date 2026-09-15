@@ -46,11 +46,6 @@ http_clients:
   - name: rbac
     timeout: "10s"
     # base_url + relative rbac_path: PR #201 (RHCLOUD-50834). Until merged, use full rbac_path below.
-    http_auth:
-      type: headers
-      headers:
-        authorization:
-          env: PARSEC_RBAC_AUTHORIZATION
 
 # Data sources with distributed caching
 data_sources:

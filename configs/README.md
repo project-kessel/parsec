@@ -398,11 +398,7 @@ http_clients:
     timeout: "10s"
     # Relative rbac_path against http_clients[].base_url: PR #201 (RHCLOUD-50834).
     # Until that merges, set a full URL in cross_account.config.rbac_path (see below).
-    http_auth:  # stage/prod: inject via app-interface secrets
-      type: headers
-      headers:
-        authorization:
-          env: PARSEC_RBAC_AUTHORIZATION
+    # RBAC auth is via x-rh-identity on each request (3scale parity); no http_auth here.
 
 data_sources:
   - name: identity-policy
