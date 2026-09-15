@@ -40,7 +40,6 @@ func defaultCrossAccountConfig() map[string]any {
 		"internal_idp_target":             "https://sso.redhat.com/auth/realms/internal",
 		"role_fallback_enabled":           false,
 		"cross_access_bypass_is_internal": false,
-		"cross_access_query_by":           "account",
 		"employee_email_suffix":           "@redhat.com",
 	}
 }
@@ -222,7 +221,7 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 	if payload["employee_org_id"] != "emp-org" {
 		t.Fatalf("employee_org_id=%v", payload["employee_org_id"])
 	}
-	if !strings.Contains(gotURL, "query_by=user_id") || !strings.Contains(gotURL, "account=999999") {
+	if !strings.Contains(gotURL, "query_by=user_id") || !strings.Contains(gotURL, "org_id=target-org") {
 		t.Fatalf("unexpected RBAC URL: %s", gotURL)
 	}
 	if gotIdentityHeader == "" {
@@ -308,43 +307,6 @@ func TestCrossAccountLua_BypassIsInternalWithRedhatEmail(t *testing.T) {
 	payload := decodeCrossAccountResult(t, result)
 	if payload["active"] != true {
 		t.Fatalf("active=%v, want true with bypass", payload["active"])
-	}
-}
-
-func TestCrossAccountLua_QueryByOrgID(t *testing.T) {
-	script := loadCrossAccountScript(t)
-	cfg := defaultCrossAccountConfig()
-	cfg["cross_access_query_by"] = "org_id"
-
-	var gotURL string
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
-			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
-				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
-					gotURL = req.URL.String()
-					return &httpfixture.Fixture{
-						StatusCode: 200,
-						Body:       rbacApprovedBody,
-					}
-				}
-				return nil
-			}),
-			Strict: true,
-		}),
-	}
-	ds := newCrossAccountDS(t, script, client, cfg)
-
-	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	payload := decodeCrossAccountResult(t, result)
-	if payload["active"] != true {
-		t.Fatalf("active=%v, want true", payload["active"])
-	}
-	if !strings.Contains(gotURL, "org_id=target-org") {
-		t.Fatalf("unexpected RBAC URL: %s", gotURL)
 	}
 }
 

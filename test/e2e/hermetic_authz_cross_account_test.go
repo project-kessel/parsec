@@ -77,7 +77,6 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				"internal_idp_target":             "https://sso.redhat.com/auth/realms/internal",
 				"role_fallback_enabled":           false,
 				"cross_access_bypass_is_internal": false,
-				"cross_access_query_by":           "account",
 				"employee_email_suffix":           "@redhat.com",
 			}),
 			HTTPClient: client,

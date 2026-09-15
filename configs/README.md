@@ -407,7 +407,6 @@ data_sources:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
       cross_access_bypass_is_internal: false
-      cross_access_query_by: account
   - name: cross_account
     type: lua
     script_file: ./configs/scripts/cross_account.lua

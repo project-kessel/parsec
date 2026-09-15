@@ -75,7 +75,6 @@ data_sources:
       role_fallback_enabled: true
       enforce_idp_auth: false
       cross_access_bypass_is_internal: false
-      cross_access_query_by: account
   # Export compliance (RHCLOUD-49359): called unless Envoy sets
   # context_extensions.export_compliance=false on User jwt-auth paths.
   # Absent extension → check on (opt-out). Missing DS → CEL skips (fail-safe).
@@ -116,7 +115,6 @@ data_sources:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
       cross_access_bypass_is_internal: false
-      cross_access_query_by: account
       employee_email_suffix: "@redhat.com"
 
 # Token issuers

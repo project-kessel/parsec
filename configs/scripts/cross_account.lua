@@ -11,7 +11,6 @@
 --   internal_idp_target        — idp match for is_internal (same as identity-policy)
 --   role_fallback_enabled      — realm_access.roles redhat:employees fallback
 --   cross_access_bypass_is_internal — skip is_internal flag; email still required
---   cross_access_query_by      — "account" (default) or "org_id"
 --   employee_email_suffix      — required email suffix (default "@redhat.com")
 -- Headers sent to RBAC:
 --   - x-rh-identity (base64 employee identity JSON, pre-swap)
@@ -241,25 +240,22 @@ local function cross_account_audit(outcome, claims, target_account, target_org)
   }
 end
 
-local function resolve_rbac_url(user_id, target_value, query_by)
+local function resolve_rbac_url(user_id, target_org_id)
   local path = config.get("rbac_path", DEFAULT_RBAC_PATH)
   if path == nil or path == "" then path = DEFAULT_RBAC_PATH end
 
   local approved_only = config.get("approved_only", "true")
   if approved_only == nil or approved_only == "" then approved_only = "true" end
 
-  local param_name = "account"
-  if query_by == "org_id" then param_name = "org_id" end
-
   local query = "?query_by=user_id"
-    .. "&" .. param_name .. "=" .. url.encode(target_value)
+    .. "&org_id=" .. url.encode(target_org_id)
     .. "&approved_only=" .. url.encode(tostring(approved_only))
 
   return path .. query
 end
 
-local function rbac_find_approved_record(claims, target_value, query_by)
-  local api_url = resolve_rbac_url(resolve_user_id(claims), target_value, query_by)
+local function rbac_find_approved_record(claims, target_org_id)
+  local api_url = resolve_rbac_url(resolve_user_id(claims), target_org_id)
   local identity_b64 = encode_identity_header(claims)
   if identity_b64 == "" then
     return nil, "infra"
@@ -363,15 +359,7 @@ function fetch(input)
       cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
 
-  local query_by = config.get("cross_access_query_by", "account")
-  if query_by == nil or query_by == "" then query_by = "account" end
-
-  local target_value = target_account
-  if query_by == "org_id" then
-    target_value = target_org
-  end
-
-  local record, err_kind = rbac_find_approved_record(claims, target_value, query_by)
+  local record, err_kind = rbac_find_approved_record(claims, target_org)
   if err_kind == "infra" then
     return encode_result({ error = "infra" },
       cross_account_audit("infra", claims, target_account, target_org))
