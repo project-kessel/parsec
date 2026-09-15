@@ -418,9 +418,6 @@ data_sources:
     http_client: rbac
     config:
       rbac_path: "https://rbac.internal.example.com/api/rbac/v1/cross-account-requests/"
-    caching:
-      type: in_memory
-      ttl: 5m
   - name: user_roles
     type: lua
     script_file: ./scripts/user_roles.lua  # Or use inline script

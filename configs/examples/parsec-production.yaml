@@ -101,12 +101,7 @@ data_sources:
       cross_access_bypass_is_internal: false
       cross_access_query_by: account
       employee_email_suffix: "@redhat.com"
-    caching:
-      type: distributed
-      ttl: 5m
-      group_name: "cross-account-cache"
-      cache_size: 67108864  # 64 MB
-  
+
   # Organization metadata
   - name: org_metadata
     type: lua

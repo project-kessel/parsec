@@ -395,33 +395,3 @@ function fetch(input)
     employee_org_id = employee_org
   }, cross_account_audit("approved", claims, record.target_account_number, record.target_org_id))
 end
-
-function fetch_cache_key(input)
-  local claims = resolve_claims(input)
-  local cookie_hdr = cookie_header(input)
-
-  local target_account = parse_cookie_value(cookie_hdr, COOKIE_ACCOUNT)
-  local target_org = parse_cookie_value(cookie_hdr, COOKIE_ORG)
-
-  if target_account == "" and target_org == "" then
-    return nil
-  end
-
-  local user_id = resolve_user_id(claims)
-  if user_id == "" then
-    return nil
-  end
-
-  return {
-    subject = {
-      claims = {
-        sub = user_id
-      }
-    },
-    request_attributes = {
-      headers = {
-        cookie = COOKIE_ACCOUNT .. "=" .. target_account .. "; " .. COOKIE_ORG .. "=" .. target_org
-      }
-    }
-  }
-end
