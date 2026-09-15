@@ -343,7 +343,8 @@ func (p *Provider) HTTPTransport() http.RoundTripper {
 	}
 	return httpfixture.NewTransport(httpfixture.TransportConfig{
 		Provider: fixtureProvider,
-		Strict:   true,
+		Strict:   !p.config.FixturesAllowRealHTTP,
+		Fallback: http.DefaultTransport,
 	})
 }
 

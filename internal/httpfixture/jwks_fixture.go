@@ -3,9 +3,12 @@ package httpfixture
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v4/jwa"
@@ -47,6 +50,13 @@ type JWKSFixtureConfig struct {
 	// Clock is the time source for token timestamps
 	// If nil, uses system clock
 	Clock clock.Clock
+
+	// PrivateKeyPEM is optional PEM-encoded RSA private key material.
+	// When set, the fixture uses this key instead of generating a new one.
+	PrivateKeyPEM []byte
+
+	// PrivateKeyFile is a path to a PEM-encoded RSA private key file.
+	PrivateKeyFile string
 }
 
 // NewJWKSFixture creates a new JWKS fixture with a generated RSA key pair
@@ -69,10 +79,9 @@ func NewJWKSFixture(cfg JWKSFixtureConfig) (*JWKSFixture, error) {
 		algorithm = jwa.RS256()
 	}
 
-	// Generate RSA key pair
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privateKey, err := loadJWKSFixturePrivateKey(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate RSA key: %w", err)
+		return nil, err
 	}
 
 	// Create JWK from public key
@@ -214,6 +223,42 @@ func (f *JWKSFixture) CreateAndSignToken(claims map[string]interface{}) (string,
 	}
 
 	return f.SignToken(token)
+}
+
+func loadJWKSFixturePrivateKey(cfg JWKSFixtureConfig) (*rsa.PrivateKey, error) {
+	pemBytes := cfg.PrivateKeyPEM
+	if len(pemBytes) == 0 && cfg.PrivateKeyFile != "" {
+		fileBytes, err := os.ReadFile(cfg.PrivateKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read private key file %s: %w", cfg.PrivateKeyFile, err)
+		}
+		pemBytes = fileBytes
+	}
+	if len(pemBytes) > 0 {
+		block, _ := pem.Decode(pemBytes)
+		if block == nil {
+			return nil, fmt.Errorf("failed to decode PEM private key")
+		}
+		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			parsed, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err2 != nil {
+				return nil, fmt.Errorf("failed to parse private key: %w", err)
+			}
+			rsaKey, ok := parsed.(*rsa.PrivateKey)
+			if !ok {
+				return nil, fmt.Errorf("private key is not RSA")
+			}
+			return rsaKey, nil
+		}
+		return key, nil
+	}
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate RSA key: %w", err)
+	}
+	return privateKey, nil
 }
 
 // CreateAndSignTokenWithExpiry creates a new JWT with the given claims and custom expiry, and signs it

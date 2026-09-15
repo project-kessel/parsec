@@ -36,6 +36,10 @@ type Config struct {
 	// Fixtures for hermetic testing (HTTP rules, etc.)
 	Fixtures []FixtureConfig `koanf:"fixtures"`
 
+	// FixturesAllowRealHTTP lets unmatched fixture HTTP requests reach the real network.
+	// Use with local configs that stub JWKS but call live services (e.g. localhost RBAC).
+	FixturesAllowRealHTTP bool `koanf:"fixtures_allow_real_http"`
+
 	// CredentialSources configures where to extract credentials, in priority
 	// order. Shared by authz subject/actor extraction and exchange caller extraction.
 	CredentialSources []CredentialSourceConfig `koanf:"credential_sources"`
@@ -417,10 +421,11 @@ type FixtureConfig struct {
 	Response FixtureResponse `koanf:"response"`
 
 	// JWKS fields (when Type is "jwks")
-	Issuer    string `koanf:"issuer"`    // Issuer URL (iss claim)
-	JWKSURL   string `koanf:"jwks_url"`  // URL where JWKS will be served
-	KeyID     string `koanf:"key_id"`    // Optional key identifier (defaults to "test-key-1")
-	Algorithm string `koanf:"algorithm"` // Optional algorithm (defaults to "RS256")
+	Issuer         string `koanf:"issuer"`           // Issuer URL (iss claim)
+	JWKSURL        string `koanf:"jwks_url"`         // URL where JWKS will be served
+	KeyID          string `koanf:"key_id"`           // Optional key identifier (defaults to "test-key-1")
+	Algorithm      string `koanf:"algorithm"`        // Optional algorithm (defaults to "RS256")
+	PrivateKeyFile string `koanf:"private_key_file"` // Optional PEM RSA private key for deterministic local signing
 }
 
 // FixtureRequest defines request matching criteria for HTTP fixtures

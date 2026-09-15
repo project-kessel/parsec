@@ -38,6 +38,8 @@ type LuaFetchProbe interface {
 	InvalidReturnType(got string)
 	FetchCompleted()
 	FetchCompletedNil()
+	// FetchAudit is called when a script attaches optional audit metadata.
+	FetchAudit(fields map[string]string)
 	ResultConversionFailed(err error)
 	End()
 }
@@ -69,6 +71,7 @@ func (NoOpLuaFetchProbe) ScriptExecutionFailed(error)  {}
 func (NoOpLuaFetchProbe) InvalidReturnType(string)     {}
 func (NoOpLuaFetchProbe) FetchCompleted()              {}
 func (NoOpLuaFetchProbe) FetchCompletedNil()           {}
+func (NoOpLuaFetchProbe) FetchAudit(map[string]string) {}
 func (NoOpLuaFetchProbe) ResultConversionFailed(error) {}
 func (NoOpLuaFetchProbe) End()                         {}
 
