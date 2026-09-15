@@ -371,4 +371,3 @@ func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 		t.Fatalf("error=%v, want rbac_denied when cookie org differs from RBAC record", payload["error"])
 	}
 }
-
