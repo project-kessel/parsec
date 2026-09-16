@@ -87,7 +87,7 @@ func TestHermeticAuthzJWT_EnforceIdpAuth(t *testing.T) {
 		dsRegistry.Register(identityPolicyDS)
 
 		tokenService := service.NewTokenService("sso.redhat.com", dsRegistry, issuerRegistry, nil)
-		return server.NewAuthzServer(trustStore, tokenService, nil, server.DefaultCredentialSources(), nil)
+		return server.NewAuthzServer(trustStore, tokenService, nil, server.DefaultCredentialSources(), nil, server.DefaultRequestIDConfig())
 	}
 
 	consoleTokenWithoutIdp := mustSignToken(t, jwksFixture, map[string]interface{}{

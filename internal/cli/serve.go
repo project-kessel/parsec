@@ -120,10 +120,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create issuer registry: %w", err)
 	}
 
-	// 4. Create service handlers
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, obs)
+	requestIDConfig := provider.RequestIDConfig()
 
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
+	// 4. Create service handlers
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, obs, requestIDConfig)
+
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs, requestIDConfig)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
 		Observer:       obs,
@@ -149,13 +151,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 6. Create and start server
 	srv := server.New(server.Config{
-		GRPCListener:   grpcListener,
-		HTTPListener:   httpListener,
-		AuthzServer:    authzServer,
-		ExchangeServer: exchangeServer,
-		JWKSServer:     jwksServer,
-		Observer:       obs,
-		MuxConfigurer:  obs.ConfigureHTTPMux,
+		GRPCListener:    grpcListener,
+		HTTPListener:    httpListener,
+		AuthzServer:     authzServer,
+		ExchangeServer:  exchangeServer,
+		JWKSServer:      jwksServer,
+		Observer:        obs,
+		MuxConfigurer:   obs.ConfigureHTTPMux,
+		RequestIDConfig: requestIDConfig,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)

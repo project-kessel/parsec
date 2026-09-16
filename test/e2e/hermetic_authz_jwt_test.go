@@ -104,7 +104,7 @@ func TestHermeticAuthzCheckJWT(t *testing.T) {
 
 	tokenService := service.NewTokenService("sso.redhat.com", dsRegistry, issuerRegistry, nil)
 
-	authzServer := server.NewAuthzServer(trustStore, tokenService, nil, server.DefaultCredentialSources(), nil)
+	authzServer := server.NewAuthzServer(trustStore, tokenService, nil, server.DefaultCredentialSources(), nil, server.DefaultRequestIDConfig())
 
 	// ============================================================
 	// 3. Test Cases
