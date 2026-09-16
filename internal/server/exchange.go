@@ -28,11 +28,12 @@ type ExchangeServer struct {
 	claimsFilterRegistry    ClaimsFilterRegistry
 	observer                service.TokenExchangeObserver
 	callerCredentialSources CredentialSources
+	requestIDConfig         RequestIDConfig
 }
 
 // NewExchangeServer creates a new token exchange server.
 // callerCredentialSources defines where caller (actor) credentials are extracted from.
-func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, callerCredentialSources CredentialSources, observer service.TokenExchangeObserver) *ExchangeServer {
+func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenService, claimsFilterRegistry ClaimsFilterRegistry, callerCredentialSources CredentialSources, observer service.TokenExchangeObserver, requestIDConfig RequestIDConfig) *ExchangeServer {
 	if observer == nil {
 		observer = service.NoOpTokenExchangeObserver{}
 	}
@@ -43,13 +44,14 @@ func NewExchangeServer(trustStore trust.Store, tokenService *service.TokenServic
 		claimsFilterRegistry:    claimsFilterRegistry,
 		observer:                observer,
 		callerCredentialSources: callerCredentialSources,
+		requestIDConfig:         requestIDConfig,
 	}
 }
 
 // Exchange implements the token exchange endpoint (RFC 8693)
 func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeRequest) (response *parsecv1.ExchangeResponse, returnErr error) {
-	ctx = contextWithRequestID(ctx, nil, nil)
-	_ = grpc.SetHeader(ctx, metadata.Pairs(requestIDHeader, request.ID(ctx)))
+	ctx = contextWithRequestID(ctx, nil, nil, s.requestIDConfig.Headers)
+	_ = grpc.SetHeader(ctx, metadata.Pairs(s.requestIDConfig.CanonicalHeader(), request.ID(ctx)))
 
 	// RFC 8693 defaults requested_token_type to access_token. Parsec issues a
 	// transaction token for that default to preserve its existing behavior.

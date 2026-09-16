@@ -52,10 +52,11 @@ type Server struct {
 	observer        LifecycleObserver
 	muxConfigurer   MuxConfigurer
 
-	authzServer    *AuthzServer
-	exchangeServer *ExchangeServer
-	jwksServer     *JWKSServer
-	activeRequests atomic.Int64
+	authzServer     *AuthzServer
+	exchangeServer  *ExchangeServer
+	jwksServer      *JWKSServer
+	requestIDConfig RequestIDConfig
+	activeRequests  atomic.Int64
 }
 
 // Config contains server configuration. Callers must supply pre-created
@@ -79,6 +80,9 @@ type Config struct {
 	// MuxConfigurer, when non-nil, is applied to the HTTP mux during Start
 	// to register additional handlers (e.g. /metrics for Prometheus scraping).
 	MuxConfigurer MuxConfigurer
+
+	// RequestIDConfig configures request correlation ID header names.
+	RequestIDConfig RequestIDConfig
 }
 
 // New creates a new server with the given configuration.
@@ -100,6 +104,7 @@ func New(cfg Config) *Server {
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
+		requestIDConfig: cfg.RequestIDConfig,
 	}
 }
 
@@ -145,8 +150,8 @@ func (s *Server) Start(ctx context.Context) error {
 	gwMux := runtime.NewServeMux(
 		runtime.WithMarshalerOption("application/x-www-form-urlencoded", NewFormMarshaler()),
 		runtime.WithErrorHandler(oauthHTTPErrorHandler),
-		runtime.WithIncomingHeaderMatcher(auditIncomingHeaderMatcher),
-		runtime.WithOutgoingHeaderMatcher(auditOutgoingHeaderMatcher),
+		runtime.WithIncomingHeaderMatcher(newIncomingHeaderMatcher(s.requestIDConfig.Headers)),
+		runtime.WithOutgoingHeaderMatcher(newOutgoingHeaderMatcher(s.requestIDConfig.Headers)),
 	)
 	opts := append(
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},

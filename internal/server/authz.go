@@ -37,6 +37,7 @@ type AuthzServer struct {
 	observer          service.AuthzCheckObserver
 	credentialSources CredentialSources
 	policy            AuthzCheckPolicy
+	requestIDConfig   RequestIDConfig
 }
 
 // NewAuthzServer creates a new ext_authz server.
@@ -45,7 +46,7 @@ type AuthzServer struct {
 // is used (preserving pre-policy behavior).
 // credentialSources defines where credentials are extracted from for both
 // subject and actor authentication.
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, observer service.AuthzCheckObserver, requestIDConfig RequestIDConfig) *AuthzServer {
 	if policy == nil {
 		policy = NewStaticAuthenticatedPolicy(nil)
 	}
@@ -60,6 +61,7 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		policy:            policy,
 		observer:          observer,
 		credentialSources: credentialSources,
+		requestIDConfig:   requestIDConfig,
 	}
 }
 
@@ -69,14 +71,14 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 	if req != nil {
 		headers = req.GetAttributes().GetRequest().GetHttp().GetHeaders()
 	}
-	ctx = contextWithRequestID(ctx, headers, nil)
+	ctx = contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
 
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
 	reasonCode := "internal_error"
 	var auditTokenTypes []service.TokenType
 	defer func() {
-		propagateAuthzRequestID(response, request.ID(ctx))
+		propagateAuthzRequestID(response, request.ID(ctx), s.requestIDConfig.CanonicalHeader())
 		p.RequestCompleted(authzRequestCompletion(response, reasonCode, auditTokenTypes))
 		p.End()
 	}()
