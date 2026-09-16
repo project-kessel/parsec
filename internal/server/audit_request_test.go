@@ -18,13 +18,43 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
-func TestContextWithRequestIDPrefersThreeScaleHeader(t *testing.T) {
+func TestContextWithRequestIDPrefersFirstConfiguredHeader(t *testing.T) {
+	headers := []string{"x-custom-request-id", "x-request-id"}
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
-		"x-rh-insights-request-id", "insights-id",
+		"x-custom-request-id", "custom-id",
 		"x-request-id", "fallback-id",
 	))
-	ctx = contextWithRequestID(ctx, nil, func() string { return "generated" })
-	require.Equal(t, "insights-id", request.ID(ctx))
+	ctx = contextWithRequestID(ctx, nil, func() string { return "generated" }, headers)
+	require.Equal(t, "custom-id", request.ID(ctx))
+}
+
+func TestContextWithRequestIDUsesDefaultWhenEmpty(t *testing.T) {
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-request-id", "default-id",
+	))
+	ctx = contextWithRequestID(ctx, nil, func() string { return "generated" }, nil)
+	require.Equal(t, "default-id", request.ID(ctx))
+}
+
+func TestDefaultRequestIDConfigPrefers3ScaleHeader(t *testing.T) {
+	config := DefaultRequestIDConfig()
+	require.Equal(t, []string{"x-rh-insights-request-id", "x-request-id"}, config.Headers)
+	require.Equal(t, "x-rh-insights-request-id", config.CanonicalHeader())
+
+	// Verify x-rh-insights-request-id takes precedence over x-request-id
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-rh-insights-request-id", "insights-id-123",
+		"x-request-id", "fallback-id",
+	))
+	ctx = contextWithRequestID(ctx, nil, func() string { return "generated" }, config.Headers)
+	require.Equal(t, "insights-id-123", request.ID(ctx))
+
+	// Verify fallback to x-request-id when x-rh-insights-request-id is missing
+	ctx2 := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-request-id", "fallback-id",
+	))
+	ctx2 = contextWithRequestID(ctx2, nil, func() string { return "generated" }, config.Headers)
+	require.Equal(t, "fallback-id", request.ID(ctx2))
 }
 
 func TestAuthzRequestCompletionClassifiesTerminalOutcome(t *testing.T) {
@@ -66,35 +96,47 @@ func deniedCheckResponse(code codes.Code, httpCode typev3.StatusCode) *authv3.Ch
 }
 
 func TestContextWithRequestIDReadsExtAuthzHeaders(t *testing.T) {
+	headers := []string{"x-custom-request-id", "x-request-id"}
 	ctx := contextWithRequestID(context.Background(), map[string]string{
-		"x-rh-insights-request-id": "ext-authz-id",
-	}, func() string { return "generated" })
+		"x-custom-request-id": "ext-authz-id",
+	}, func() string { return "generated" }, headers)
 	require.Equal(t, "ext-authz-id", request.ID(ctx))
 }
 
 func TestContextWithRequestIDGeneratesForUnsafeInput(t *testing.T) {
+	headers := []string{"x-request-id"}
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
-		"x-rh-insights-request-id", "bad\nvalue",
+		"x-request-id", "bad\nvalue",
 	))
-	ctx = contextWithRequestID(ctx, nil, func() string { return "generated-id" })
+	ctx = contextWithRequestID(ctx, nil, func() string { return "generated-id" }, headers)
 	require.Equal(t, "generated-id", request.ID(ctx))
 }
 
 func TestPropagateAuthzRequestID(t *testing.T) {
+	canonical := "x-request-id"
 	response := (&AuthzServer{}).okResponse(nil, nil)
-	propagateAuthzRequestID(response, "request-123")
-	require.Equal(t, requestIDHeader, response.GetOkResponse().GetHeaders()[0].GetHeader().GetKey())
+	propagateAuthzRequestID(response, "request-123", canonical)
+	require.Equal(t, canonical, response.GetOkResponse().GetHeaders()[0].GetHeader().GetKey())
 	require.Equal(t, corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD, response.GetOkResponse().GetHeaders()[0].GetAppendAction())
 	require.Equal(t, "request-123", response.GetOkResponse().GetHeaders()[0].GetHeader().GetValue())
 }
 
-func TestAuditHeaderMatchersPreserveRequestIDName(t *testing.T) {
-	incoming, ok := auditIncomingHeaderMatcher("X-Rh-Insights-Request-Id")
+func TestHeaderMatchersPreserveConfiguredRequestIDName(t *testing.T) {
+	headers := []string{"x-custom-request-id", "x-request-id"}
+	incomingMatcher := newIncomingHeaderMatcher(headers)
+	outgoingMatcher := newOutgoingHeaderMatcher(headers)
+
+	incoming, ok := incomingMatcher("X-Custom-Request-Id")
 	require.True(t, ok)
-	require.Equal(t, requestIDHeader, incoming)
-	outgoing, ok := auditOutgoingHeaderMatcher(requestIDHeader)
-	require.True(t, ok)
-	require.Equal(t, requestIDHeader, outgoing)
+	require.Equal(t, "x-custom-request-id", incoming)
+
+	incoming2, ok2 := incomingMatcher("X-Request-Id")
+	require.True(t, ok2)
+	require.Equal(t, "x-request-id", incoming2)
+
+	outgoing, ok3 := outgoingMatcher("x-custom-request-id")
+	require.True(t, ok3)
+	require.Equal(t, "x-custom-request-id", outgoing)
 }
 
 type capturingAuthzObserver struct {

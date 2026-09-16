@@ -39,6 +39,7 @@ type AuthzServer struct {
 	policy            AuthzCheckPolicy
 	dropHeaders       []string // unconditionally removed from upstream requests
 	dropCookies       []string // unconditionally removed from the Cookie header
+	requestIDConfig   RequestIDConfig
 }
 
 // NewAuthzServer creates a new ext_authz server.
@@ -56,7 +57,7 @@ type AuthzServer struct {
 // Cookie header, regardless of which credential source matched. Unlike
 // dropHeaders, cookie names are case-sensitive (RFC 6265) and are not
 // lowercased.
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, dropHeaders []string, dropCookies []string, observer service.AuthzCheckObserver) *AuthzServer {
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, dropHeaders []string, dropCookies []string, observer service.AuthzCheckObserver, requestIDConfig RequestIDConfig) *AuthzServer {
 	if policy == nil {
 		policy = NewStaticAuthenticatedPolicy(nil)
 	}
@@ -73,6 +74,7 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		credentialSources: credentialSources,
 		dropHeaders:       normalizeDropHeaders(dropHeaders),
 		dropCookies:       normalizeDropCookies(dropCookies),
+		requestIDConfig:   requestIDConfig,
 	}
 }
 
@@ -114,14 +116,14 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 	if req != nil {
 		headers = req.GetAttributes().GetRequest().GetHttp().GetHeaders()
 	}
-	ctx = contextWithRequestID(ctx, headers, nil)
+	ctx = contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
 
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
 	reasonCode := "internal_error"
 	var auditTokenTypes []service.TokenType
 	defer func() {
-		propagateAuthzRequestID(response, request.ID(ctx))
+		propagateAuthzRequestID(response, request.ID(ctx), s.requestIDConfig.CanonicalHeader())
 		p.RequestCompleted(authzRequestCompletion(response, reasonCode, auditTokenTypes))
 		p.End()
 	}()
