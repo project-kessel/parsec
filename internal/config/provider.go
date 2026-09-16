@@ -158,11 +158,31 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 	if !audit.ValidEventPrefix(prefix) {
 		return nil, fmt.Errorf("invalid audit event prefix %q: use only letters, digits, underscore, hyphen, or dot", prefix)
 	}
+
+	opts := []audit.Option{audit.WithEventPrefix(prefix)}
+
+	classifications := p.failureClassifications()
+	if len(classifications) > 0 {
+		opts = append(opts, audit.WithFailureClassifications(classifications))
+	}
+
 	return audit.New(logger, audit.Metadata{
 		ServiceName:    "parsec",
 		ServiceVersion: buildinfo.Version,
 		TrustDomain:    p.config.TrustDomain,
-	}, audit.WithEventPrefix(prefix)), nil
+	}, opts...), nil
+}
+
+// failureClassifications builds a map from datasource name to audit failure
+// classification from the DataSources config.
+func (p *Provider) failureClassifications() map[string]string {
+	result := make(map[string]string)
+	for _, ds := range p.config.DataSources {
+		if ds.FailureClassification != "" {
+			result[ds.Name] = ds.FailureClassification
+		}
+	}
+	return result
 }
 
 func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {
@@ -493,4 +513,13 @@ func (p *Provider) CredentialSources() (server.CredentialSources, error) {
 	}
 
 	return newCredentialSources(p.config.CredentialSources)
+}
+
+// RequestIDConfig returns the configured request-ID header config. Returns
+// the default (["x-request-id"]) when no headers are configured.
+func (p *Provider) RequestIDConfig() server.RequestIDConfig {
+	if p.config.Observability != nil && len(p.config.Observability.RequestIDHeaders) > 0 {
+		return server.RequestIDConfig{Headers: p.config.Observability.RequestIDHeaders}
+	}
+	return server.DefaultRequestIDConfig()
 }

@@ -121,7 +121,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 		}))
 
 		tokenService := service.NewTokenService("sso.redhat.com", dsRegistry, issuerRegistry, nil)
-		return server.NewAuthzServer(trustStore(t, jwksFixture, client), tokenService, nil, server.DefaultCredentialSources(), nil)
+		return server.NewAuthzServer(trustStore(t, jwksFixture, client), tokenService, nil, server.DefaultCredentialSources(), nil, server.DefaultRequestIDConfig())
 	}
 
 	consoleClaims := map[string]interface{}{

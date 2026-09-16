@@ -12,6 +12,11 @@ observability:
   type: composite
   log_level: info
   log_format: json
+  # Ordered request-ID header names. First match wins on extraction; first
+  # entry is the canonical header propagated on responses.
+  request_id_headers:
+    - "x-rh-insights-request-id"
+    - "x-request-id"
   observers:
     - type: audit
       # Defaults to "parsec_"; set to "insights_" for 3scale-compatible names.
@@ -88,6 +93,7 @@ data_sources:
     type: lua
     script_file: ./configs/scripts/export_compliance.lua
     http_client: entitlements
+    failure_classification: compliance_failure
     config:
       compliance_api: "/v1/compliance"
     caching:
@@ -98,6 +104,7 @@ data_sources:
   - name: bop-user
     type: lua
     script_file: ./configs/scripts/bop_user.lua
+    failure_classification: supplemental_user_data_failure
     http_client: backoffice-proxy
     config:
       bop_url: "https://backoffice-proxy.apps.ext.spoke.preprod.us-west-2.aws.paas.redhat.com"

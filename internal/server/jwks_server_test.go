@@ -27,8 +27,8 @@ func startJWKSTestServer(t *testing.T, issuerRegistry service.Registry) *testEnv
 	claimsFilterRegistry := NewStubClaimsFilterRegistry()
 
 	return startTestServer(t, Config{
-		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil),
-		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil),
+		AuthzServer:    NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig()),
+		ExchangeServer: NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig()),
 		JWKSServer:     NewJWKSServer(JWKSServerConfig{IssuerRegistry: issuerRegistry, Observer: NoOpServerObserver{}}),
 		Observer:       NoOpServerObserver{},
 	})

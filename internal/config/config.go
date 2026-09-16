@@ -224,6 +224,11 @@ type DataSourceConfig struct {
 
 	// Caching configuration
 	Caching *CachingConfig `koanf:"caching"`
+
+	// FailureClassification is the audit reason code to emit when this
+	// datasource fails (e.g. "compliance_failure", "supplemental_user_data_failure").
+	// Defaults to "dependency_failure" when unset.
+	FailureClassification string `koanf:"failure_classification"`
 }
 
 // HTTPClientSpec is the client configuration schema (no name).
@@ -474,6 +479,13 @@ type ObservabilityConfig struct {
 	// EventPrefix is prepended to every audit event name. When omitted, audit
 	// events use "parsec_". Set it to an empty string to disable prefixing.
 	EventPrefix *string `koanf:"event_prefix" usage:"audit event-name prefix (default: parsec_)"`
+
+	// RequestIDHeaders is an ordered list of HTTP header names used to extract
+	// and propagate request correlation identifiers. The first match wins on
+	// extraction; the first entry is the canonical header set on responses.
+	// Defaults to ["x-request-id"] when empty or unset. RH deployments should
+	// configure ["x-rh-insights-request-id", "x-request-id"].
+	RequestIDHeaders []string `koanf:"request_id_headers" usage:"ordered request-ID header names (default: x-request-id)"`
 
 	// Event-specific logging configuration
 	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`

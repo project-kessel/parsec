@@ -55,7 +55,7 @@ func TestAuthzServer_Check(t *testing.T) {
 	trustDomain := "parsec.test"
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-	authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	t.Run("successful authorization", func(t *testing.T) {
 		req := &authv3.CheckRequest{
@@ -436,7 +436,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 	trustDomain := "parsec.test"
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	t.Run("anonymous actor gets filtered store - no validators match", func(t *testing.T) {
 		// No actor credentials in context, so ForActor will be called with AnonymousResult
@@ -504,7 +504,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 		storeWithGateway.AddValidator("external-validator", externalValidator)
 		storeWithGateway.AddValidator("internal-validator", internalValidator)
 
-		authzServerWithGateway := NewAuthzServer(storeWithGateway, tokenService, nil, DefaultCredentialSources(), nil)
+		authzServerWithGateway := NewAuthzServer(storeWithGateway, tokenService, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		req := &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -560,7 +560,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 		})
 		emptyStore.AddValidator(jwtValidator)
 
-		authzServerFailing := NewAuthzServer(emptyStore, tokenService, nil, DefaultCredentialSources(), nil)
+		authzServerFailing := NewAuthzServer(emptyStore, tokenService, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		// Add actor credentials (Bearer) that will fail validation since no Bearer validator exists
 		md := metadata.New(map[string]string{
@@ -656,7 +656,7 @@ func TestAuthzServer_WithActorFilteringByRequestPath(t *testing.T) {
 	trustDomain := "parsec.test"
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	t.Run("admin path allows admin validator", func(t *testing.T) {
 		req := &authv3.CheckRequest{
@@ -791,7 +791,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		trustDomain := "parsec.test"
 		tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs)
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs, DefaultRequestIDConfig())
 
 		// Configure stub validator to return success
 		stubValidator.WithResult(&trust.Result{
@@ -843,7 +843,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		trustDomain := "parsec.test"
 		tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs)
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs, DefaultRequestIDConfig())
 
 		// Create request with invalid token (not added to stubValidator)
 		req := &authv3.CheckRequest{
@@ -891,7 +891,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		trustDomain := "parsec.test"
 		tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs)
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs, DefaultRequestIDConfig())
 
 		// Create request with no authorization header
 		req := &authv3.CheckRequest{
@@ -1108,7 +1108,7 @@ func TestAuthzServer_Check_AllowWithoutIssue(t *testing.T) {
 		Reason: "allow without issue",
 	}}
 
-	authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -1162,7 +1162,7 @@ func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
 	}}
 
 	cookieSource := mustCookieSource(t, "cookie-jwt", "cs_jwt")
-	authzServer := NewAuthzServer(trustStore, nil, policy, NewCredentialSources(cookieSource), nil)
+	authzServer := NewAuthzServer(trustStore, nil, policy, NewCredentialSources(cookieSource), nil, DefaultRequestIDConfig())
 	ctx := context.Background()
 
 	t.Run("mixed-case Cookie header key is normalized and sanitized", func(t *testing.T) {
@@ -1254,7 +1254,7 @@ func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
 		// Source is configured for "cs_jwt" but header has "CS_JWT" (different case).
 		// Cookie names are case-sensitive per RFC 6265, so no credential should
 		// be extracted and no sanitization should occur.
-		noMatchServer := NewAuthzServer(trustStore, nil, nil, NewCredentialSources(cookieSource), nil)
+		noMatchServer := NewAuthzServer(trustStore, nil, nil, NewCredentialSources(cookieSource), nil, DefaultRequestIDConfig())
 
 		resp, err := noMatchServer.Check(ctx, &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -1294,7 +1294,7 @@ func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
 func TestAuthzServer_Check_NilHttpRequest(t *testing.T) {
 	ctx := context.Background()
 
-	authzServer := NewAuthzServer(trust.NewStubStore(), nil, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(trust.NewStubStore(), nil, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -1316,7 +1316,7 @@ func TestAuthzServer_Check_NilHttpRequest(t *testing.T) {
 }
 
 func TestBuildRequestAttributes_NilHttp(t *testing.T) {
-	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil)
+	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -1360,7 +1360,7 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 			TransactionContextMappers: []service.ClaimMapper{celMapper},
 		}))
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-		return NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), observer)
+		return NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), observer, DefaultRequestIDConfig())
 	}
 
 	checkReq := &authv3.CheckRequest{
@@ -1437,7 +1437,7 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		registry.Register(service.TokenTypeTransactionToken, &nilTokenIssuer{})
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
 		observer := &capturingAuthzObserver{}
-		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), observer)
+		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), observer, DefaultRequestIDConfig())
 
 		resp, err := srv.Check(ctx, checkReq)
 		if err != nil {
@@ -1495,7 +1495,7 @@ func TestAuthz_DenialHTTPStatus(t *testing.T) {
 			TTL:       time.Minute,
 		}))
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		resp, err := srv.Check(ctx, &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -1537,7 +1537,7 @@ func TestAuthz_DenialHTTPStatus(t *testing.T) {
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
 		srv := NewAuthzServer(trustStore, tokenService, &stubPolicy{
 			decision: AuthzCheckDecision{Action: AuthzCheckDeny, Reason: "not allowed"},
-		}, DefaultCredentialSources(), nil)
+		}, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		resp, err := srv.Check(ctx, &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{

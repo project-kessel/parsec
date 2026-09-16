@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	auditctx "github.com/project-kessel/parsec/internal/audit"
 	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/keys"
@@ -58,9 +59,10 @@ type Observer struct {
 	server.NoOpServerObserver
 	httpclient.NoOpHTTPClientObserver
 
-	logger      zerolog.Logger
-	meta        Metadata
-	eventPrefix string
+	logger                 zerolog.Logger
+	meta                   Metadata
+	eventPrefix            string
+	failureClassifications map[string]string
 }
 
 // Option configures an audit observer.
@@ -70,6 +72,15 @@ type Option func(*Observer)
 func WithEventPrefix(prefix string) Option {
 	return func(observer *Observer) {
 		observer.eventPrefix = prefix
+	}
+}
+
+// WithFailureClassifications sets the mapping from datasource name to audit
+// failure reason code. When a datasource fails, the mapped classification is
+// used instead of the generic "dependency_failure" default.
+func WithFailureClassifications(classifications map[string]string) Option {
+	return func(observer *Observer) {
+		observer.failureClassifications = classifications
 	}
 }
 
@@ -125,31 +136,28 @@ type resourceInfo struct {
 	CacheStatus string   `json:"cache_status,omitempty"`
 }
 
-type crossAccountInfo struct {
-	TargetOrgID         string `json:"target_org_id,omitempty"`
-	TargetAccountNumber string `json:"target_account_number,omitempty"`
-}
-
 type requestProbe struct {
 	service.NoOpAuthzCheckProbe
 	service.NoOpTokenExchangeProbe
-	observer     *Observer
-	requestID    string
-	started      time.Time
-	action       string
-	request      requestInfo
-	subject      principal
-	actor        principal
-	crossAccount crossAccountInfo
-	completion   service.RequestCompletion
-	completed    bool
-	authorize    bool
-	state        *request.AuditState
-	cacheStatus  string
+	observer    *Observer
+	requestID   string
+	started     time.Time
+	action      string
+	request     requestInfo
+	subject     principal
+	actor       principal
+	completion  service.RequestCompletion
+	completed   bool
+	authorize   bool
+	state       *request.AuditState
+	collector   *auditctx.Collector
+	cacheStatus string
 }
 
 func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, service.AuthzCheckProbe) {
 	ctx, state := request.WithAuditState(ctx)
+	collector := &auditctx.Collector{}
+	ctx = auditctx.WithReporter(ctx, collector)
 	return ctx, &requestProbe{
 		observer:  o,
 		requestID: safeValue(request.ID(ctx), 128),
@@ -158,11 +166,14 @@ func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, serv
 		request:   requestInfo{Protocol: "ext_authz"},
 		authorize: true,
 		state:     state,
+		collector: collector,
 	}
 }
 
 func (o *Observer) TokenExchangeStarted(ctx context.Context, _, requestedTokenType, _, _ string) (context.Context, service.TokenExchangeProbe) {
 	ctx, state := request.WithAuditState(ctx)
+	collector := &auditctx.Collector{}
+	ctx = auditctx.WithReporter(ctx, collector)
 	p := &requestProbe{
 		observer:  o,
 		requestID: safeValue(request.ID(ctx), 128),
@@ -170,6 +181,7 @@ func (o *Observer) TokenExchangeStarted(ctx context.Context, _, requestedTokenTy
 		action:    "token_exchange",
 		request:   requestInfo{Protocol: "grpc", Method: http.MethodPost, Path: "/v1/token"},
 		state:     state,
+		collector: collector,
 	}
 	if tokenType := safeValue(requestedTokenType, 256); tokenType != "" {
 		p.completion.TokenTypes = []service.TokenType{service.TokenType(tokenType)}
@@ -184,7 +196,6 @@ func (p *requestProbe) RequestAttributesParsed(attrs *request.RequestAttributes)
 	p.request.Method = safeValue(attrs.Method, 32)
 	p.request.Path = safePath(attrs.Path)
 	p.request.SourceIP = safeValue(attrs.IPAddress, 64)
-	p.crossAccount = crossAccountFromCookie(attrs.Headers)
 }
 
 func (p *requestProbe) ActorCredentialExtracted(credential trust.Credential, _ []string) {
@@ -228,33 +239,49 @@ func (p *requestProbe) End() {
 		p.completion.ReasonCode = failureReason
 	}
 	p.cacheStatus = cacheStatus
-	p.emit("request")
+	signals := p.collector.Signals()
+	p.emit("request", nil)
+	emitted := map[string]bool{}
 
-	if p.crossAccount.TargetOrgID != "" || p.crossAccount.TargetAccountNumber != "" {
-		p.emit("rbac_cross_access_audit")
+	for _, signal := range signals {
+		if signal.Operation == "cross_account_access" {
+			p.emit("rbac_cross_access_audit", signal.Metadata)
+			emitted["rbac_cross_access_audit"] = true
+			break
+		}
 	}
 	if p.authorize {
-		p.emit("authorize")
+		p.emit("authorize", nil)
 	}
 	if p.subject.CredentialType == string(trust.CredentialTypeMTLS) || p.subject.CredentialType == string(trust.CredentialTypeForwardedClientCert) {
-		p.emit("validate_ssl_cert")
+		p.emit("validate_ssl_cert", nil)
 	}
 	if p.actor.CredentialType == string(trust.CredentialTypeHeader) {
-		p.emit("verify_psk")
+		p.emit("verify_psk", nil)
 	}
 	switch p.completion.ReasonCode {
 	case ReasonComplianceDenied:
-		p.emit("auth_compliance_failure")
+		p.emit("auth_compliance_failure", nil)
+		emitted["auth_compliance_failure"] = true
 	case ReasonComplianceFailure:
-		p.emit("compliance_failure")
+		p.emit("compliance_failure", nil)
+		emitted["compliance_failure"] = true
 	case ReasonSupplementalFailure:
-		p.emit("supplemental_user_data_failure")
+		p.emit("supplemental_user_data_failure", nil)
+		emitted["supplemental_user_data_failure"] = true
 	case ReasonDependencyFailure:
-		p.emit("dependency_failure")
+		p.emit("dependency_failure", nil)
+		emitted["dependency_failure"] = true
+	}
+	for _, signal := range signals {
+		if suffix := signalEventSuffix(signal.ReasonCode); suffix != "" && !emitted[suffix] {
+			p.emit(suffix, nil)
+			emitted[suffix] = true
+		}
 	}
 }
 
-func (p *requestProbe) emit(suffix string) {
+func (p *requestProbe) emit(suffix string, signalMetadata map[string]string) {
 	name := p.observer.eventName(suffix)
 	completion := p.completion
 	reason := safeReasonCode(completion.ReasonCode)
@@ -279,13 +306,31 @@ func (p *requestProbe) emit(suffix string) {
 		Interface("actor", p.actor).
 		Interface("resource", resourceInfo{Type: "authorization_request", TokenTypes: tokenTypes, CacheStatus: p.cacheStatus}).
 		Interface("response", responseInfo{GRPCCode: completion.GRPCCode, HTTPStatus: completion.HTTPStatus})
+	if signals := p.collector.Signals(); len(signals) > 0 {
+		event = event.Interface("signals", signals)
+	}
 	if reason != "" {
 		event = event.Str("reason_code", reason)
 	}
-	if p.crossAccount.TargetOrgID != "" || p.crossAccount.TargetAccountNumber != "" {
-		event = event.Interface("cross_account", p.crossAccount)
+	if len(signalMetadata) > 0 {
+		event = event.Interface("cross_account", signalMetadata)
 	}
 	event.Msg("security audit event")
+}
+
+func signalEventSuffix(reason string) string {
+	switch reason {
+	case ReasonComplianceDenied:
+		return "auth_compliance_failure"
+	case ReasonComplianceFailure:
+		return "compliance_failure"
+	case ReasonSupplementalFailure:
+		return "supplemental_user_data_failure"
+	case ReasonDependencyFailure:
+		return "dependency_failure"
+	default:
+		return ""
+	}
 }
 
 func safeReasonCode(reason string) string {
@@ -350,7 +395,7 @@ type auditDataSourceCacheProbe struct {
 }
 
 func (o *Observer) CacheFetchStarted(ctx context.Context, name string) (context.Context, datasource.CacheFetchProbe) {
-	return ctx, &auditDataSourceCacheProbe{state: request.AuditStateFrom(ctx), failureReason: dependencyReason(name)}
+	return ctx, &auditDataSourceCacheProbe{state: request.AuditStateFrom(ctx), failureReason: o.classificationFor(name)}
 }
 func (p *auditDataSourceCacheProbe) CacheHit()     { p.state.SetCacheStatus("hit") }
 func (p *auditDataSourceCacheProbe) CacheMiss()    { p.state.SetCacheStatus("miss") }
@@ -367,7 +412,7 @@ type auditLuaFetchProbe struct {
 }
 
 func (o *Observer) LuaFetchStarted(ctx context.Context, name string) (context.Context, datasource.LuaFetchProbe) {
-	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), failureReason: dependencyReason(name)}
+	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), failureReason: o.classificationFor(name)}
 }
 func (p *auditLuaFetchProbe) ScriptLoadFailed(error)       { p.state.SetFailureReason(p.failureReason) }
 func (p *auditLuaFetchProbe) ScriptExecutionFailed(error)  { p.state.SetFailureReason(p.failureReason) }
@@ -386,13 +431,13 @@ func (p *auditJWTProbe) JWKSLookupFailed(error) {
 	p.state.SetFailureReason(ReasonDependencyFailure)
 }
 
-func dependencyReason(name string) string {
-	name = strings.ToLower(name)
-	if strings.Contains(name, "compliance") {
-		return ReasonComplianceFailure
-	}
-	if strings.Contains(name, "supplemental") || strings.Contains(name, "backoffice") || strings.Contains(name, "bop") {
-		return ReasonSupplementalFailure
+// classificationFor returns the configured failure classification for a
+// datasource, falling back to "dependency_failure" when not configured.
+func (o *Observer) classificationFor(name string) string {
+	if o.failureClassifications != nil {
+		if classification, ok := o.failureClassifications[name]; ok && classification != "" {
+			return classification
+		}
 	}
 	return ReasonDependencyFailure
 }
@@ -611,30 +656,6 @@ func safeValue(value string, max int) string {
 		}
 	}
 	return value
-}
-
-func crossAccountFromCookie(headers map[string]string) crossAccountInfo {
-	if len(headers) == 0 {
-		return crossAccountInfo{}
-	}
-	cookieHeader := headers["cookie"]
-	if cookieHeader == "" {
-		cookieHeader = headers["Cookie"]
-	}
-	cookies, err := http.ParseCookie(cookieHeader)
-	if err != nil {
-		return crossAccountInfo{}
-	}
-	var result crossAccountInfo
-	for _, cookie := range cookies {
-		switch cookie.Name {
-		case "cross_access_org_id":
-			result.TargetOrgID = safeValue(cookie.Value, 256)
-		case "cross_access_account_number":
-			result.TargetAccountNumber = safeValue(cookie.Value, 256)
-		}
-	}
-	return result
 }
 
 var _ interface {

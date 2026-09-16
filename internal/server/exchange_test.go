@@ -70,7 +70,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
 	claimsFilterRegistry := NewStubClaimsFilterRegistry()
-	exchangeServer := NewExchangeServer(filteredStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+	exchangeServer := NewExchangeServer(filteredStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	t.Run("anonymous actor gets filtered store - no validators match", func(t *testing.T) {
 		// No actor credentials in context, so ForActor will be called with AnonymousResult
@@ -122,7 +122,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 		storeWithClient.AddValidator("external-validator", externalValidator)
 		storeWithClient.AddValidator("internal-validator", internalValidator)
 
-		exchangeServerWithClient := NewExchangeServer(storeWithClient, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		exchangeServerWithClient := NewExchangeServer(storeWithClient, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -159,7 +159,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 		})
 		emptyStore.AddValidator(jwtValidator)
 
-		exchangeServerFailing := NewExchangeServer(emptyStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		exchangeServerFailing := NewExchangeServer(emptyStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		// Add actor credentials (Bearer) that will fail validation since no Bearer validator exists
 		md := metadata.New(map[string]string{
@@ -227,7 +227,7 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 		roleBasedStore.AddValidator("admin-validator", adminSubjectValidator)
 		roleBasedStore.AddValidator("user-validator", userValidator)
 
-		exchangeServerRoleBased := NewExchangeServer(roleBasedStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		exchangeServerRoleBased := NewExchangeServer(roleBasedStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		// Test admin actor can access admin validator
 		adminMd := metadata.New(map[string]string{
@@ -308,7 +308,7 @@ func TestExchangeServer_WithActorFilteringByAudience(t *testing.T) {
 	tokenService := service.NewTokenService("prod.example.com", dataSourceRegistry, issuerRegistry, nil)
 
 	claimsFilterRegistry := NewStubClaimsFilterRegistry()
-	exchangeServer := NewExchangeServer(filteredStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+	exchangeServer := NewExchangeServer(filteredStore, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	t.Run("prod audience allows prod validator", func(t *testing.T) {
 		req := &parsecv1.ExchangeRequest{
@@ -339,7 +339,7 @@ func TestExchangeServer_WithActorFilteringByAudience(t *testing.T) {
 	})
 	devIssuerRegistry.Register(service.TokenTypeTransactionToken, devIssuer)
 	devTokenService := service.NewTokenService("dev.example.com", dataSourceRegistry, devIssuerRegistry, nil)
-	devExchangeServer := NewExchangeServer(filteredStore, devTokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+	devExchangeServer := NewExchangeServer(filteredStore, devTokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	t.Run("dev audience allows dev validator", func(t *testing.T) {
 		req := &parsecv1.ExchangeRequest{
@@ -372,7 +372,7 @@ func TestExchangeServer_WithActorFilteringByAudience(t *testing.T) {
 		})
 		wrongIssuerRegistry.Register(service.TokenTypeTransactionToken, wrongIssuer)
 		wrongTokenService := service.NewTokenService("wrong.example.com", dataSourceRegistry, wrongIssuerRegistry, nil)
-		wrongExchangeServer := NewExchangeServer(filteredStore, wrongTokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		wrongExchangeServer := NewExchangeServer(filteredStore, wrongTokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -439,7 +439,7 @@ func TestExchangeServer_ActorPassedToTokenIssuance(t *testing.T) {
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
 	claimsFilterRegistry := NewStubClaimsFilterRegistry()
-	exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+	exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	t.Run("actor information is passed to token issuance", func(t *testing.T) {
 		// Add actor credentials via gRPC metadata
@@ -576,7 +576,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 
 		// Use passthrough filter that allows all claims
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
-		exchangeServer := NewExchangeServer(store, localTokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		exchangeServer := NewExchangeServer(store, localTokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		requestContextJSON := `{
 			"method": "GET",
@@ -643,7 +643,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 
 		// Use allow list filter that only allows method and path
 		allowListFilter := NewAllowListClaimsFilterRegistry([]string{"method", "path"})
-		exchangeServer := NewExchangeServer(store, localTokenService, allowListFilter, DefaultCredentialSources(), nil)
+		exchangeServer := NewExchangeServer(store, localTokenService, allowListFilter, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		requestContextJSON := `{
 			"method": "GET",
@@ -698,7 +698,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 
 	t.Run("empty request_context uses empty attributes", func(t *testing.T) {
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
-		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -719,7 +719,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 
 	t.Run("legacy base64-encoded request_context is accepted", func(t *testing.T) {
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
-		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		requestContextJSON := `{"method":"GET","path":"/api/users"}`
 		requestContextBase64 := base64.StdEncoding.EncodeToString([]byte(requestContextJSON))
@@ -743,7 +743,7 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 
 	t.Run("invalid JSON in request_context returns error", func(t *testing.T) {
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
-		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil)
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -807,7 +807,7 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
 
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
-		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), fakeObs)
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), fakeObs, DefaultRequestIDConfig())
 
 		req := &parsecv1.ExchangeRequest{
 			GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -849,7 +849,7 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
 
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
-		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), fakeObs)
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), fakeObs, DefaultRequestIDConfig())
 
 		md := metadata.New(map[string]string{
 			"authorization": "Bearer invalid-actor-token",
@@ -888,7 +888,7 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
 
 		claimsFilterRegistry := NewStubClaimsFilterRegistry()
-		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), fakeObs)
+		exchangeServer := NewExchangeServer(store, tokenService, claimsFilterRegistry, DefaultCredentialSources(), fakeObs, DefaultRequestIDConfig())
 
 		req := &parsecv1.ExchangeRequest{
 			GrantType:      "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -913,7 +913,7 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 
 func TestExchangeUnsupportedGrantTypeAuditReason(t *testing.T) {
 	observer := &capturingExchangeObserver{}
-	server := NewExchangeServer(nil, nil, nil, CredentialSources{}, observer)
+	server := NewExchangeServer(nil, nil, nil, CredentialSources{}, observer, DefaultRequestIDConfig())
 
 	_, err := server.Exchange(context.Background(), &parsecv1.ExchangeRequest{GrantType: "client-secret-value"})
 	if err == nil {
@@ -945,7 +945,7 @@ func TestExchange_InvalidRequest(t *testing.T) {
 		TransactionContextMappers: []service.ClaimMapper{celMapper},
 	}))
 	tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-	exchangeServer := NewExchangeServer(trustStore, tokenService, NewStubClaimsFilterRegistry(), DefaultCredentialSources(), nil)
+	exchangeServer := NewExchangeServer(trustStore, tokenService, NewStubClaimsFilterRegistry(), DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	_, err = exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
 		GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -1002,7 +1002,7 @@ func TestExchange_InvalidTarget(t *testing.T) {
 		TransactionContextMappers: []service.ClaimMapper{celMapper},
 	}))
 	tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-	exchangeServer := NewExchangeServer(trustStore, tokenService, NewStubClaimsFilterRegistry(), DefaultCredentialSources(), nil)
+	exchangeServer := NewExchangeServer(trustStore, tokenService, NewStubClaimsFilterRegistry(), DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	_, err = exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
 		GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -1040,7 +1040,7 @@ func TestExchange_NilToken_Internal(t *testing.T) {
 	registry := service.NewSimpleRegistry()
 	registry.Register(service.TokenTypeTransactionToken, &nilTokenIssuer{})
 	tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-	exchangeServer := NewExchangeServer(trustStore, tokenService, NewStubClaimsFilterRegistry(), DefaultCredentialSources(), nil)
+	exchangeServer := NewExchangeServer(trustStore, tokenService, NewStubClaimsFilterRegistry(), DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	_, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
 		GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",

@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
+	auditctx "github.com/project-kessel/parsec/internal/audit"
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -21,7 +22,18 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	var output bytes.Buffer
 	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec", ServiceVersion: "v1"})
 	ctx := request.WithID(context.Background(), "request-123")
-	_, probe := obs.AuthzCheckStarted(ctx)
+	ctx, probe := obs.AuthzCheckStarted(ctx)
+
+	// Simulate Lua validator emitting a cross-account signal (previously detected by Go cookie parsing).
+	auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+		Source:    auditctx.SourceValidator,
+		Operation: "cross_account_access",
+		Outcome:   auditctx.OutcomeSuccess,
+		Metadata: map[string]string{
+			"target_org_id": "target-org",
+		},
+	})
+
 	probe.RequestAttributesParsed(&request.RequestAttributes{
 		Method: "GET",
 		Path:   "/api/widgets?access_token=secret-query",
@@ -57,6 +69,11 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	require.Equal(t, "info", records[0]["level"])
 	require.Equal(t, "parsec_rbac_cross_access_audit", records[1]["log_type"])
 	require.Equal(t, "parsec_authorize", records[2]["log_type"])
+
+	// Verify cross_account metadata is carried through from the signal
+	crossAccount, hasCrossAccount := records[1]["cross_account"].(map[string]any)
+	require.True(t, hasCrossAccount)
+	require.Equal(t, "target-org", crossAccount["target_org_id"])
 
 	serialized := output.String()
 	require.NotContains(t, serialized, "secret-token")
@@ -107,6 +124,27 @@ func TestTokenExchangeAuditEmitsSingleTerminalRequest(t *testing.T) {
 	require.Len(t, records, 1)
 	require.Equal(t, "parsec_request", records[0]["log_type"])
 	require.NotContains(t, output.String(), "secret-password")
+}
+
+func TestAuditReporterPropagatesSignalsIntoRequestRecord(t *testing.T) {
+	var output bytes.Buffer
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "signal-1"))
+	auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+		Source: auditctx.SourceDataSource, Operation: "user_enrichment",
+		Outcome: auditctx.OutcomeFailure, ReasonCode: ReasonSupplementalFailure,
+	})
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeFailure, ReasonCode: ReasonSupplementalFailure, HTTPStatus: 503})
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	require.Len(t, records, 3)
+	requestRecord := records[0]
+	signals, ok := requestRecord["signals"].([]any)
+	require.True(t, ok)
+	require.Len(t, signals, 1)
+	require.Equal(t, "user_enrichment", signals[0].(map[string]any)["operation"])
+	require.Equal(t, "parsec_supplemental_user_data_failure", records[2]["log_type"])
 }
 
 func TestAuditEventPrefixCanBeCustomizedOrRemoved(t *testing.T) {
@@ -237,7 +275,11 @@ func TestAuditEmitsCertificateAndInternalAuthenticationNames(t *testing.T) {
 
 func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	var output bytes.Buffer
-	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"},
+		WithFailureClassifications(map[string]string{
+			"backoffice-proxy": ReasonSupplementalFailure,
+		}),
+	)
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-nested"))
 	_, cacheProbe := obs.InMemoryValidateStarted(ctx, "validator")
 	cacheProbe.CacheHit()
