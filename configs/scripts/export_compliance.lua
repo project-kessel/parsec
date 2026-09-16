@@ -115,7 +115,15 @@ end
 
 -- fail_open returns nil so CEL treats the check as absent (allow) and so
 -- cache wrappers do not store the result (AC7).
-local function fail_open()
+local function fail_open(reason)
+  if reason ~= nil and reason ~= "" then
+    audit.record({
+      source = "data_source",
+      operation = "export_compliance",
+      outcome = "failure",
+      reason_code = reason,
+    })
+  end
   return nil
 end
 
@@ -139,7 +147,7 @@ function fetch(input)
 
   local encoded, enc_err = json.encode(envelope)
   if encoded == nil then
-    return fail_open()
+    return fail_open("compliance_failure")
   end
 
   local identity_b64 = base64.encode(encoded)
@@ -149,15 +157,15 @@ function fetch(input)
   })
 
   if response == nil then
-    return fail_open()
+    return fail_open("compliance_failure")
   end
   if response.status ~= 200 then
-    return fail_open()
+    return fail_open("compliance_failure")
   end
 
   local decoded, dec_err = json.decode(response.body)
   if decoded == nil then
-    return fail_open()
+    return fail_open("compliance_failure")
   end
 
   local result_code = ""

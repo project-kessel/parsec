@@ -16,19 +16,43 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
-const (
-	requestIDHeader         = "x-rh-insights-request-id"
-	fallbackRequestIDHeader = "x-request-id"
-)
+// defaultRequestIDHeaders is the 3scale-compatible default when no deployment-specific
+// headers are configured. The order ensures x-rh-insights-request-id takes precedence
+// over x-request-id for correlation across upstream/downstream audit records.
+var defaultRequestIDHeaders = []string{"x-rh-insights-request-id", "x-request-id"}
 
-func contextWithRequestID(ctx context.Context, headers map[string]string, generate func() string) context.Context {
-	for _, name := range []string{requestIDHeader, fallbackRequestIDHeader} {
+// RequestIDConfig holds the ordered list of header names used to extract
+// and propagate request correlation identifiers. The first match wins on
+// extraction; the first entry is the canonical header set on responses.
+type RequestIDConfig struct {
+	Headers []string
+}
+
+// DefaultRequestIDConfig returns a config with 3scale-compatible headers:
+// x-rh-insights-request-id (preferred) and x-request-id (fallback).
+func DefaultRequestIDConfig() RequestIDConfig {
+	return RequestIDConfig{Headers: defaultRequestIDHeaders}
+}
+
+// CanonicalHeader returns the first (canonical) header name, used for response propagation.
+func (c RequestIDConfig) CanonicalHeader() string {
+	if len(c.Headers) == 0 {
+		return defaultRequestIDHeaders[0]
+	}
+	return c.Headers[0]
+}
+
+func contextWithRequestID(ctx context.Context, headers map[string]string, generate func() string, reqIDHeaders []string) context.Context {
+	if len(reqIDHeaders) == 0 {
+		reqIDHeaders = defaultRequestIDHeaders
+	}
+	for _, name := range reqIDHeaders {
 		if id := validRequestID(headerValue(headers, name)); id != "" {
 			return request.WithID(ctx, id)
 		}
 	}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		for _, name := range []string{requestIDHeader, fallbackRequestIDHeader} {
+		for _, name := range reqIDHeaders {
 			if values := md.Get(name); len(values) > 0 {
 				if id := validRequestID(values[0]); id != "" {
 					return request.WithID(ctx, id)
@@ -57,20 +81,33 @@ func headerValue(headers map[string]string, name string) string {
 	return ""
 }
 
-func auditIncomingHeaderMatcher(key string) (string, bool) {
-	switch strings.ToLower(key) {
-	case requestIDHeader, fallbackRequestIDHeader:
-		return strings.ToLower(key), true
-	default:
+func newIncomingHeaderMatcher(reqIDHeaders []string) func(string) (string, bool) {
+	if len(reqIDHeaders) == 0 {
+		reqIDHeaders = defaultRequestIDHeaders
+	}
+	lower := make(map[string]bool, len(reqIDHeaders))
+	for _, h := range reqIDHeaders {
+		lower[strings.ToLower(h)] = true
+	}
+	return func(key string) (string, bool) {
+		if lower[strings.ToLower(key)] {
+			return strings.ToLower(key), true
+		}
 		return runtime.DefaultHeaderMatcher(key)
 	}
 }
 
-func auditOutgoingHeaderMatcher(key string) (string, bool) {
-	if strings.EqualFold(key, requestIDHeader) {
-		return requestIDHeader, true
+func newOutgoingHeaderMatcher(reqIDHeaders []string) func(string) (string, bool) {
+	if len(reqIDHeaders) == 0 {
+		reqIDHeaders = defaultRequestIDHeaders
 	}
-	return runtime.DefaultHeaderMatcher(key)
+	canonical := reqIDHeaders[0]
+	return func(key string) (string, bool) {
+		if strings.EqualFold(key, canonical) {
+			return canonical, true
+		}
+		return runtime.DefaultHeaderMatcher(key)
+	}
 }
 
 func validRequestID(value string) string {
@@ -88,13 +125,16 @@ func validRequestID(value string) string {
 	return value
 }
 
-func propagateAuthzRequestID(response *authv3.CheckResponse, id string) {
+func propagateAuthzRequestID(response *authv3.CheckResponse, id string, canonicalHeader string) {
 	id = validRequestID(id)
 	if response == nil || id == "" {
 		return
 	}
+	if canonicalHeader == "" {
+		canonicalHeader = defaultRequestIDHeaders[0]
+	}
 	header := &corev3.HeaderValueOption{
-		Header:       &corev3.HeaderValue{Key: requestIDHeader, Value: id},
+		Header:       &corev3.HeaderValue{Key: canonicalHeader, Value: id},
 		AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
 	}
 	if ok := response.GetOkResponse(); ok != nil {
@@ -155,13 +195,6 @@ func auditReasonFromError(err error, fallback string) string {
 func auditReasonFromText(value, fallback string) string {
 	value = strings.ToLower(value)
 	switch {
-	case strings.Contains(value, "compliance"):
-		if strings.Contains(value, "denied") || strings.Contains(value, "deny") {
-			return "compliance_denied"
-		}
-		return "compliance_failure"
-	case strings.Contains(value, "supplemental user"), strings.Contains(value, "bop"):
-		return "supplemental_user_data_failure"
 	case strings.Contains(value, "jwks"), strings.Contains(value, "dependency"):
 		return "dependency_failure"
 	default:
