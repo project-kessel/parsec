@@ -2,13 +2,9 @@
 
 **JIRA**: https://redhat.atlassian.net/browse/RHCLOUD-47320
 **PR**: https://github.com/project-kessel/parsec/pull/206
-**Status**: In re-review on [#206](https://github.com/project-kessel/parsec/pull/206)
-(`parsec-CAR` @ `6c286fc`, local). Sep 10 security fixes + Sep 15 parity follow-ups
-(Steps 10–12) landed locally; push + GitHub thread replies pending. App-interface
-required after merge. Deploy script mount split to [#210](https://github.com/project-kessel/parsec/pull/210).
-
-**Last PR comment check**: 2026-09-15 12:39 UTC — no new inline comments since
-@jharting org_id-only query mode.
+**Status**: Ready for merge review on [#206](https://github.com/project-kessel/parsec/pull/206)
+(`parsec-CAR` @ local, not pushed). Sep 17 review items R1–R3 and Step 14
+(`base_url` migration) implemented locally in separate commits.
 
 ## PR Review Feedback
 
@@ -55,31 +51,46 @@ items as **blocking** until fixed and covered by tests.
 | Sep 15 | @jharting | `http_clients.rbac.http_auth` | Question raised — 3scale uses `x-rh-identity` only; drop example auth header |
 | Sep 15 | @jharting | `cross_access_query_by` (Q6) | **Org_id query mode only** — remove account mode + config toggle |
 
-### Pending PR thread replies (after Steps 10–12 land)
+### 2026-09-17 — @Rajagopalan-Ranganathan (new inline comments)
 
-| Thread | Reviewer | Reply needed |
-|--------|----------|--------------|
-| S2 / 3scale L548 | @coderbydesign | Fixed in `d549f48` + `addb672` — RBAC record binding + cookie match tests |
-| Q3 RBAC caching | @coderbydesign / @jharting | Removing DS cache per @jharting Sep 15 agreement (3scale parity) |
-| Q5 `http_auth` | @jharting | Removing `PARSEC_RBAC_AUTHORIZATION`; RBAC auth is `x-rh-identity` only |
-| Q6 query mode | @jharting / @coderbydesign | Org_id-only RBAC query; dropping `cross_access_query_by` toggle |
+| # | Source | File | Issue | Plan action |
+|---|--------|------|-------|-------------|
+| R1 | @Rajagopalan-Ranganathan | `cross_account.lua` L307 | **Defense in depth**: explicitly check RBAC record `status == "approved"` before accepting (not only `approved_only=true` query param). | **Should-do** — add `record_field(record, "status")` check → `rbac_denied`; unit test with `status: "pending"` in fixture body |
+| R2 | @Rajagopalan-Ranganathan | `cross_account_lua_test.go` L249 | Assert `user["user_id"]` in decoded `x-rh-identity` envelope (currently checks `username` only). | **Should-do** — add `user["user_id"] == "emp-1"` assertion in approved-path test |
+| R3 | @Rajagopalan-Ranganathan | `parsec-cross-account-local.yaml` L14 | References `docs/verification/cross-account-rbac-local/` and `./scripts/verify-cross-account-rbac-local.sh` — **neither exists** in repo. | **Should-do** — fix or remove stale paths (create verification doc/script, or point to README / manual steps only) |
+
+### PR thread replies
+
+| Thread | Reviewer | Status |
+|--------|----------|--------|
+| S2 / 3scale L548 | @coderbydesign | ✅ Replied Sep 15 — `d549f48` + `addb672` |
+| Q3 RBAC caching | @coderbydesign / @jharting | ✅ Replied Sep 15 — removed DS cache (`26de316`) |
+| Q5 `http_auth` | @jharting | ✅ Replied Sep 15 — removed spurious auth header (`2d6eacc`) |
+| Q6 query mode | @jharting / @coderbydesign | ✅ Replied Sep 15 — org_id-only (`6c286fc`) |
+| R1 record status | @Rajagopalan-Ranganathan | ✅ `b223ce5` — explicit `status == "approved"` check + test |
+| R2 user_id assert | @Rajagopalan-Ranganathan | ✅ `18a3918` — assert in approved-path test |
+| R3 local doc path | @Rajagopalan-Ranganathan | ✅ `0eb6b18` — fixed yaml header references |
 
 ### Non-blocking — automated review
 
 | Source | Item | Notes |
 |--------|------|-------|
-| CodeRabbit | Merge risk | **⚪ Minimal** on latest review (Sep 14, through `4d7c6cd`) after S1/S2 fixes |
+| CodeRabbit | Merge risk | **⚪ Minimal** through `4d8b3c9` (Sep 17); config/LuaClient merge after #201 |
 | CodeRabbit | Pre-merge checklist | PR description / ticket ref incomplete; docstring coverage warning — process, not blocking code |
 | Codecov | Patch coverage | Fixture helpers (`jwks_fixture.go`, etc.); low priority unless touching again |
 
 ## Remaining Work (before merge)
 
 Single PR on `parsec-CAR` ([#206](https://github.com/project-kessel/parsec/pull/206)). Core flow
-is implemented and hermetically tested.
+is implemented and hermetically tested; CI green except unrelated Anchore Grype
+scan failure (pre-existing on branch).
 
-**Next step**: Reply on open GitHub threads (S2, Q3, Q5, Q6) after push.
+**Next steps** (ordered):
 
-Production rollout still requires **app-interface** secret updates (separate repo).
+1. ~~Address Sep 17 review items R1–R3~~ — done locally
+2. Reply on R1–R3 GitHub threads after push
+3. ~~Step 14: migrate `rbac_path` to `http_clients.rbac.base_url` + relative path~~ — done locally
+4. App-interface secret updates (separate repo) after merge
 
 ### Must-do (blocking merge in parsec repo)
 
@@ -91,15 +102,19 @@ Production rollout still requires **app-interface** secret updates (separate rep
 - [x] **Hermetic tests**: Lua unit, CEL unit, ext_authz e2e (including SA skip + compliance ordering)
 - [x] **`deploy/parsec.yaml` mount**: moved to [#210](https://github.com/project-kessel/parsec/pull/210) (not in #206)
 
-### Depends on follow-up PR
+### Post–PR #201 config migration (Step 14)
 
-- [ ] **[PR #201](https://github.com/project-kessel/parsec/pull/201) / RHCLOUD-50834**: `http_clients[].base_url` for relative `rbac_path` (and `export_compliance` path). After merge, switch configs from full `rbac_path` URLs to `base_url` + `/api/rbac/v1/cross-account-requests/`.
+- [x] **[PR #201](https://github.com/project-kessel/parsec/pull/201) / RHCLOUD-50834**: merged to main (`bbd7c4a`); `parsec-CAR` rebased (`4d8b3c9`)
+- [x] Switch `cross_account` configs from full `rbac_path` URLs to `http_clients.rbac.base_url` + relative `rbac_path: "/api/rbac/v1/cross-account-requests/"` in `parsec.yaml`, `parsec-production.yaml`, `parsec-cross-account-local.yaml`, README, and hermetic tests (`LuaClient{BaseURL: …}` + path-only `rbac_path`)
 
 ### Should-do (AC / parity)
 
 - [x] E2E: service-account path does not invoke cross-account
 - [x] E2E: compliance runs on original identity before cross-account swap
 - [ ] Confirm `employee_account_number` / `employee_org_id` placement vs 3scale `x-rh-identity` shape (currently at identity root in CEL; matches JIRA wording)
+- [x] **R1**: Explicit RBAC record `status == "approved"` check in `rbac_find_approved_record`
+- [x] **R2**: Assert `user["user_id"]` in `x-rh-identity` decode test (`cross_account_lua_test.go`)
+- [x] **R3**: Fix broken `parsec-cross-account-local.yaml` references to missing verification doc/script
 - [x] **AC8 audit** (blocking per @coderbydesign): `FetchAudit` probe + cross_account audit table on forbidden / rbac_denied / approved / infra
 - [x] **S1/S2**: bind target identity to RBAC record; deny cookie/RBAC mismatch; regression tests added
 - [x] **Q2**: CEL `datasource("cross_account")` memoized per evaluation (`mapper_input.go` cache); replied Sep 14
@@ -360,7 +375,7 @@ Work starts from `origin/main`. **Do not** build on commit `5ec349d`.
   bind `target_account_number` / `target_org_id` from that record; deny when
   cookies disagree with the record (3scale auth.lua L548 parity)
 - Return structured result table (see Approach); `nil` on infrastructure failure
-- `fetch_cache_key`: employee `sub`/`user_id` + target cookie values (AC9) — **pending removal** per Sep 15 review (3scale parity)
+- ~~`fetch_cache_key`~~ — removed with DS caching (`26de316`; 3scale parity)
 
 **Config keys** (Lua `config.get`):
 
@@ -503,14 +518,21 @@ cleanup PR or additional commits on same branch.
 **Files**: `cross_account.lua`, yaml configs, `cross_account_lua_test.go`, e2e
 **Status**: ✅ Done (`6c286fc`)
 
-#### Step 13: Reply on open GitHub threads
+#### Step 13: Reply on GitHub threads (Sep 15 items)
 
-**Status**: Pending (push + thread replies)
+**Status**: ✅ Done (replied Sep 15 on S2, Q3, Q5, Q6)
 
-- S2/L548: point to `d549f48` + `addb672`
-- Q3: removing cache per @jharting agreement
-- Q5: removing spurious `http_auth`; `x-rh-identity` only
-- Q6: org_id-only query mode
+#### Step 14: Migrate cross_account to rbac `base_url` + relative path
+
+**Status**: ✅ Done (local commit on `parsec-CAR`)
+
+#### Step 15: Sep 17 review follow-ups (R1–R3)
+
+**Status**: ✅ Done (`b223ce5`, `18a3918`, `0eb6b18`)
+
+#### Step 16: Reply on Sep 17 GitHub threads (R1–R3)
+
+**Status**: Pending (after push)
 
 ## Naming
 
@@ -540,7 +562,8 @@ Per `docs/testing.md`: hermetic, no I/O, prefer fakes/fixtures over mocks.
 | `TestCrossAccountLua_RBACRecordMismatch` | `internal/datasource` | S1/S2 — approved RBAC record but cookie org/account mismatch → deny |
 | `TestCrossAccountLua_AccountCookieOnlyEmptyOrg` | `internal/datasource` | S1 — account cookie only, empty org cookie → deny (no employee org fallback) |
 | `TestCrossAccountLua_RBACUnavailable` | `internal/datasource` | AC5 — nil fetch |
-| `TestCrossAccountLua_CacheKey` | `internal/datasource` | AC9 — employee + cookies (**remove or skip if DS caching dropped — Step 10**) |
+| `TestCrossAccountLua_RBACRecordNotApproved` | `internal/datasource` | R1 — record with `status != "approved"` → rbac_denied |
+| ~~`TestCrossAccountLua_CacheKey`~~ | — | Removed with DS caching (Step 10 / Q3) |
 | `TestCrossAccountLua_BypassIsInternal` | `internal/datasource` | AC6 — email-only path |
 | `TestRedHatIdentityCEL_CrossAccount_*` | `configs/scripts` | CEL mapping per AC |
 | `TestHermeticAuthzCrossAccount_*` | `test/e2e` | Full ext_authz status codes |
@@ -602,7 +625,8 @@ Existing `LuaDataSourceConfig.Observer` — wire through registry construction
 - [x] JWT-auth only: CEL branch gating excludes cert-auth, service accounts, registry-auth
 - [x] Fail-closed on RBAC infra failure (500), fail-safe on missing DS (no check)
 - [x] **Review gap (S1/S2)**: bind approved target to RBAC record; reject cookie/RBAC mismatch and empty cookies
-- [ ] **Review gap (Q3)**: Remove RBAC DS caching to match 3scale (@jharting Sep 15); eliminates revocation fail-open window
+- [x] **Review gap (Q3)**: RBAC DS caching removed (`26de316`); matches 3scale no-cache behavior
+- [x] **Review gap (R1)**: Explicit RBAC record `status == "approved"` check (defense in depth beyond query param)
 
 ## Maintainability
 
@@ -701,7 +725,7 @@ See Step 4 YAML snippet above.
 
 | # | Item | Status | Resolution |
 |---|------|--------|------------|
-| 1 | Exact RBAC base URL and path for stage/prod | **Open** | Full `rbac_path` until #201; then `base_url` + relative path |
+| 1 | Exact RBAC base URL and path for stage/prod | **Open** | PR #201 merged; Step 14 migrates parsec configs to `base_url` + relative path; app-interface sets host |
 | 2 | Org-id query param name (`org_id` vs `target_org`) | **Resolved — Q6** | Query RBAC with `org_id=` from target org cookie only; drop account mode |
 | 3 | Placement of `employee_account_number` / `employee_org_id` in identity JSON | **Open** | Confirm 3scale `x-rh-identity` shape |
 | 4 | Cache TTL / AC9 | **Resolved — Q3** | No RBAC DS caching (`26de316`); AC9 superseded by 3scale parity |
@@ -714,6 +738,8 @@ See Step 4 YAML snippet above.
 | 11 | CEL verbosity (3 duplicated guard blocks) | **Open** | Accept duplication (compliance precedent) or extract shared CEL file later |
 | 12 | Commit `5ec349d` on `rhcloud-47320-clean` | **Resolved** | Revert in Step 1 |
 | 13 | Deploy mount chicken-egg | **Resolved — Q7** | [#210](https://github.com/project-kessel/parsec/pull/210) |
+| 14 | RBAC record `status` field check | **Resolved — R1** | Explicit `status == "approved"` check + test (`b223ce5`) |
+| 15 | Local verification doc/script paths | **Resolved — R3** | Fixed yaml header (`0eb6b18`) |
 
 ## Review Log
 
@@ -728,3 +754,8 @@ See Step 4 YAML snippet above.
 | 2026-09-14 | @coderbydesign | `cross_access_query_by` is legacy — not necessary | Superseded by Q6 org_id-only direction |
 | 2026-09-15 | @jharting | No RBAC caching beyond 3scale; question rbac `http_auth` | Plan Q3 — drop DS cache; Q5 — drop http_auth example |
 | 2026-09-15 | Plan | Latest feedback check | No new comments since jharting 12:39 org_id-only; Steps 10–13 scoped |
+| 2026-09-15 | @Adam0Brien | Replied S2, Q3, Q5, Q6 on GitHub | Thread replies complete |
+| 2026-09-17 | @Rajagopalan-Ranganathan ([#206](https://github.com/project-kessel/parsec/pull/206)) | R1: explicit record status check. R2: user_id in identity test. R3: broken local verification paths in yaml. | Plan updated — Steps 14–16 scoped |
+| 2026-09-17 | Merge | PR #201 merged to main; `parsec-CAR` rebased | Step 14: migrate rbac_path to base_url pattern |
+| 2026-09-17 | CodeRabbit ([#206](https://github.com/project-kessel/parsec/pull/206)) | Merge risk Minimal through `4d8b3c9`; no new actionable inline comments | Config/LuaClient merge clean |
+| 2026-09-17 | Implementation | R1–R3 + Step 14 on `parsec-CAR` (local, not pushed) | `b223ce5`..`b2aab9b` |
