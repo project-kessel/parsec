@@ -344,6 +344,35 @@ func TestCrossAccountLua_AccountCookieOnlyEmptyOrg(t *testing.T) {
 	}
 }
 
+func TestCrossAccountLua_RBACRecordNotApproved(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
+					return &httpfixture.Fixture{
+						StatusCode: 200,
+						Body:       `{"data":[{"status":"pending","target_account":"999999","target_org":"target-org"}]}`,
+					}
+				}
+				return nil
+			}),
+			Strict: true,
+		}),
+	}
+	ds := newCrossAccountDS(t, script, client, nil)
+
+	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "rbac_denied" {
+		t.Fatalf("error=%v, want rbac_denied when RBAC record status is not approved", payload["error"])
+	}
+}
+
 func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	client := &http.Client{

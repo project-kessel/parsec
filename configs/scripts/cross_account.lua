@@ -308,6 +308,10 @@ local function rbac_find_approved_record(claims, target_org_id)
     return nil, "infra"
   end
 
+  if record_field(record, "status") ~= "approved" then
+    return nil, "rbac_denied"
+  end
+
   local target_account = record_field(record, "target_account")
   local target_org = record_field(record, "target_org")
   if target_account == "" or target_org == "" then
