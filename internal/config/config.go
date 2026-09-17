@@ -242,6 +242,10 @@ type HTTPClientSpec struct {
 	// CACert is the path to a PEM-encoded CA certificate file for TLS verification.
 	// When set, this CA is appended to the system root pool for this client.
 	CACert string `koanf:"ca_cert"`
+
+	// BaseURL is an optional origin (scheme + host) that relative Lua URLs
+	// resolve against. Empty preserves absolute-URL-only behavior.
+	BaseURL string `koanf:"base_url"`
 }
 
 // HTTPClientConfig is a named HTTP client entry for the top-level registry.
