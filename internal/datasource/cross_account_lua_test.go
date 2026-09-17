@@ -21,7 +21,6 @@ import (
 
 const rbacBaseURL = "https://rbac.example.internal"
 const rbacListPath = "/api/rbac/v1/cross-account-requests/"
-const rbacListURL = rbacBaseURL + rbacListPath
 const rbacApprovedBody = `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`
 
 func loadCrossAccountScript(t *testing.T) string {
@@ -36,7 +35,7 @@ func loadCrossAccountScript(t *testing.T) string {
 
 func defaultCrossAccountConfig() map[string]any {
 	return map[string]any{
-		"rbac_path":                       rbacListURL,
+		"rbac_path":                       rbacListPath,
 		"approved_only":                   "true",
 		"internal_idp_target":             "https://sso.redhat.com/auth/realms/internal",
 		"role_fallback_enabled":           false,
@@ -78,7 +77,7 @@ func newCrossAccountDS(t *testing.T, script string, client *http.Client, cfg map
 		Name:         "cross_account",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(cfg),
-		HTTP:         httpclient.LuaClient{Client: client},
+		HTTP:         httpclient.LuaClient{Client: client, BaseURL: rbacBaseURL},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)

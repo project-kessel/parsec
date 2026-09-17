@@ -73,14 +73,14 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 			Name:   "cross_account",
 			Script: string(luaScript),
 			ConfigSource: luaservices.NewMapConfigSource(map[string]any{
-				"rbac_path":                       testRBACListURL,
+				"rbac_path":                       testRBACListPath,
 				"approved_only":                   "true",
 				"internal_idp_target":             "https://sso.redhat.com/auth/realms/internal",
 				"role_fallback_enabled":           false,
 				"cross_access_bypass_is_internal": false,
 				"employee_email_suffix":           "@redhat.com",
 			}),
-			HTTP: httpclient.LuaClient{Client: client},
+			HTTP: httpclient.LuaClient{Client: client, BaseURL: testRBACBaseURL},
 		})
 		if err != nil {
 			t.Fatalf("cross_account DS: %v", err)

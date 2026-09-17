@@ -420,8 +420,7 @@ Data sources enrich tokens with external data:
 http_clients:
   - name: rbac
     timeout: "10s"
-    # Relative rbac_path against http_clients[].base_url: PR #201 (RHCLOUD-50834).
-    # Until that merges, set a full URL in cross_account.config.rbac_path (see below).
+    base_url: "https://rbac.internal.example.com"
     # RBAC auth is via x-rh-identity on each request (3scale parity); no http_auth here.
 
 data_sources:
@@ -436,7 +435,7 @@ data_sources:
     script_file: ./configs/scripts/cross_account.lua
     http_client: rbac
     config:
-      rbac_path: "https://rbac.internal.example.com/api/rbac/v1/cross-account-requests/"
+      rbac_path: "/api/rbac/v1/cross-account-requests/"
   - name: user_roles
     type: lua
     script_file: ./scripts/user_roles.lua  # Or use inline script
