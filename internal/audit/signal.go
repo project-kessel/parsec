@@ -71,7 +71,15 @@ func (c *Collector) Record(signal Signal) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.signals) < 32 {
-		c.signals = append(c.signals, signal)
+		// Clone metadata to prevent caller mutations from bypassing validation
+		cloned := signal
+		if signal.Metadata != nil {
+			cloned.Metadata = make(map[string]string, len(signal.Metadata))
+			for k, v := range signal.Metadata {
+				cloned.Metadata[k] = v
+			}
+		}
+		c.signals = append(c.signals, cloned)
 	}
 }
 
