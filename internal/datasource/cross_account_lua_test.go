@@ -247,6 +247,9 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 	if !ok || user["username"] != "tam@redhat.com" {
 		t.Fatalf("unexpected user in identity envelope: %+v", identity)
 	}
+	if user["user_id"] != "emp-1" {
+		t.Fatalf("unexpected user_id in identity envelope: %+v", identity)
+	}
 }
 
 func TestCrossAccountLua_RBACUnavailable(t *testing.T) {
