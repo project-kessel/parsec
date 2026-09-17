@@ -28,13 +28,19 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
+		metadata, metadataValid := luaStringMap(state.GetField(table, "metadata"))
+		if !metadataValid {
+			// Metadata contained non-string keys or values; reject entire signal
+			state.Push(gopherlua.LFalse)
+			return 1
+		}
 		signal := auditctx.Signal{
 			Source:         luaString(state.GetField(table, "source")),
 			Operation:      luaString(state.GetField(table, "operation")),
 			Outcome:        luaString(state.GetField(table, "outcome")),
 			ReasonCode:     luaString(state.GetField(table, "reason_code")),
 			Classification: luaString(state.GetField(table, "classification")),
-			Metadata:       luaStringMap(state.GetField(table, "metadata")),
+			Metadata:       metadata,
 		}
 		if !auditctx.Valid(signal) {
 			state.Push(gopherlua.LFalse)
@@ -54,19 +60,29 @@ func luaString(value gopherlua.LValue) string {
 	return value.String()
 }
 
-func luaStringMap(value gopherlua.LValue) map[string]string {
+// luaStringMap converts a Lua table to a map[string]string, returning both the
+// result and a validity flag. Returns (nil, false) if any key or value is not a string,
+// preventing silent skipping of invalid metadata entries.
+func luaStringMap(value gopherlua.LValue) (map[string]string, bool) {
 	table, ok := value.(*gopherlua.LTable)
 	if !ok || table == nil {
-		return nil
+		return nil, true // nil metadata is valid (absent)
 	}
 	result := make(map[string]string)
+	allValid := true
 	table.ForEach(func(k, v gopherlua.LValue) {
-		if k.Type() == gopherlua.LTString && v.Type() == gopherlua.LTString {
-			result[k.String()] = v.String()
+		if k.Type() != gopherlua.LTString || v.Type() != gopherlua.LTString {
+			// Found non-string key or value; mark as invalid
+			allValid = false
+			return
 		}
+		result[k.String()] = v.String()
 	})
-	if len(result) == 0 {
-		return nil
+	if !allValid {
+		return nil, false
 	}
-	return result
+	if len(result) == 0 {
+		return nil, true // empty metadata is valid
+	}
+	return result, true
 }

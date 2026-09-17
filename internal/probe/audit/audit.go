@@ -240,64 +240,76 @@ func (p *requestProbe) End() {
 	}
 	p.cacheStatus = cacheStatus
 	signals := p.collector.Signals()
-	p.emit("request", nil)
+	p.emit("request", nil, nil)
 	emitted := map[string]bool{}
 
 	for _, signal := range signals {
 		if signal.Operation == "cross_account_access" {
-			p.emit("rbac_cross_access_audit", signal.Metadata)
+			p.emit("rbac_cross_access_audit", signal.Metadata, &signal)
 			emitted["rbac_cross_access_audit"] = true
 			break
 		}
 	}
 	if p.authorize {
-		p.emit("authorize", nil)
+		p.emit("authorize", nil, nil)
 	}
 	if p.subject.CredentialType == string(trust.CredentialTypeMTLS) || p.subject.CredentialType == string(trust.CredentialTypeForwardedClientCert) {
-		p.emit("validate_ssl_cert", nil)
+		p.emit("validate_ssl_cert", nil, nil)
 	}
 	if p.actor.CredentialType == string(trust.CredentialTypeHeader) {
-		p.emit("verify_psk", nil)
+		p.emit("verify_psk", nil, nil)
 	}
 	switch p.completion.ReasonCode {
 	case ReasonComplianceDenied:
-		p.emit("auth_compliance_failure", nil)
+		p.emit("auth_compliance_failure", nil, nil)
 		emitted["auth_compliance_failure"] = true
 	case ReasonComplianceFailure:
-		p.emit("compliance_failure", nil)
+		p.emit("compliance_failure", nil, nil)
 		emitted["compliance_failure"] = true
 	case ReasonSupplementalFailure:
-		p.emit("supplemental_user_data_failure", nil)
+		p.emit("supplemental_user_data_failure", nil, nil)
 		emitted["supplemental_user_data_failure"] = true
 	case ReasonDependencyFailure:
-		p.emit("dependency_failure", nil)
+		p.emit("dependency_failure", nil, nil)
 		emitted["dependency_failure"] = true
 	}
 	for _, signal := range signals {
 		if suffix := signalEventSuffix(signal.ReasonCode); suffix != "" && !emitted[suffix] {
-			p.emit(suffix, nil)
+			p.emit(suffix, nil, &signal)
 			emitted[suffix] = true
 		}
 	}
 }
 
-func (p *requestProbe) emit(suffix string, signalMetadata map[string]string) {
+func (p *requestProbe) emit(suffix string, signalMetadata map[string]string, signal *auditctx.Signal) {
 	name := p.observer.eventName(suffix)
-	completion := p.completion
-	reason := safeReasonCode(completion.ReasonCode)
-	tokenTypes := make([]string, 0, len(completion.TokenTypes))
-	for _, tokenType := range completion.TokenTypes {
+	// Use signal outcome if provided, otherwise use terminal request completion
+	var outcome service.AuditOutcome
+	var reasonCode string
+	if signal != nil {
+		// Signal-derived event: use signal's outcome and reason
+		outcome = signalOutcomeToAuditOutcome(signal.Outcome)
+		reasonCode = signal.ReasonCode
+	} else {
+		// Request-level event: use terminal completion
+		outcome = p.completion.Outcome
+		reasonCode = p.completion.ReasonCode
+	}
+
+	reason := safeReasonCode(reasonCode)
+	tokenTypes := make([]string, 0, len(p.completion.TokenTypes))
+	for _, tokenType := range p.completion.TokenTypes {
 		if value := safeTokenType(tokenType); value != "" {
 			tokenTypes = append(tokenTypes, value)
 		}
 	}
 
-	event := p.observer.event(completion.Outcome).
+	event := p.observer.event(outcome).
 		Str("log_type", name).
 		Str("event", name).
 		Str("schema_version", SchemaVersion).
 		Str("action", p.action).
-		Str("outcome", string(completion.Outcome)).
+		Str("outcome", string(outcome)).
 		Str("request_id", p.requestID).
 		Int64("duration_ms", time.Since(p.started).Milliseconds()).
 		Interface("service", p.observer.meta).
@@ -305,7 +317,7 @@ func (p *requestProbe) emit(suffix string, signalMetadata map[string]string) {
 		Interface("subject", p.subject).
 		Interface("actor", p.actor).
 		Interface("resource", resourceInfo{Type: "authorization_request", TokenTypes: tokenTypes, CacheStatus: p.cacheStatus}).
-		Interface("response", responseInfo{GRPCCode: completion.GRPCCode, HTTPStatus: completion.HTTPStatus})
+		Interface("response", responseInfo{GRPCCode: p.completion.GRPCCode, HTTPStatus: p.completion.HTTPStatus})
 	if signals := p.collector.Signals(); len(signals) > 0 {
 		event = event.Interface("signals", signals)
 	}
@@ -316,6 +328,20 @@ func (p *requestProbe) emit(suffix string, signalMetadata map[string]string) {
 		event = event.Interface("cross_account", signalMetadata)
 	}
 	event.Msg("security audit event")
+}
+
+// signalOutcomeToAuditOutcome converts audit.Signal outcome to service.AuditOutcome
+func signalOutcomeToAuditOutcome(outcome string) service.AuditOutcome {
+	switch outcome {
+	case auditctx.OutcomeSuccess:
+		return service.AuditOutcomeSuccess
+	case auditctx.OutcomeDenied:
+		return service.AuditOutcomeDenied
+	case auditctx.OutcomeFailure:
+		return service.AuditOutcomeFailure
+	default:
+		return service.AuditOutcomeFailure
+	}
 }
 
 func signalEventSuffix(reason string) string {

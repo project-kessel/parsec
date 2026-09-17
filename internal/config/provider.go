@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -518,9 +519,44 @@ func (p *Provider) CredentialSources() (server.CredentialSources, error) {
 
 // RequestIDConfig returns the configured request-ID header config. Returns
 // the default (["x-request-id"]) when no headers are configured.
+// Validates that no credential or response-control headers are used.
 func (p *Provider) RequestIDConfig() server.RequestIDConfig {
 	if p.config.Observability != nil && len(p.config.Observability.RequestIDHeaders) > 0 {
-		return server.RequestIDConfig{Headers: p.config.Observability.RequestIDHeaders}
+		// Validate headers before using them
+		validated := make([]string, 0, len(p.config.Observability.RequestIDHeaders))
+		for _, header := range p.config.Observability.RequestIDHeaders {
+			if isValidRequestIDHeaderName(header) {
+				validated = append(validated, header)
+			}
+		}
+		// If all headers were rejected, fall back to default
+		if len(validated) == 0 {
+			return server.DefaultRequestIDConfig()
+		}
+		return server.RequestIDConfig{Headers: validated}
 	}
 	return server.DefaultRequestIDConfig()
+}
+
+// isValidRequestIDHeaderName rejects credential and response-control headers.
+func isValidRequestIDHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	// Reject credential headers
+	lower := strings.ToLower(name)
+	forbidden := []string{
+		"authorization",
+		"proxy-authorization",
+		"cookie",
+		"set-cookie",
+		"www-authenticate",
+		"proxy-authenticate",
+	}
+	for _, f := range forbidden {
+		if lower == f {
+			return false
+		}
+	}
+	return true
 }
