@@ -30,8 +30,12 @@ type RequestIDConfig struct {
 
 // DefaultRequestIDConfig returns a config with 3scale-compatible headers:
 // x-rh-insights-request-id (preferred) and x-request-id (fallback).
+// Returns a copy to prevent caller mutations from affecting future defaults.
 func DefaultRequestIDConfig() RequestIDConfig {
-	return RequestIDConfig{Headers: defaultRequestIDHeaders}
+	// Return a copy to prevent mutation
+	headers := make([]string, len(defaultRequestIDHeaders))
+	copy(headers, defaultRequestIDHeaders)
+	return RequestIDConfig{Headers: headers}
 }
 
 // CanonicalHeader returns the first (canonical) header name, used for response propagation.
