@@ -175,7 +175,7 @@ function fetch(input)
 
   local encoded, enc_err2 = json.encode({ result_code = result_code, synthetic = false })
   if encoded == nil then
-    return fail_open()
+    return fail_open("compliance_failure")
   end
   return { data = encoded, content_type = "application/json" }
 end
