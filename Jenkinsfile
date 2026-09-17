@@ -25,7 +25,9 @@ pipeline {
         COMPONENT_NAME="parsec"  // name of app-sre "resourceTemplate" in deploy.yaml for this component
         IMAGE="quay.io/cloudservices/kessel-parsec"  // image location on quay
         RUN_PLATSEC=true // optional step to run vulnerability checks
-        CICD_URL="https://raw.githubusercontent.com/RedHatInsights/cicd-tools/main"
+        CICD_URL="https://raw.githubusercontent.com/RedHatInsights/cicd-tools/63daadce8b4b54de5f47747cabf4fdaf6029e272"
+        CICD_BOOTSTRAP_SHA256="2fe7070e0ee412756aa1cca3dc4727678c820949d2a95a5214e5a7d99d48df41"
+        CICD_COMMIT="63daadce8b4b54de5f47747cabf4fdaf6029e272"
     }
     stages {
         stage('Build the PR commit image') {
@@ -43,7 +45,12 @@ pipeline {
             withVault([configuration: configuration, vaultSecrets: secrets]) {
                 sh '''
                     curl -s $CICD_URL/bootstrap.sh > .cicd_bootstrap.sh
+                    echo "${CICD_BOOTSTRAP_SHA256}  .cicd_bootstrap.sh" | sha256sum --check --strict
                     source ./.cicd_bootstrap.sh
+
+                    # Pin the second-stage cicd-tools checkout to the immutable commit
+                    # so post_test_results.sh comes from the verified revision
+                    git -C "$CICD_ROOT" checkout "$CICD_COMMIT" --quiet
 
                     source "${CICD_ROOT}/post_test_results.sh"
                 '''
