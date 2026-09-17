@@ -3,12 +3,15 @@ package config
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/rs/zerolog"
 
+	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
+	"github.com/project-kessel/parsec/internal/probe/audit"
 	"github.com/project-kessel/parsec/internal/probe/otel"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -107,6 +110,13 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 	}
 
 	switch cfg.Type {
+	case "audit":
+		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
+		if err != nil {
+			return nil, err
+		}
+		return p.newAuditObserver(cfg, lc)
+
 	case "logging":
 		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
 		if err != nil {
@@ -133,8 +143,47 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 		return p.buildCompositeObserver(cfg, parentLogCtx)
 
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: audit, logging, noop, metrics, composite)", cfg.Type)
 	}
+}
+
+func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	// Audit records are always structured JSON at production-visible levels.
+	// Writer is the raw sink, so parent console formatting and restrictive
+	// diagnostic levels cannot suppress or reshape security events.
+	logger := zerolog.New(logCtx.Writer).Level(zerolog.InfoLevel)
+	prefix := audit.DefaultEventPrefix
+	if cfg.EventPrefix != nil {
+		prefix = *cfg.EventPrefix
+	}
+	if !audit.ValidEventPrefix(prefix) {
+		return nil, fmt.Errorf("invalid audit event prefix %q: use only letters, digits, underscore, hyphen, or dot", prefix)
+	}
+
+	opts := []audit.Option{audit.WithEventPrefix(prefix)}
+
+	classifications := p.failureClassifications()
+	if len(classifications) > 0 {
+		opts = append(opts, audit.WithFailureClassifications(classifications))
+	}
+
+	return audit.New(logger, audit.Metadata{
+		ServiceName:    "parsec",
+		ServiceVersion: buildinfo.Version,
+		TrustDomain:    p.config.TrustDomain,
+	}, opts...), nil
+}
+
+// failureClassifications builds a map from datasource name to audit failure
+// classification from the DataSources config.
+func (p *Provider) failureClassifications() map[string]string {
+	result := make(map[string]string)
+	for _, ds := range p.config.DataSources {
+		if ds.FailureClassification != "" {
+			result[ds.Name] = ds.FailureClassification
+		}
+	}
+	return result
 }
 
 func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {
@@ -465,4 +514,48 @@ func (p *Provider) CredentialSources() (server.CredentialSources, error) {
 	}
 
 	return newCredentialSources(p.config.CredentialSources)
+}
+
+// RequestIDConfig returns the configured request-ID header config. Returns
+// the default (["x-request-id"]) when no headers are configured.
+// Validates that no credential or response-control headers are used.
+func (p *Provider) RequestIDConfig() server.RequestIDConfig {
+	if p.config.Observability != nil && len(p.config.Observability.RequestIDHeaders) > 0 {
+		// Validate headers before using them
+		validated := make([]string, 0, len(p.config.Observability.RequestIDHeaders))
+		for _, header := range p.config.Observability.RequestIDHeaders {
+			if isValidRequestIDHeaderName(header) {
+				validated = append(validated, header)
+			}
+		}
+		// If all headers were rejected, fall back to default
+		if len(validated) == 0 {
+			return server.DefaultRequestIDConfig()
+		}
+		return server.RequestIDConfig{Headers: validated}
+	}
+	return server.DefaultRequestIDConfig()
+}
+
+// isValidRequestIDHeaderName rejects credential and response-control headers.
+func isValidRequestIDHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	// Reject credential headers
+	lower := strings.ToLower(name)
+	forbidden := []string{
+		"authorization",
+		"proxy-authorization",
+		"cookie",
+		"set-cookie",
+		"www-authenticate",
+		"proxy-authenticate",
+	}
+	for _, f := range forbidden {
+		if lower == f {
+			return false
+		}
+	}
+	return true
 }

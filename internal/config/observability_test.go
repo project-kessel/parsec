@@ -13,6 +13,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/service"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -126,6 +129,65 @@ func TestNewLoggingObserver_ProducesOutput(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "data source fetch failed")
 	assert.Contains(t, buf.String(), `"datasource":"test-ds"`)
+}
+
+func TestNewAuditObserverAlwaysProducesJSONAtInfo(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := LoggerContext{
+		Logger: zerolog.New(&buf).Level(zerolog.ErrorLevel),
+		Writer: &buf,
+	}
+	p := NewProvider(&Config{TrustDomain: "td.example"})
+
+	obs, err := p.newAuditObserver(&ObservabilityConfig{Type: "audit"}, logCtx)
+	require.NoError(t, err)
+	ctx := request.WithID(context.Background(), "request-1")
+	_, probe := obs.AuthzCheckStarted(ctx)
+	probe.RequestCompleted(service.RequestCompletion{
+		Outcome:    service.AuditOutcomeSuccess,
+		HTTPStatus: 200,
+	})
+	probe.End()
+
+	var record map[string]any
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.NotEmpty(t, lines)
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
+	assert.Equal(t, "parsec_request", record["log_type"])
+	assert.Equal(t, "parsec_request", record["event"])
+	assert.Equal(t, "info", record["level"])
+	assert.Equal(t, "success", record["outcome"])
+	response, ok := record["response"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(200), response["http_status"])
+}
+
+func TestNewAuditObserverEmitsOneTimestamp(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := LoggerContext{Logger: zerolog.New(&buf), Writer: &buf}
+	p := NewProvider(&Config{TrustDomain: "td.example"})
+
+	obs, err := p.newAuditObserver(&ObservabilityConfig{Type: "audit"}, logCtx)
+	require.NoError(t, err)
+	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-time"))
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess})
+	probe.End()
+
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		require.Equal(t, 1, strings.Count(line, `"time":`))
+	}
+}
+
+func TestAuditObserverEventPrefixValidation(t *testing.T) {
+	custom := "custom."
+	p := providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &custom})
+	_, err := p.Observer()
+	require.NoError(t, err)
+
+	invalid := "bad prefix/"
+	p = providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &invalid})
+	_, err = p.Observer()
+	require.ErrorContains(t, err, "invalid audit event prefix")
 }
 
 func TestProvider_Observer_CompositeLogging_FansOut(t *testing.T) {
