@@ -7,11 +7,10 @@
 #   - insights-rbac running at http://localhost:8000 (DEVELOPMENT=True is fine)
 #
 # Usage:
-#   ./scripts/verify-cross-account-rbac-local.sh
-#   # or manually:
+#   go build -o bin/parsec ./cmd/parsec
 #   ./bin/parsec serve --config ./configs/examples/parsec-cross-account-local.yaml
 #
-# See docs/verification/cross-account-rbac-local/ for captured request/response logs.
+# See configs/README.md (cross_account data source) for configuration details.
 
 server:
   grpc_port: 9090
