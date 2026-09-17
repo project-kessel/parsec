@@ -15,6 +15,7 @@ import (
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/datasource"
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/issuer"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
@@ -79,7 +80,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 				"cross_access_bypass_is_internal": false,
 				"employee_email_suffix":           "@redhat.com",
 			}),
-			HTTPClient: client,
+			HTTP: httpclient.LuaClient{Client: client},
 		})
 		if err != nil {
 			t.Fatalf("cross_account DS: %v", err)
@@ -94,7 +95,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 			ConfigSource: luaservices.NewMapConfigSource(map[string]any{
 				"compliance_api": testComplianceAPIURL,
 			}),
-			HTTPClient: client,
+			HTTP: httpclient.LuaClient{Client: client},
 		})
 		if err != nil {
 			t.Fatalf("export_compliance DS: %v", err)
