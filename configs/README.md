@@ -417,12 +417,25 @@ data_sources:
 Data sources enrich tokens with external data:
 
 ```yaml
+http_clients:
+  - name: rbac
+    timeout: "10s"
+    base_url: "https://rbac.internal.example.com"
+    # RBAC auth is via x-rh-identity on each request (3scale parity); no http_auth here.
+
 data_sources:
   - name: identity-policy
     type: static
     data:
       internal_idp_target: "https://sso.redhat.com/auth/realms/internal"
       role_fallback_enabled: true
+      cross_access_bypass_is_internal: false
+  - name: cross_account
+    type: lua
+    script_file: ./configs/scripts/cross_account.lua
+    http_client: rbac
+    config:
+      rbac_path: "/api/rbac/v1/cross-account-requests/"
   - name: user_roles
     type: lua
     script_file: ./scripts/user_roles.lua  # Or use inline script

@@ -302,6 +302,11 @@ func (m *compositeLuaFetchProbe) FetchCompletedNil() {
 		p.FetchCompletedNil()
 	}
 }
+func (m *compositeLuaFetchProbe) FetchAudit(fields map[string]string) {
+	for _, p := range m.probes {
+		p.FetchAudit(fields)
+	}
+}
 func (m *compositeLuaFetchProbe) ResultConversionFailed(err error) {
 	for _, p := range m.probes {
 		p.ResultConversionFailed(err)

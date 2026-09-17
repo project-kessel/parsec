@@ -195,3 +195,208 @@ func TestRedHatIdentityCEL_UnsignedJSONBOPError(t *testing.T) {
 		t.Errorf("Message=%q, want bop_enrichment_failed", mf.Message)
 	}
 }
+
+func consoleJWTSubject() *trust.Result {
+	return &trust.Result{
+		Subject:  "user-1",
+		Audience: []string{"api.console"},
+		Claims: map[string]any{
+			"sub":                "user-1",
+			"preferred_username": "alice",
+			"email":              "alice@redhat.com",
+			"scope":              "api.console openid",
+			"idp":                "https://sso.redhat.com/auth/realms/internal",
+			"user_id":            "user-1",
+			"organization": map[string]any{
+				"id":             "org-1",
+				"account_number": "111111",
+			},
+			"realm_access": map[string]any{
+				"roles": []any{"admin:org:all"},
+			},
+		},
+	}
+}
+
+func crossAccountRegistry(crossAccount map[string]any) *service.DataSourceRegistry {
+	registry := service.NewDataSourceRegistry()
+	policy, err := datasource.NewStaticDataSource("identity-policy", map[string]any{
+		"internal_idp_target":   "https://sso.redhat.com/auth/realms/internal",
+		"role_fallback_enabled": true,
+		"enforce_idp_auth":      false,
+	})
+	if err != nil {
+		panic(err)
+	}
+	registry.Register(policy)
+	if crossAccount != nil {
+		ds, err := datasource.NewStaticDataSource("cross_account", crossAccount)
+		if err != nil {
+			panic(err)
+		}
+		registry.Register(ds)
+	}
+	return registry
+}
+
+func TestRedHatIdentityCEL_CrossAccountForbidden(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := consoleJWTSubject()
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: crossAccountRegistry(map[string]any{"error": "forbidden"}),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if result.Decision.Action != service.MappingDeny {
+		t.Fatalf("Action=%q, want deny", result.Decision.Action)
+	}
+	if result.Decision.Message != "Cross account access is forbidden." {
+		t.Errorf("Message=%q", result.Decision.Message)
+	}
+}
+
+func TestRedHatIdentityCEL_CrossAccountRBACDenied(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := consoleJWTSubject()
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: crossAccountRegistry(map[string]any{"error": "rbac_denied"}),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if result.Decision.Action != service.MappingDeny {
+		t.Fatalf("Action=%q, want deny", result.Decision.Action)
+	}
+	if result.Decision.Message != "Access denied from RBAC on cross-access check." {
+		t.Errorf("Message=%q", result.Decision.Message)
+	}
+}
+
+func TestRedHatIdentityCEL_CrossAccountInfraFailure(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := consoleJWTSubject()
+	_, err = m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: crossAccountRegistry(map[string]any{"error": "infra"}),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err == nil {
+		t.Fatal("expected fail() error")
+	}
+	var mf *service.MappingFailure
+	if !errors.As(err, &mf) {
+		t.Fatalf("expected MappingFailure, got %T: %v", err, err)
+	}
+	if mf.Message != "cross_account_check_failed" {
+		t.Errorf("Message=%q", mf.Message)
+	}
+}
+
+func TestRedHatIdentityCEL_CrossAccountActiveSwap(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := consoleJWTSubject()
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject: subject,
+		Actor:   trust.AnonymousResult(),
+		DataSourceRegistry: crossAccountRegistry(map[string]any{
+			"active":                  true,
+			"target_account_number":   "999999",
+			"target_org_id":           "target-org",
+			"employee_account_number": "111111",
+			"employee_org_id":         "org-1",
+		}),
+		DataSourceInput: &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if !result.Decision.IsAllow() {
+		t.Fatalf("Decision=%+v, want Allow", result.Decision)
+	}
+
+	identity, ok := result.Claims["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity=%T", result.Claims["identity"])
+	}
+	if identity["account_number"] != "999999" {
+		t.Errorf("account_number=%v", identity["account_number"])
+	}
+	if identity["employee_account_number"] != "111111" {
+		t.Errorf("employee_account_number=%v", identity["employee_account_number"])
+	}
+	internal, ok := identity["internal"].(map[string]any)
+	if !ok {
+		t.Fatalf("internal=%T", identity["internal"])
+	}
+	if internal["cross_access"] != true {
+		t.Errorf("cross_access=%v", internal["cross_access"])
+	}
+	user, ok := identity["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("user=%T", identity["user"])
+	}
+	if user["is_org_admin"] != false {
+		t.Errorf("is_org_admin=%v", user["is_org_admin"])
+	}
+}
+
+func TestRedHatIdentityCEL_CrossAccountInactiveNoEmployeeFields(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := consoleJWTSubject()
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: crossAccountRegistry(map[string]any{"active": false}),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	identity, ok := result.Claims["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity=%T", result.Claims["identity"])
+	}
+	if _, ok := identity["employee_account_number"]; ok {
+		t.Error("expected no employee_account_number when inactive")
+	}
+	internal, ok := identity["internal"].(map[string]any)
+	if !ok {
+		t.Fatalf("internal=%T", identity["internal"])
+	}
+	if internal["cross_access"] != false {
+		t.Errorf("cross_access=%v", internal["cross_access"])
+	}
+}
