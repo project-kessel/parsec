@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/request"
@@ -77,7 +78,7 @@ func newCrossAccountDS(t *testing.T, script string, client *http.Client, cfg map
 		Name:         "cross_account",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(cfg),
-		HTTPClient:   client,
+		HTTP:         httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
 		t.Fatalf("NewLuaDataSource: %v", err)
