@@ -295,6 +295,16 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 		assertOKResponse(t, resp)
 		identity := decodeTokenIdentity(t, resp)
+		if identity["account_number"] != "999999" {
+			t.Errorf("account_number=%v, want 999999", identity["account_number"])
+		}
+		internal, ok := identity["internal"].(map[string]any)
+		if !ok {
+			t.Fatalf("internal=%T", identity["internal"])
+		}
+		if internal["cross_access"] != true {
+			t.Errorf("cross_access=%v, want true", internal["cross_access"])
+		}
 		user, ok := identity["user"].(map[string]any)
 		if !ok {
 			t.Fatalf("user=%T", identity["user"])
