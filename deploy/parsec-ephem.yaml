@@ -174,7 +174,7 @@ objects:
             has(subject.audience) && "rhsm-api" in subject.audience ? {
               "identity": {
                 "auth_type": "jwt-auth",
-                "account_number": has(subject.claims.account_id) ? safeToString(subject.claims.account_id) : "",
+                "account_number": has(subject.claims.account_number) ? safeToString(subject.claims.account_number) : "",
                 "org_id": has(subject.claims.organization) && has(subject.claims.organization.id) ?
                           subject.claims.organization.id :
                           (has(subject.claims.org_id) ? safeToString(subject.claims.org_id) :
@@ -196,8 +196,7 @@ objects:
                                  false,
                   "locale": has(subject.claims.locale) ? subject.claims.locale :
                             (has(subject.claims.lang) ? subject.claims.lang : ""),
-                  "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) :
-                             (has(subject.claims.sub) ? safeToString(subject.claims.sub) : "")
+                  "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : ""
                 },
                 "internal": {
                   "org_id": has(subject.claims.organization) && has(subject.claims.organization.id) ?

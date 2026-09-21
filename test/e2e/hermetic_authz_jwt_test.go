@@ -290,7 +290,8 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 			"email":              "rhsm@example.com",
 			"sub":                "f:ac4bcdb5-1fb1-41c5-9323-349698b9b757:rhsm-user",
 			"user_id":            "58962552",
-			"account_id":         "acct-001",
+			"account_number":     "account-001",
+			"account_id":         "org-001",
 			"aud":                []string{"rhsm-api"},
 		})
 
@@ -308,11 +309,11 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 		if identity["auth_type"] != "jwt-auth" {
 			t.Errorf("expected auth_type=jwt-auth, got %v", identity["auth_type"])
 		}
-		if identity["org_id"] != "acct-001" {
-			t.Errorf("expected org_id=acct-001, got %v", identity["org_id"])
+		if identity["org_id"] != "org-001" {
+			t.Errorf("expected org_id=org-001, got %v", identity["org_id"])
 		}
-		if identity["account_number"] != "acct-001" {
-			t.Errorf("expected account_number=acct-001, got %v", identity["account_number"])
+		if identity["account_number"] != "account-001" {
+			t.Errorf("expected account_number=account-001, got %v", identity["account_number"])
 		}
 
 		user := assertNestedMap(t, identity, "user")
@@ -349,6 +350,9 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 			t.Errorf("expected type=User, got %v", identity["type"])
 		}
 		user := assertNestedMap(t, identity, "user")
+		if user["user_id"] != "" {
+			t.Errorf("expected empty user_id without JWT user_id claim, got %v", user["user_id"])
+		}
 		if user["is_internal"] != true {
 			t.Errorf("expected is_internal=true (idp matches internal target), got %v", user["is_internal"])
 		}
