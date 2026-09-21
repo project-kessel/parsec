@@ -293,6 +293,9 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 			"account_number":     "account-001",
 			"account_id":         "org-001",
 			"aud":                []string{"rhsm-api"},
+			"organization": map[string]interface{}{
+				"id": "wrong-org",
+			},
 		})
 
 		resp, err := authzServer.Check(context.Background(), checkRequestWithBearer(token))
@@ -360,16 +363,18 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 
 	t.Run("customer portal user", func(t *testing.T) {
 		token := mustSignToken(t, jwks, map[string]interface{}{
-			"username":  "portal-jane",
-			"email":     "jane@acme.com",
-			"firstName": "Jane",
-			"lastName":  "Smith",
-			"lang":      "fr_FR",
-			"user_id":   101,
-			"sub":       "portal-sub-101",
-			"aud":       []string{"customer-portal"},
+			"username":       "portal-jane",
+			"email":          "jane@acme.com",
+			"firstName":      "Jane",
+			"lastName":       "Smith",
+			"lang":           "fr_FR",
+			"user_id":        101,
+			"sub":            "portal-sub-101",
+			"account_number": "account-portal",
+			"account_id":     "org-portal",
+			"aud":            []string{"customer-portal"},
 			"organization": map[string]interface{}{
-				"id": "org-portal",
+				"id": "wrong-org",
 			},
 		})
 
@@ -387,6 +392,9 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 		if identity["org_id"] != "org-portal" {
 			t.Errorf("expected org_id=org-portal, got %v", identity["org_id"])
 		}
+		if identity["account_number"] != "account-portal" {
+			t.Errorf("expected account_number=account-portal, got %v", identity["account_number"])
+		}
 
 		user := assertNestedMap(t, identity, "user")
 		if user["username"] != "portal-jane" {
@@ -401,6 +409,9 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 		if user["locale"] != "fr_FR" {
 			t.Errorf("expected locale=fr_FR (from lang), got %v", user["locale"])
 		}
+		if user["user_id"] != "101" {
+			t.Errorf("expected user_id=101, got %v", user["user_id"])
+		}
 		if user["is_internal"] != false {
 			t.Errorf("expected is_internal=false (no idp claim), got %v", user["is_internal"])
 		}
@@ -408,15 +419,15 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 
 	t.Run("customer portal internal user", func(t *testing.T) {
 		token := mustSignToken(t, jwks, map[string]interface{}{
-			"username":  "portal-internal",
-			"email":     "internal@redhat.com",
-			"firstName": "Internal",
-			"lastName":  "User",
-			"lang":      "en_US",
-			"user_id":   201,
-			"sub":       "portal-internal-sub",
-			"idp":       "https://sso.redhat.com/auth/realms/internal",
-			"aud":       []string{"customer-portal"},
+			"username":   "portal-internal",
+			"email":      "internal@redhat.com",
+			"firstName":  "Internal",
+			"lastName":   "User",
+			"lang":       "en_US",
+			"sub":        "portal-internal-sub",
+			"account_id": "org-internal-portal",
+			"idp":        "https://sso.redhat.com/auth/realms/internal",
+			"aud":        []string{"customer-portal"},
 			"organization": map[string]interface{}{
 				"id": "org-internal-portal",
 			},
@@ -440,6 +451,9 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 		user := assertNestedMap(t, identity, "user")
 		if user["username"] != "portal-internal" {
 			t.Errorf("expected username=portal-internal, got %v", user["username"])
+		}
+		if user["user_id"] != "" {
+			t.Errorf("expected empty user_id without JWT user_id claim, got %v", user["user_id"])
 		}
 		if user["is_internal"] != true {
 			t.Errorf("expected is_internal=true (idp matches internal target), got %v", user["is_internal"])
