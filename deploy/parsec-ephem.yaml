@@ -196,8 +196,8 @@ objects:
                                  false,
                   "locale": has(subject.claims.locale) ? subject.claims.locale :
                             (has(subject.claims.lang) ? subject.claims.lang : ""),
-                  "user_id": has(subject.claims.sub) ? safeToString(subject.claims.sub) :
-                             (has(subject.claims.user_id) ? safeToString(subject.claims.user_id) : "")
+                  "user_id": has(subject.claims.user_id) ? safeToString(subject.claims.user_id) :
+                             (has(subject.claims.sub) ? safeToString(subject.claims.sub) : "")
                 },
                 "internal": {
                   "org_id": has(subject.claims.organization) && has(subject.claims.organization.id) ?

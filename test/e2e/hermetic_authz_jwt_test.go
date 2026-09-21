@@ -288,7 +288,8 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 		token := mustSignToken(t, jwks, map[string]interface{}{
 			"preferred_username": "rhsm-user",
 			"email":              "rhsm@example.com",
-			"sub":                "rhsm-sub-789",
+			"sub":                "f:ac4bcdb5-1fb1-41c5-9323-349698b9b757:rhsm-user",
+			"user_id":            "58962552",
 			"account_id":         "acct-001",
 			"aud":                []string{"rhsm-api"},
 		})
@@ -318,8 +319,8 @@ func jwtIdentityTests(t *testing.T, authzServer *server.AuthzServer, jwks *httpf
 		if user["username"] != "rhsm-user" {
 			t.Errorf("expected username=rhsm-user, got %v", user["username"])
 		}
-		if user["user_id"] != "rhsm-sub-789" {
-			t.Errorf("expected user_id=rhsm-sub-789, got %v", user["user_id"])
+		if user["user_id"] != "58962552" {
+			t.Errorf("expected user_id=58962552, got %v", user["user_id"])
 		}
 		if user["is_internal"] != false {
 			t.Errorf("expected is_internal=false (no idp claim), got %v", user["is_internal"])
