@@ -259,6 +259,61 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 	})
 
+	t.Run("RHSM user ID survives approved cross-account swap", func(t *testing.T) {
+		client := &http.Client{
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+					if fix := jwksFixture.GetFixture(req); fix != nil {
+						return fix
+					}
+					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`}
+					}
+					return nil
+				}),
+				Strict: true,
+				Clock:  clk,
+			}),
+		}
+		authz := newAuthz(true, false, client)
+		token := mustSignToken(t, jwksFixture, map[string]interface{}{
+			"sub":                "f:ac4bcdb5-1fb1-41c5-9323-349698b9b757:rhsm-user",
+			"user_id":            "58962552",
+			"preferred_username": "rhsm-user",
+			"email":              "rhsm-user@redhat.com",
+			"aud":                []string{"rhsm-api"},
+			"idp":                "https://sso.redhat.com/auth/realms/internal",
+			"account_id":         "111111",
+			"organization": map[string]interface{}{
+				"id":             "emp-org",
+				"account_number": "111111",
+			},
+		})
+		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		assertOKResponse(t, resp)
+		identity := decodeTokenIdentity(t, resp)
+		if identity["account_number"] != "999999" {
+			t.Errorf("account_number=%v, want 999999", identity["account_number"])
+		}
+		internal, ok := identity["internal"].(map[string]any)
+		if !ok {
+			t.Fatalf("internal=%T", identity["internal"])
+		}
+		if internal["cross_access"] != true {
+			t.Errorf("cross_access=%v, want true", internal["cross_access"])
+		}
+		user, ok := identity["user"].(map[string]any)
+		if !ok {
+			t.Fatalf("user=%T", identity["user"])
+		}
+		if user["user_id"] != "58962552" {
+			t.Errorf("user_id=%v, want 58962552", user["user_id"])
+		}
+	})
+
 	t.Run("RBAC unavailable → 500", func(t *testing.T) {
 		client := &http.Client{
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{

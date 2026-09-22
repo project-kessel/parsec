@@ -368,6 +368,51 @@ func TestRedHatIdentityCEL_CrossAccountActiveSwap(t *testing.T) {
 	}
 }
 
+func TestRedHatIdentityCEL_RHSMCrossAccountDoesNotUseSubjectAsUserID(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := &trust.Result{
+		Subject:  "f:ac4bcdb5-1fb1-41c5-9323-349698b9b757:rhsm-user",
+		Audience: []string{"rhsm-api"},
+		Claims: map[string]any{
+			"sub":                "f:ac4bcdb5-1fb1-41c5-9323-349698b9b757:rhsm-user",
+			"preferred_username": "rhsm-user",
+			"account_number":     "111111",
+			"account_id":         "employee-org",
+		},
+	}
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject: subject,
+		Actor:   trust.AnonymousResult(),
+		DataSourceRegistry: crossAccountRegistry(map[string]any{
+			"active":                  true,
+			"target_account_number":   "999999",
+			"target_org_id":           "target-org",
+			"employee_account_number": "111111",
+			"employee_org_id":         "employee-org",
+		}),
+		DataSourceInput: &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	identity, ok := result.Claims["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity=%T", result.Claims["identity"])
+	}
+	user, ok := identity["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("user=%T", identity["user"])
+	}
+	if user["user_id"] != "" {
+		t.Errorf("user_id=%v, want empty without a JWT user_id claim", user["user_id"])
+	}
+}
+
 func TestRedHatIdentityCEL_CrossAccountInactiveNoEmployeeFields(t *testing.T) {
 	script := loadScript(t, "redhat_identity.cel")
 	m, err := mapper.NewCELMapper(script)
