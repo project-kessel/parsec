@@ -240,7 +240,6 @@ type HTTPClientSpec struct {
 	HTTPAuth *HTTPAuthConfig `koanf:"http_auth"`
 
 	// ClientCertSource configures the client certificate source for mTLS. Optional.
-	// When set, this client gets its own transport rather than sharing the default.
 	ClientCertSource *CertSourceConfig `koanf:"client_cert_source"`
 
 	// CACert is the path to a PEM-encoded CA certificate file for TLS verification.
@@ -250,6 +249,11 @@ type HTTPClientSpec struct {
 	// BaseURL is an optional origin (scheme + host) that relative Lua URLs
 	// resolve against. Empty preserves absolute-URL-only behavior.
 	BaseURL string `koanf:"base_url"`
+
+	// MaxIdleConnsPerHost controls the maximum number of idle (keep-alive)
+	// connections to keep per-host for this client's transport.
+	// 0 (or omitted) defaults to httpclient.DefaultMaxIdleConnsPerHost (10).
+	MaxIdleConnsPerHost int `koanf:"max_idle_conns_per_host"`
 }
 
 // HTTPClientConfig is a named HTTP client entry for the top-level registry.
