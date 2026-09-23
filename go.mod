@@ -1,6 +1,6 @@
 module github.com/project-kessel/parsec
 
-go 1.26.6
+go 1.26.4
 
 require (
 	cel.dev/cel-go v0.32.0

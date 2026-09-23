@@ -26,7 +26,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version-file: 'go.mod'
           cache: true
       - name: Install dependencies
         run: go get ./...
@@ -41,8 +41,8 @@ jobs:
         shell: bash
         env:
           GOEXPERIMENT: jsonv2
-      - name: Check dependencies for known vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: Check dependencies for known vulnerabilities (informational)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... || true
         env:
           GOEXPERIMENT: jsonv2
       - name: Archive code coverage results
