@@ -8,6 +8,23 @@ parsec is a gRPC-first service that implements:
 
 Both services issue transaction tokens following the [draft-ietf-oauth-transaction-tokens](https://datatracker.ietf.org/doc/draft-ietf-oauth-transaction-tokens/) specification.
 
+## Deployment Architecture
+
+### TLS and Network Security
+
+parsec is architected for **in-mesh deployment** where TLS termination is handled by the service mesh or ingress controller:
+
+- **Production deployment model**: parsec runs as a sidecar-injected pod in Kubernetes with Istio/Envoy handling mTLS between services
+- **TLS termination**: Handled externally by Envoy sidecar, not by parsec itself
+- **Internal communication**: The grpc-gateway uses plaintext (insecure) credentials to dial the local gRPC server because both endpoints are within the same process/pod and never traverse the network
+- **External traffic**: All external traffic must enter through the mesh/ingress where TLS is terminated
+
+**Security implications**:
+- ✅ In-mesh: Token material is protected by mesh mTLS; plaintext listeners are not externally accessible
+- ⚠️ Standalone: Do NOT deploy parsec with exposed plaintext listeners in non-mesh environments without external TLS termination
+
+See `internal/server/server.go` for implementation details of the plaintext listener model.
+
 ### Key Features
 
 - **Dual identity support**: Subject credentials (end users) and actor credentials (services/machines)
