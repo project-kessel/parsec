@@ -513,7 +513,8 @@ func TestExportComplianceLua_Fetch_FullComplianceAPIOverridesPath(t *testing.T) 
 	}
 }
 
-// TestExportComplianceLua_RHSMTokenShape verifies rhsm-style claims (sub, org_id) are supported
+// TestExportComplianceLua_RHSMTokenShape verifies the intermediate identity uses
+// the same canonical RHSM claims as the final identity mapper.
 func TestExportComplianceLua_RHSMTokenShape(t *testing.T) {
 	script := loadExportComplianceScript(t)
 	var gotIdentityHeader string
@@ -533,13 +534,19 @@ func TestExportComplianceLua_RHSMTokenShape(t *testing.T) {
 		}),
 	}
 
-	// RHSM-style: username in "sub", org in "org_id"
 	rhsmInput := &service.DataSourceInput{
 		Subject: &trust.Result{
-			Subject: "rhsm-user",
+			Subject: "f:federated-id:rhsm-user",
 			Claims: map[string]any{
-				"sub":    "rhsm-user",
-				"org_id": "rhsm-org",
+				"sub":                "f:federated-id:rhsm-user",
+				"preferred_username": "rhsm-user",
+				"user_id":            "58962552",
+				"account_number":     "12345",
+				"account_id":         "rhsm-org",
+				"organization": map[string]any{
+					"id":             "wrong-org",
+					"account_number": "wrong-account",
+				},
 			},
 		},
 	}
@@ -566,6 +573,15 @@ func TestExportComplianceLua_RHSMTokenShape(t *testing.T) {
 	if user == nil || user["username"] != "rhsm-user" {
 		t.Errorf("user.username = %v, want rhsm-user", user)
 	}
+	if user["user_id"] != "58962552" {
+		t.Errorf("user.user_id = %v, want 58962552", user["user_id"])
+	}
+	if identity["account_number"] != "12345" {
+		t.Errorf("account_number = %v, want 12345", identity["account_number"])
+	}
+	if identity["org_id"] != "rhsm-org" {
+		t.Errorf("org_id = %v, want rhsm-org", identity["org_id"])
+	}
 
 	var data map[string]any
 	if unmarshalErr := json.Unmarshal(result.Data, &data); unmarshalErr != nil {
@@ -583,6 +599,36 @@ func TestExportComplianceLua_RHSMTokenShape(t *testing.T) {
 	}
 	if masked.Subject == nil || masked.Subject.Claims["preferred_username"] != "rhsm-user" {
 		t.Errorf("cache key for RHSM: expected preferred_username=rhsm-user, got %v", masked.Subject)
+	}
+}
+
+func TestExportComplianceLua_DoesNotUseFederatedSubjectAsUsername(t *testing.T) {
+	script := loadExportComplianceScript(t)
+	var calls int
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				calls++
+				return &httpfixture.Fixture{StatusCode: 200, Body: `{"result_code":""}`}
+			}),
+			Strict: true,
+		}),
+	}
+	input := &service.DataSourceInput{Subject: &trust.Result{
+		Subject: "f:federated-id:rhsm-user",
+		Claims: map[string]any{
+			"sub":            "f:federated-id:rhsm-user",
+			"user_id":        "58962552",
+			"account_number": "12345",
+			"account_id":     "rhsm-org",
+		},
+	}}
+
+	result, err := newComplianceDS(t, script, client).Fetch(context.Background(), input)
+	assertFailOpenNil(t, result, err)
+	if calls != 0 {
+		t.Fatalf("compliance calls=%d, want 0 without a username claim", calls)
 	}
 }
 
