@@ -251,6 +251,93 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 	}
 }
 
+func TestCrossAccountLua_RHSMIdentityHeaderUsesCanonicalClaims(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	var gotIdentityHeader string
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				gotIdentityHeader = req.Header.Get("x-rh-identity")
+				return &httpfixture.Fixture{StatusCode: 200, Body: rbacApprovedBody}
+			}),
+			Strict: true,
+		}),
+	}
+	ds := newCrossAccountDS(t, script, client, nil)
+
+	input := internalEmployeeSubject()
+	input.Subject.Claims["sub"] = "f:federated-id:rhsm-user"
+	input.Subject.Claims["user_id"] = "58962552"
+	delete(input.Subject.Claims, "preferred_username")
+	input.Subject.Claims["account_number"] = "222222"
+	input.Subject.Claims["account_id"] = "employee-org"
+
+	if _, err := ds.Fetch(context.Background(), input); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(gotIdentityHeader)
+	if err != nil {
+		t.Fatalf("decode x-rh-identity: %v", err)
+	}
+	var envelope struct {
+		Identity struct {
+			AccountNumber string `json:"account_number"`
+			OrgID         string `json:"org_id"`
+			User          struct {
+				Username string `json:"username"`
+				UserID   string `json:"user_id"`
+			} `json:"user"`
+		} `json:"identity"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal identity envelope: %v", err)
+	}
+	if envelope.Identity.AccountNumber != "222222" {
+		t.Errorf("account_number=%q, want JWT account_number", envelope.Identity.AccountNumber)
+	}
+	if envelope.Identity.OrgID != "employee-org" {
+		t.Errorf("org_id=%q, want JWT account_id", envelope.Identity.OrgID)
+	}
+	if envelope.Identity.User.UserID != "58962552" {
+		t.Errorf("user_id=%q, want JWT user_id", envelope.Identity.User.UserID)
+	}
+	if envelope.Identity.User.Username != "" {
+		t.Errorf("username=%q, want empty without a username claim", envelope.Identity.User.Username)
+	}
+}
+
+func TestCrossAccountLua_MissingUserIDDoesNotUseSubject(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	var calls int
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				calls++
+				return &httpfixture.Fixture{StatusCode: 200, Body: rbacApprovedBody}
+			}),
+			Strict: true,
+		}),
+	}
+	input := internalEmployeeSubject()
+	input.Subject.Claims["sub"] = "f:federated-id:rhsm-user"
+	delete(input.Subject.Claims, "user_id")
+
+	result, err := newCrossAccountDS(t, script, client, nil).Fetch(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "infra" {
+		t.Fatalf("error=%v, want infra without JWT user_id", payload["error"])
+	}
+	if calls != 0 {
+		t.Fatalf("RBAC calls=%d, want 0 without JWT user_id", calls)
+	}
+}
+
 func TestCrossAccountLua_RBACUnavailable(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	client := &http.Client{
