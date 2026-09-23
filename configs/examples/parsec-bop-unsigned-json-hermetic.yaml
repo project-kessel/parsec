@@ -1,3 +1,7 @@
+# DEVELOPMENT ONLY — DO NOT USE IN PRODUCTION.
+# This configuration uses UNSIGNED tokens and hermetic test fixtures.
+# It bypasses cryptographic verification completely. For testing only.
+#
 # parsec Configuration - BOP Unsigned JSON Hermetic Testing
 #
 # For testing the BOP user enrichment flow (RHCLOUD-49474 + RHCLOUD-49475)
