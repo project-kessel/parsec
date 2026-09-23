@@ -163,14 +163,99 @@ func TestRegistry_RootCAPathMissingFileErrors(t *testing.T) {
 	}
 }
 
-func TestRegistry_EmptyRootCAPathUsesDefaultTransport(t *testing.T) {
+func TestRegistry_PlainSpecGetsOwnTransportWithDefaultPooling(t *testing.T) {
 	r := NewRegistry(nil)
 	client, err := r.Build(ClientSpec{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	if client.Transport != http.DefaultTransport {
-		t.Error("empty RootCAPath should share http.DefaultTransport")
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.MaxIdleConnsPerHost != DefaultMaxIdleConnsPerHost {
+		t.Errorf("MaxIdleConnsPerHost = %d, want %d", transport.MaxIdleConnsPerHost, DefaultMaxIdleConnsPerHost)
+	}
+}
+
+func TestRegistry_ExplicitMaxIdleConnsPerHost(t *testing.T) {
+	r := NewRegistry(nil)
+	client, err := r.Build(ClientSpec{
+		Timeout:             5 * time.Second,
+		MaxIdleConnsPerHost: 25,
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.MaxIdleConnsPerHost != 25 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 25", transport.MaxIdleConnsPerHost)
+	}
+}
+
+func TestRegistry_ZeroMaxIdleConnsPerHostUsesDefault(t *testing.T) {
+	r := NewRegistry(nil)
+	client, err := r.Build(ClientSpec{
+		Timeout:             5 * time.Second,
+		MaxIdleConnsPerHost: 0,
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.MaxIdleConnsPerHost != DefaultMaxIdleConnsPerHost {
+		t.Errorf("MaxIdleConnsPerHost = %d, want %d", transport.MaxIdleConnsPerHost, DefaultMaxIdleConnsPerHost)
+	}
+}
+
+func TestRegistry_MaxIdleConnsPerHostWithCertSource(t *testing.T) {
+	certDir := t.TempDir()
+	certPath, keyPath := generateSelfSignedCert(t, certDir)
+
+	r := NewRegistry(nil)
+	client, err := r.Build(ClientSpec{
+		Timeout:             5 * time.Second,
+		CertSource:          NewFileCertSource(certPath, keyPath),
+		MaxIdleConnsPerHost: 50,
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.MaxIdleConnsPerHost != 50 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 50", transport.MaxIdleConnsPerHost)
+	}
+	if transport.TLSClientConfig == nil || transport.TLSClientConfig.GetClientCertificate == nil {
+		t.Fatal("expected TLSClientConfig.GetClientCertificate to be set")
+	}
+}
+
+func TestRegistry_FixtureTransportIgnoresMaxIdleConnsPerHost(t *testing.T) {
+	fixtureTransport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
+	})
+
+	r := NewRegistry(fixtureTransport)
+	client, err := r.Build(ClientSpec{
+		Timeout:             5 * time.Second,
+		MaxIdleConnsPerHost: 99,
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	// In fixture mode the transport is the fixture, not a cloned *http.Transport.
+	if _, ok := client.Transport.(*http.Transport); ok {
+		t.Error("fixture mode should not produce an *http.Transport")
 	}
 }
 
@@ -424,6 +509,9 @@ func TestRegistry_CertSourcePreservesDefaultTransportSettings(t *testing.T) {
 	}
 	if transport.IdleConnTimeout != defaultTransport.IdleConnTimeout {
 		t.Errorf("IdleConnTimeout = %v, want %v (inherited from http.DefaultTransport)", transport.IdleConnTimeout, defaultTransport.IdleConnTimeout)
+	}
+	if transport.MaxIdleConnsPerHost != DefaultMaxIdleConnsPerHost {
+		t.Errorf("MaxIdleConnsPerHost = %d, want %d (project default)", transport.MaxIdleConnsPerHost, DefaultMaxIdleConnsPerHost)
 	}
 	if transport.TLSClientConfig == nil || transport.TLSClientConfig.GetClientCertificate == nil {
 		t.Fatal("expected TLSClientConfig.GetClientCertificate to be set")
