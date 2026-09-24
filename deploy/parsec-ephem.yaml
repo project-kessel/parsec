@@ -254,6 +254,11 @@ objects:
             image: ${PARSEC_IMAGE}:${IMAGE_TAG}
             command: ["parsec"]
             args: ["serve", "--config", "/etc/parsec/parsec.yaml"]
+            terminationGracePeriodSeconds: 40
+            lifecycle:
+              preStop:
+                exec:
+                  command: ["sleep", "10"]
             livenessProbe:
               httpGet:
                 path: /healthz/live
