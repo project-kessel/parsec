@@ -224,8 +224,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		// GracefulStop can stay blocked after grpc.Stop, and gracefulStop
+		// does not reach HTTP shutdown until GracefulStop returns. Close
+		// HTTP here and return. errCh is buffered, so this does not wait
+		// out a stuck gRPC shutdown.
 		s.forceStop()
-		<-errCh
 		return ctx.Err()
 	}
 }
@@ -245,11 +248,13 @@ func (s *Server) gracefulStop() error {
 }
 
 func (s *Server) forceStop() {
-	if s.grpcServer != nil {
-		s.grpcServer.Stop()
-	}
 	if s.httpServer != nil {
 		_ = s.httpServer.Close()
+	}
+	// Stop can block alongside a stuck GracefulStop. Do not run it on the
+	// Stop caller, or the context deadline is missed.
+	if s.grpcServer != nil {
+		go s.grpcServer.Stop()
 	}
 }
 
