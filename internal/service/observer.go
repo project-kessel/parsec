@@ -85,6 +85,9 @@ type TokenExchangeProbe interface {
 	// SubjectTokenValidationFailed is called when subject token validation fails.
 	SubjectTokenValidationFailed(err error)
 
+	// RequestCompleted records the terminal externally-visible request outcome.
+	RequestCompleted(completion RequestCompletion)
+
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
 }
@@ -147,6 +150,9 @@ type AuthzCheckProbe interface {
 	// evaluate (as opposed to a deliberate denial).
 	PolicyEvaluationFailed(err error)
 
+	// RequestCompleted records the terminal externally-visible request outcome.
+	RequestCompleted(completion RequestCompletion)
+
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
 }
@@ -158,6 +164,26 @@ type ServiceObserver interface {
 	TokenServiceObserver
 	TokenExchangeObserver
 	AuthzCheckObserver
+}
+
+// AuditOutcome is the externally-visible result of a security-relevant request.
+type AuditOutcome string
+
+const (
+	AuditOutcomeSuccess AuditOutcome = "success"
+	AuditOutcomeDenied  AuditOutcome = "denied"
+	AuditOutcomeFailure AuditOutcome = "failure"
+)
+
+// RequestCompletion contains only safe, machine-readable terminal metadata.
+// It deliberately excludes errors and response bodies because those can carry
+// credentials or other sensitive request material.
+type RequestCompletion struct {
+	Outcome    AuditOutcome
+	ReasonCode string
+	GRPCCode   int32
+	HTTPStatus int
+	TokenTypes []TokenType
 }
 
 // --- NoOp probe implementations ---
@@ -185,6 +211,7 @@ func (NoOpTokenExchangeProbe) RequestContextParsed(*request.RequestAttributes)  
 func (NoOpTokenExchangeProbe) RequestContextParseFailed(error)                     {}
 func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)       {}
 func (NoOpTokenExchangeProbe) SubjectTokenValidationFailed(error)                  {}
+func (NoOpTokenExchangeProbe) RequestCompleted(RequestCompletion)                  {}
 func (NoOpTokenExchangeProbe) End()                                                {}
 
 // NoOpAuthzCheckProbe is a no-op implementation of AuthzCheckProbe.
@@ -205,6 +232,7 @@ func (NoOpAuthzCheckProbe) PolicyDecisionIssue(int, string, string)             
 func (NoOpAuthzCheckProbe) PolicyDecisionAllowWithoutIssue(string)                {}
 func (NoOpAuthzCheckProbe) PolicyDecisionDeny(string)                             {}
 func (NoOpAuthzCheckProbe) PolicyEvaluationFailed(error)                          {}
+func (NoOpAuthzCheckProbe) RequestCompleted(RequestCompletion)                    {}
 func (NoOpAuthzCheckProbe) End()                                                  {}
 
 // --- NoOp observer implementations ---

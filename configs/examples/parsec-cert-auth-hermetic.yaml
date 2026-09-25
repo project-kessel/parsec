@@ -15,9 +15,12 @@ server:
   http_port: 8080
 
 observability:
-  type: logging
+  type: composite
   log_level: debug
   log_format: json
+  observers:
+    - type: audit
+    - type: logging
 
 trust_domain: "parsec.example.com"
 

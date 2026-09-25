@@ -28,6 +28,7 @@ func TestAuthzServer_Check_AllowAnonymousPaths_AnonymousAllowed(t *testing.T) {
 		policy,
 		DefaultCredentialSources(),
 		nil,
+		DefaultRequestIDConfig(),
 	)
 
 	resp, err := authzServer.Check(context.Background(), &authv3.CheckRequest{
