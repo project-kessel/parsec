@@ -492,9 +492,14 @@ type ObservabilityConfig struct {
 	// RequestIDHeaders is an ordered list of HTTP header names used to extract
 	// and propagate request correlation identifiers. The first match wins on
 	// extraction; the first entry is the canonical header set on responses.
-	// Defaults to ["x-request-id"] when empty or unset. RH deployments should
-	// configure ["x-rh-insights-request-id", "x-request-id"].
+	// Defaults to ["x-request-id"] when empty or unset.
 	RequestIDHeaders []string `koanf:"request_id_headers" usage:"ordered request-ID header names (default: x-request-id)"`
+
+	// AllowedMetadataKeys is an optional allowlist of metadata keys that Lua
+	// scripts and other extensions may emit via audit.record(). When empty or
+	// unset, all keys that pass text/length validation are accepted. When
+	// configured, only listed keys are permitted (prevents secrets leakage).
+	AllowedMetadataKeys []string `koanf:"audit_metadata_keys" usage:"optional allowlist of audit.record() metadata keys"`
 
 	// Event-specific logging configuration
 	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`

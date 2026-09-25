@@ -61,14 +61,13 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 
 	records := decodeRecords(t, output.Bytes())
 	require.Len(t, records, 3)
-	require.Equal(t, "parsec_request", records[0]["log_type"])
-	require.Equal(t, records[0]["log_type"], records[0]["event"])
+	require.Equal(t, "parsec_request", records[0]["event"])
 	require.Equal(t, "1.0", records[0]["schema_version"])
 	require.Equal(t, "request-123", records[0]["request_id"])
 	require.Equal(t, "success", records[0]["outcome"])
 	require.Equal(t, "info", records[0]["level"])
-	require.Equal(t, "parsec_rbac_cross_access_audit", records[1]["log_type"])
-	require.Equal(t, "parsec_authorize", records[2]["log_type"])
+	require.Equal(t, "parsec_rbac_cross_access_audit", records[1]["event"])
+	require.Equal(t, "parsec_authorize", records[2]["event"])
 
 	// Verify cross_account metadata is carried through from the signal
 	crossAccount, hasCrossAccount := records[1]["cross_account"].(map[string]any)
@@ -98,8 +97,8 @@ func TestAuthzAuditEmitsNamedFailureEventsWithoutRawError(t *testing.T) {
 
 	records := decodeRecords(t, output.Bytes())
 	require.Len(t, records, 2)
-	require.Equal(t, "parsec_request", records[0]["log_type"])
-	require.Equal(t, "parsec_authorize", records[1]["log_type"])
+	require.Equal(t, "parsec_request", records[0]["event"])
+	require.Equal(t, "parsec_authorize", records[1]["event"])
 	require.Equal(t, "warn", records[0]["level"])
 	require.NotContains(t, output.String(), "secret-token")
 }
@@ -122,7 +121,7 @@ func TestTokenExchangeAuditEmitsSingleTerminalRequest(t *testing.T) {
 
 	records := decodeRecords(t, output.Bytes())
 	require.Len(t, records, 1)
-	require.Equal(t, "parsec_request", records[0]["log_type"])
+	require.Equal(t, "parsec_request", records[0]["event"])
 	require.NotContains(t, output.String(), "secret-password")
 }
 
@@ -144,7 +143,40 @@ func TestAuditReporterPropagatesSignalsIntoRequestRecord(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, signals, 1)
 	require.Equal(t, "user_enrichment", signals[0].(map[string]any)["operation"])
-	require.Equal(t, "parsec_supplemental_user_data_failure", records[2]["log_type"])
+	require.Equal(t, "parsec_supplemental_user_data_failure", records[2]["event"])
+}
+
+func TestCrossAccountDeniedSignalPreservesReasonCode(t *testing.T) {
+	var output bytes.Buffer
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "cross-account-1"))
+	auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+		Source:     auditctx.SourceValidator,
+		Operation:  "cross_account_access",
+		Outcome:    auditctx.OutcomeDenied,
+		ReasonCode: ReasonCrossAccountDenied,
+	})
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeDenied, ReasonCode: "policy_denied", HTTPStatus: 403})
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	var crossAccountRecord map[string]any
+	for _, record := range records {
+		if record["event"] == "parsec_rbac_cross_access_audit" {
+			crossAccountRecord = record
+		}
+	}
+	require.NotNil(t, crossAccountRecord, "expected a rbac_cross_access_audit record")
+	require.Equal(t, "denied", crossAccountRecord["outcome"])
+	require.Equal(t, ReasonCrossAccountDenied, crossAccountRecord["reason_code"],
+		"cross_account_denied must not be rewritten to internal_error by safeReasonCode")
+}
+
+func TestValidReasonCodeAcceptsKnownReasonsOnly(t *testing.T) {
+	require.True(t, ValidReasonCode(ReasonCrossAccountDenied))
+	require.True(t, ValidReasonCode(ReasonDependencyFailure))
+	require.False(t, ValidReasonCode("not_a_real_reason"))
+	require.False(t, ValidReasonCode(""))
 }
 
 func TestAuditEventPrefixCanBeCustomizedOrRemoved(t *testing.T) {
@@ -170,9 +202,6 @@ func TestAuditEventPrefixCanBeCustomizedOrRemoved(t *testing.T) {
 
 			records := decodeRecords(t, output.Bytes())
 			require.Equal(t, []string{tt.want, tt.prefix + "process_status", tt.prefix + "key_rotation"}, eventNames(records))
-			for _, record := range records {
-				require.Equal(t, record["log_type"], record["event"])
-			}
 		})
 	}
 }
@@ -203,8 +232,7 @@ func TestAuditEmitsKeyLifecycleEvents(t *testing.T) {
 	records := decodeRecords(t, output.Bytes())
 	require.Len(t, records, 4)
 	for _, record := range records {
-		require.Equal(t, "parsec_key_rotation", record["log_type"])
-		require.Equal(t, record["log_type"], record["event"])
+		require.Equal(t, "parsec_key_rotation", record["event"])
 	}
 	require.Equal(t, "key_alias_create", records[2]["action"])
 	require.NotContains(t, output.String(), "secret-key-name")
@@ -221,9 +249,9 @@ func TestAuditEmitsProcessReadyAndShutdown(t *testing.T) {
 
 	records := decodeRecords(t, output.Bytes())
 	require.Len(t, records, 2)
-	require.Equal(t, "parsec_process_status", records[0]["log_type"])
+	require.Equal(t, "parsec_process_status", records[0]["event"])
 	require.Equal(t, "process_ready", records[0]["action"])
-	require.Equal(t, "parsec_process_status", records[1]["log_type"])
+	require.Equal(t, "parsec_process_status", records[1]["event"])
 	require.Equal(t, "process_stop", records[1]["action"])
 }
 
@@ -247,7 +275,7 @@ func TestAuditEmitsEveryThreeScaleFailureName(t *testing.T) {
 
 			names := map[string]bool{}
 			for _, record := range decodeRecords(t, output.Bytes()) {
-				names[record["log_type"].(string)] = true
+				names[record["event"].(string)] = true
 			}
 			require.True(t, names[tt.name])
 		})
@@ -265,7 +293,7 @@ func TestAuditEmitsCertificateAndInternalAuthenticationNames(t *testing.T) {
 
 	names := map[string]bool{}
 	for _, record := range decodeRecords(t, output.Bytes()) {
-		names[record["log_type"].(string)] = true
+		names[record["event"].(string)] = true
 	}
 	require.True(t, names["parsec_validate_ssl_cert"])
 	require.True(t, names["parsec_verify_psk"])
@@ -294,7 +322,7 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	require.Equal(t, "hit", resource["cache_status"])
 	names := map[string]bool{}
 	for _, record := range records {
-		names[record["log_type"].(string)] = true
+		names[record["event"].(string)] = true
 	}
 	require.True(t, names["parsec_supplemental_user_data_failure"])
 	require.NotContains(t, output.String(), "secret dependency response")
@@ -336,7 +364,7 @@ func decodeRecords(t *testing.T, data []byte) []map[string]any {
 func eventNames(records []map[string]any) []string {
 	names := make([]string, 0, len(records))
 	for _, record := range records {
-		name, _ := record["log_type"].(string)
+		name, _ := record["event"].(string)
 		names = append(names, name)
 	}
 	return names

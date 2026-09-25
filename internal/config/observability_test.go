@@ -153,7 +153,6 @@ func TestNewAuditObserverAlwaysProducesJSONAtInfo(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	require.NotEmpty(t, lines)
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
-	assert.Equal(t, "parsec_request", record["log_type"])
 	assert.Equal(t, "parsec_request", record["event"])
 	assert.Equal(t, "info", record["level"])
 	assert.Equal(t, "success", record["outcome"])
@@ -178,6 +177,28 @@ func TestNewAuditObserverEmitsOneTimestamp(t *testing.T) {
 	}
 }
 
+func TestAuditObserverRejectsInvalidFailureClassification(t *testing.T) {
+	p := NewProvider(&Config{
+		Observability: &ObservabilityConfig{Type: "audit"},
+		DataSources: []DataSourceConfig{
+			{Name: "bad-ds", FailureClassification: "not_a_real_reason"},
+		},
+	})
+	_, err := p.Observer()
+	require.ErrorContains(t, err, "invalid failure_classification")
+}
+
+func TestAuditObserverAcceptsCrossAccountDeniedFailureClassification(t *testing.T) {
+	p := NewProvider(&Config{
+		Observability: &ObservabilityConfig{Type: "audit"},
+		DataSources: []DataSourceConfig{
+			{Name: "cross-account", FailureClassification: "cross_account_denied"},
+		},
+	})
+	_, err := p.Observer()
+	require.NoError(t, err)
+}
+
 func TestAuditObserverEventPrefixValidation(t *testing.T) {
 	custom := "custom."
 	p := providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &custom})
@@ -188,6 +209,81 @@ func TestAuditObserverEventPrefixValidation(t *testing.T) {
 	p = providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &invalid})
 	_, err = p.Observer()
 	require.ErrorContains(t, err, "invalid audit event prefix")
+}
+
+func TestEffectiveEventPrefix(t *testing.T) {
+	child := "child."
+	top := "top."
+
+	t.Run("child overrides parent", func(t *testing.T) {
+		got := effectiveEventPrefix(&ObservabilityConfig{EventPrefix: &child}, &ObservabilityConfig{EventPrefix: &top})
+		require.NotNil(t, got)
+		assert.Equal(t, child, *got)
+	})
+
+	t.Run("falls back to parent when child unset", func(t *testing.T) {
+		got := effectiveEventPrefix(&ObservabilityConfig{}, &ObservabilityConfig{EventPrefix: &top})
+		require.NotNil(t, got)
+		assert.Equal(t, top, *got)
+	})
+
+	t.Run("nil when neither set", func(t *testing.T) {
+		got := effectiveEventPrefix(&ObservabilityConfig{}, &ObservabilityConfig{})
+		assert.Nil(t, got)
+	})
+
+	t.Run("nil top-level config", func(t *testing.T) {
+		got := effectiveEventPrefix(&ObservabilityConfig{}, nil)
+		assert.Nil(t, got)
+	})
+}
+
+// TestProvider_Observer_CompositeAudit_HonorsTopLevelEventPrefix guards
+// against a regression where a `type: composite` observer's top-level
+// event_prefix (and the --observability-event-prefix flag that sets it) was
+// silently ignored because the child `- type: audit` entry was consulted
+// exclusively.
+func TestProvider_Observer_CompositeAudit_HonorsTopLevelEventPrefix(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := jsonLogCtx(&buf)
+	custom := "custom_"
+
+	p := providerWithObs(t, &ObservabilityConfig{
+		Type:        "composite",
+		EventPrefix: &custom,
+		Observers:   []ObservabilityConfig{{Type: "audit"}},
+	})
+	p.logCtx = &logCtx
+
+	obs, err := p.Observer()
+	require.NoError(t, err)
+	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-prefix"))
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess})
+	probe.End()
+
+	assert.Contains(t, buf.String(), `"event":"custom_request"`)
+}
+
+func TestAllowedMetadataKeys(t *testing.T) {
+	p := NewProvider(&Config{})
+
+	t.Run("child overrides parent", func(t *testing.T) {
+		p.config.Observability = &ObservabilityConfig{AllowedMetadataKeys: []string{"parent_key"}}
+		keys := p.allowedMetadataKeys(&ObservabilityConfig{AllowedMetadataKeys: []string{"child_key"}})
+		assert.Equal(t, map[string]bool{"child_key": true}, keys)
+	})
+
+	t.Run("falls back to parent when child unset", func(t *testing.T) {
+		p.config.Observability = &ObservabilityConfig{AllowedMetadataKeys: []string{"parent_key"}}
+		keys := p.allowedMetadataKeys(&ObservabilityConfig{})
+		assert.Equal(t, map[string]bool{"parent_key": true}, keys)
+	})
+
+	t.Run("nil when neither set", func(t *testing.T) {
+		p.config.Observability = &ObservabilityConfig{}
+		keys := p.allowedMetadataKeys(&ObservabilityConfig{})
+		assert.Nil(t, keys)
+	})
 }
 
 func TestProvider_Observer_CompositeLogging_FansOut(t *testing.T) {

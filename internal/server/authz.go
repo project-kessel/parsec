@@ -71,14 +71,17 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 	if req != nil {
 		headers = req.GetAttributes().GetRequest().GetHttp().GetHeaders()
 	}
-	ctx = contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
+	ctx, extracted := contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
 
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
 	reasonCode := "internal_error"
 	var auditTokenTypes []service.TokenType
 	defer func() {
-		propagateAuthzRequestID(response, request.ID(ctx), s.requestIDConfig.CanonicalHeader())
+		// Do not propagate locally-generated fallback IDs upstream.
+		if extracted {
+			propagateAuthzRequestID(response, request.ID(ctx), s.requestIDConfig.CanonicalHeader())
+		}
 		p.RequestCompleted(authzRequestCompletion(response, reasonCode, auditTokenTypes))
 		p.End()
 	}()

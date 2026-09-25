@@ -169,6 +169,44 @@ func TestCrossAccountLua_NonInternalForbidden(t *testing.T) {
 	}
 }
 
+// TestCrossAccountLua_OversizedCookieStillAudited guards against a
+// regression where an attacker-controlled cookie value long enough to
+// exceed the audit metadata length limit (e.g. a 300-character
+// cross_access_account_number) caused the entire cross_account_access
+// audit signal to be silently dropped instead of denying the request AND
+// recording the denial, leaving no audit trail for the forbidden attempt.
+func TestCrossAccountLua_OversizedCookieStillAudited(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	ds := newCrossAccountDS(t, script, &http.Client{Timeout: 5 * time.Second}, nil)
+	ctx, collector := newAuditContext()
+
+	oversizedAccount := strings.Repeat("9", 300)
+	input := internalEmployeeSubject()
+	input.Subject.Claims["idp"] = "https://sso.redhat.com/auth/realms/redhat-external"
+	input.Subject.Claims["is_internal"] = false
+	input.RequestAttributes.Headers["cookie"] = "cross_access_account_number=" + oversizedAccount + "; cross_access_org_id=target-org"
+
+	result, err := ds.Fetch(ctx, input)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "forbidden" {
+		t.Fatalf("error=%v, want forbidden", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	}
+	if got := len(signal.Metadata["target_account_number"]); got != auditctx.MaxMetadataValueLength {
+		t.Fatalf("target_account_number length=%d, want truncated to %d", got, auditctx.MaxMetadataValueLength)
+	}
+}
+
 func TestCrossAccountLua_NonRedhatEmailForbidden(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	ds := newCrossAccountDS(t, script, &http.Client{Timeout: 5 * time.Second}, nil)

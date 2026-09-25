@@ -39,6 +39,7 @@ const (
 	ReasonInternalError        = "internal_error"
 	ReasonTokenIssuanceFailed  = "token_issuance_failed"
 	ReasonTokenIssuanceDenied  = "token_issuance_denied"
+	ReasonCrossAccountDenied   = "cross_account_denied"
 )
 
 // Metadata is safe service metadata included in every audit record.
@@ -63,6 +64,7 @@ type Observer struct {
 	meta                   Metadata
 	eventPrefix            string
 	failureClassifications map[string]string
+	allowedMetadataKeys    map[string]bool
 }
 
 // Option configures an audit observer.
@@ -84,6 +86,15 @@ func WithFailureClassifications(classifications map[string]string) Option {
 	}
 }
 
+// WithAllowedMetadataKeys sets the optional allowlist of metadata keys that
+// audit.record() may emit. An empty or nil map means allow-all (text/length
+// validation only). When non-empty, only listed keys are permitted.
+func WithAllowedMetadataKeys(keys map[string]bool) Option {
+	return func(observer *Observer) {
+		observer.allowedMetadataKeys = keys
+	}
+}
+
 func New(logger zerolog.Logger, meta Metadata, options ...Option) *Observer {
 	observer := &Observer{logger: logger, meta: meta, eventPrefix: DefaultEventPrefix}
 	for _, option := range options {
@@ -92,7 +103,7 @@ func New(logger zerolog.Logger, meta Metadata, options ...Option) *Observer {
 	return observer
 }
 
-// ValidEventPrefix reports whether prefix is safe to include in log_type and event.
+// ValidEventPrefix reports whether prefix is safe to include in the event field.
 // An empty prefix is valid and emits the canonical event suffix unchanged.
 func ValidEventPrefix(prefix string) bool {
 	for _, r := range prefix {
@@ -156,7 +167,7 @@ type requestProbe struct {
 
 func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, service.AuthzCheckProbe) {
 	ctx, state := request.WithAuditState(ctx)
-	collector := &auditctx.Collector{}
+	collector := auditctx.NewCollector(o.allowedMetadataKeys)
 	ctx = auditctx.WithReporter(ctx, collector)
 	return ctx, &requestProbe{
 		observer:  o,
@@ -172,7 +183,7 @@ func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, serv
 
 func (o *Observer) TokenExchangeStarted(ctx context.Context, _, requestedTokenType, _, _ string) (context.Context, service.TokenExchangeProbe) {
 	ctx, state := request.WithAuditState(ctx)
-	collector := &auditctx.Collector{}
+	collector := auditctx.NewCollector(o.allowedMetadataKeys)
 	ctx = auditctx.WithReporter(ctx, collector)
 	p := &requestProbe{
 		observer:  o,
@@ -305,7 +316,6 @@ func (p *requestProbe) emit(suffix string, signalMetadata map[string]string, sig
 	}
 
 	event := p.observer.event(outcome).
-		Str("log_type", name).
 		Str("event", name).
 		Str("schema_version", SchemaVersion).
 		Str("action", p.action).
@@ -327,7 +337,7 @@ func (p *requestProbe) emit(suffix string, signalMetadata map[string]string, sig
 	if len(signalMetadata) > 0 {
 		event = event.Interface("cross_account", signalMetadata)
 	}
-	event.Msg("security audit event")
+	event.Msg(name)
 }
 
 // signalOutcomeToAuditOutcome converts audit.Signal outcome to service.AuditOutcome
@@ -360,18 +370,31 @@ func signalEventSuffix(reason string) string {
 }
 
 func safeReasonCode(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	if !ValidReasonCode(reason) {
+		return ReasonInternalError
+	}
+	return reason
+}
+
+// ValidReasonCode reports whether reason is one of the known audit reason
+// codes. Used both to sanitize signal/completion reason codes at emit time
+// and to validate configured values (e.g. DataSource.FailureClassification)
+// at startup so misconfiguration fails fast instead of silently becoming
+// "internal_error" in every audit record.
+func ValidReasonCode(reason string) bool {
 	switch reason {
 	case ReasonInvalidRequest, ReasonGrantTypeUnsupported,
 		ReasonCredentialMissing, ReasonCredentialMalformed, ReasonCredentialInvalid,
 		ReasonCredentialExpired, ReasonSchemeNotAllowed, ReasonPolicyDenied,
 		ReasonComplianceDenied, ReasonComplianceFailure, ReasonSupplementalFailure,
 		ReasonDependencyFailure, ReasonInternalError, ReasonTokenIssuanceFailed,
-		ReasonTokenIssuanceDenied:
-		return reason
-	case "":
-		return ""
+		ReasonTokenIssuanceDenied, ReasonCrossAccountDenied:
+		return true
 	default:
-		return ReasonInternalError
+		return false
 	}
 }
 
@@ -495,7 +518,6 @@ type processConfig struct {
 func (o *Observer) emitLifecycle(suffix, action string, outcome service.AuditOutcome, reason string, started time.Time, resource lifecycleResource, config any) {
 	name := o.eventName(suffix)
 	event := o.event(outcome).
-		Str("log_type", name).
 		Str("event", name).
 		Str("schema_version", SchemaVersion).
 		Str("action", action).
@@ -509,7 +531,7 @@ func (o *Observer) emitLifecycle(suffix, action string, outcome service.AuditOut
 	if config != nil {
 		event = event.Interface("configuration", config)
 	}
-	event.Msg("security audit event")
+	event.Msg(name)
 }
 
 func (o *Observer) ProcessReady(info server.ProcessInfo) {
@@ -519,7 +541,6 @@ func (o *Observer) ProcessReady(info server.ProcessInfo) {
 	}
 	name := o.eventName("process_status")
 	event := o.event(service.AuditOutcomeSuccess).
-		Str("log_type", name).
 		Str("event", name).
 		Str("schema_version", SchemaVersion).
 		Str("action", "process_ready").
@@ -533,7 +554,8 @@ func (o *Observer) ProcessReady(info server.ProcessInfo) {
 			HTTPAddress: safeValue(info.HTTPAddress, 256),
 			Commit:      safeValue(info.Commit, 128),
 		})
-	event.Msg("security audit event")
+	// configuration values are static process startup config, not per-request.
+	event.Msg(name)
 }
 
 type auditStopProbe struct {
