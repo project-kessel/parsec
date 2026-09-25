@@ -16,50 +16,33 @@ import (
 	"github.com/project-kessel/parsec/internal/service"
 )
 
-// defaultRequestIDHeaders is the 3scale-compatible default when no deployment-specific
-// headers are configured. The order ensures x-rh-insights-request-id takes precedence
-// over x-request-id for correlation across upstream/downstream audit records.
-var defaultRequestIDHeaders = []string{"x-rh-insights-request-id", "x-request-id"}
+// RequestIDConfig is an alias for request.RequestIDConfig so server callers
+// can keep using the server package without importing request for the type.
+type RequestIDConfig = request.RequestIDConfig
 
-// RequestIDConfig holds the ordered list of header names used to extract
-// and propagate request correlation identifiers. The first match wins on
-// extraction; the first entry is the canonical header set on responses.
-type RequestIDConfig struct {
-	Headers []string
-}
-
-// DefaultRequestIDConfig returns a config with 3scale-compatible headers:
-// x-rh-insights-request-id (preferred) and x-request-id (fallback).
-// Returns a copy to prevent caller mutations from affecting future defaults.
+// DefaultRequestIDConfig returns the industry-standard x-request-id config.
 func DefaultRequestIDConfig() RequestIDConfig {
-	// Return a copy to prevent mutation
-	headers := make([]string, len(defaultRequestIDHeaders))
-	copy(headers, defaultRequestIDHeaders)
-	return RequestIDConfig{Headers: headers}
+	return request.DefaultRequestIDConfig()
 }
 
-// CanonicalHeader returns the first (canonical) header name, used for response propagation.
-func (c RequestIDConfig) CanonicalHeader() string {
-	if len(c.Headers) == 0 {
-		return defaultRequestIDHeaders[0]
-	}
-	return c.Headers[0]
-}
-
-func contextWithRequestID(ctx context.Context, headers map[string]string, generate func() string, reqIDHeaders []string) context.Context {
+// contextWithRequestID extracts a request ID from headers or gRPC metadata,
+// falling back to a generated UUID. The bool return is true when the ID was
+// extracted from an incoming header; false when it was generated locally.
+// An incoming value that fails ValidRequestID is treated as generated.
+func contextWithRequestID(ctx context.Context, headers map[string]string, generate func() string, reqIDHeaders []string) (context.Context, bool) {
 	if len(reqIDHeaders) == 0 {
-		reqIDHeaders = defaultRequestIDHeaders
+		reqIDHeaders = request.DefaultRequestIDHeaders()
 	}
 	for _, name := range reqIDHeaders {
-		if id := validRequestID(headerValue(headers, name)); id != "" {
-			return request.WithID(ctx, id)
+		if id := request.ValidRequestID(request.HeaderValue(headers, name)); id != "" {
+			return request.WithID(ctx, id), true
 		}
 	}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		for _, name := range reqIDHeaders {
 			if values := md.Get(name); len(values) > 0 {
-				if id := validRequestID(values[0]); id != "" {
-					return request.WithID(ctx, id)
+				if id := request.ValidRequestID(values[0]); id != "" {
+					return request.WithID(ctx, id), true
 				}
 			}
 		}
@@ -67,27 +50,12 @@ func contextWithRequestID(ctx context.Context, headers map[string]string, genera
 	if generate == nil {
 		generate = uuid.NewString
 	}
-	return request.WithID(ctx, validRequestID(generate()))
-}
-
-func headerValue(headers map[string]string, name string) string {
-	if len(headers) == 0 {
-		return ""
-	}
-	if value := headers[name]; value != "" {
-		return value
-	}
-	for key, value := range headers {
-		if strings.EqualFold(key, name) {
-			return value
-		}
-	}
-	return ""
+	return request.WithID(ctx, request.ValidRequestID(generate())), false
 }
 
 func newIncomingHeaderMatcher(reqIDHeaders []string) func(string) (string, bool) {
 	if len(reqIDHeaders) == 0 {
-		reqIDHeaders = defaultRequestIDHeaders
+		reqIDHeaders = request.DefaultRequestIDHeaders()
 	}
 	lower := make(map[string]bool, len(reqIDHeaders))
 	for _, h := range reqIDHeaders {
@@ -103,7 +71,7 @@ func newIncomingHeaderMatcher(reqIDHeaders []string) func(string) (string, bool)
 
 func newOutgoingHeaderMatcher(reqIDHeaders []string) func(string) (string, bool) {
 	if len(reqIDHeaders) == 0 {
-		reqIDHeaders = defaultRequestIDHeaders
+		reqIDHeaders = request.DefaultRequestIDHeaders()
 	}
 	canonical := reqIDHeaders[0]
 	return func(key string) (string, bool) {
@@ -114,28 +82,13 @@ func newOutgoingHeaderMatcher(reqIDHeaders []string) func(string) (string, bool)
 	}
 }
 
-func validRequestID(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > 128 {
-		return ""
-	}
-	for _, r := range value {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || strings.ContainsRune("._:-", r) {
-			continue
-		}
-		return ""
-	}
-	return value
-}
-
 func propagateAuthzRequestID(response *authv3.CheckResponse, id string, canonicalHeader string) {
-	id = validRequestID(id)
+	id = request.ValidRequestID(id)
 	if response == nil || id == "" {
 		return
 	}
 	if canonicalHeader == "" {
-		canonicalHeader = defaultRequestIDHeaders[0]
+		canonicalHeader = request.DefaultRequestIDHeaders()[0]
 	}
 	header := &corev3.HeaderValueOption{
 		Header:       &corev3.HeaderValue{Key: canonicalHeader, Value: id},

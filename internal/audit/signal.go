@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 type contextKey struct{}
@@ -25,21 +26,6 @@ const (
 	OutcomeFailure = "failure"
 )
 
-// Allowlisted metadata keys that Lua scripts and other extensions may emit.
-// Only these keys are permitted to prevent secrets leakage (credentials, tokens,
-// claims, headers, raw dependency responses).
-var allowedMetadataKeys = map[string]bool{
-	"cache_status":            true,
-	"classification":          true,
-	"target_account_number":   true,
-	"target_org_id":           true,
-	"employee_user_id":        true,
-	"employee_account_number": true,
-	"employee_org_id":         true,
-	"dependency_name":         true,
-	"dependency_status":       true,
-}
-
 // Signal is bounded, deployment-neutral audit metadata emitted by an extension.
 type Signal struct {
 	Source         string            `json:"source"`
@@ -59,27 +45,34 @@ type NoOpReporter struct{}
 func (NoOpReporter) Record(Signal) {}
 
 // Collector stores a bounded list of valid signals for one request.
+// When allowedKeys is empty, metadata keys are accepted after text/length
+// checks only. When non-empty, only listed keys are permitted.
 type Collector struct {
-	mu      sync.Mutex
-	signals []Signal
+	mu          sync.Mutex
+	signals     []Signal
+	allowedKeys map[string]bool
+}
+
+// NewCollector returns a Collector that enforces allowedKeys when non-empty.
+// A nil or empty allowlist means allow-all (text/length validation only).
+func NewCollector(allowedKeys map[string]bool) *Collector {
+	return &Collector{allowedKeys: allowedKeys}
 }
 
 func (c *Collector) Record(signal Signal) {
-	if c == nil || !Valid(signal) {
+	if c == nil {
+		return
+	}
+	// Sanitize metadata values before validating/storing. This also clones
+	// the map, preventing caller mutations from bypassing validation.
+	signal.Metadata = SanitizeMetadata(signal.Metadata)
+	if !c.valid(signal) {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.signals) < 32 {
-		// Clone metadata to prevent caller mutations from bypassing validation
-		cloned := signal
-		if signal.Metadata != nil {
-			cloned.Metadata = make(map[string]string, len(signal.Metadata))
-			for k, v := range signal.Metadata {
-				cloned.Metadata[k] = v
-			}
-		}
-		c.signals = append(c.signals, cloned)
+		c.signals = append(c.signals, signal)
 	}
 }
 
@@ -109,7 +102,14 @@ func ReporterFrom(ctx context.Context) Reporter {
 	return NoOpReporter{}
 }
 
+// Valid reports whether signal passes structural validation with no metadata
+// key allowlist (allow-all). Prefer Collector validation when an allowlist
+// is configured for the request.
 func Valid(signal Signal) bool {
+	return (&Collector{}).valid(signal)
+}
+
+func (c *Collector) valid(signal Signal) bool {
 	if !validEnum(signal.Source, SourceValidator, SourceDataSource, SourceMapper, SourcePolicy) ||
 		!validEnum(signal.Outcome, OutcomeSuccess, OutcomeDenied, OutcomeFailure) ||
 		!validText(signal.Operation, MaxOperationLength) ||
@@ -119,16 +119,50 @@ func Valid(signal Signal) bool {
 	if signal.ReasonCode != "" && !validReason(signal.ReasonCode) {
 		return false
 	}
-	return validMetadata(signal.Metadata)
+	return c.validMetadata(signal.Metadata)
 }
 
-func validMetadata(md map[string]string) bool {
+// SanitizeMetadata trims surrounding whitespace and truncates each metadata
+// value to MaxMetadataValueLength (without splitting a multi-byte UTF-8
+// rune), returning a new map. Values commonly originate from attacker-
+// influenced input surfaced by Lua/CEL scripts (request cookies, headers,
+// claims); without sanitization, a single oversized or padded value would
+// cause validMetadata to reject the *entire* signal, silently dropping a
+// security-relevant audit event (e.g. a cross-account access denial).
+// Truncating/trimming here preserves the event with a bounded value instead.
+// Keys are left unmodified: callers are expected to use fixed,
+// script-defined key names, not attacker-controlled strings.
+func SanitizeMetadata(md map[string]string) map[string]string {
+	if md == nil {
+		return nil
+	}
+	sanitized := make(map[string]string, len(md))
+	for k, v := range md {
+		sanitized[k] = sanitizeMetadataValue(v)
+	}
+	return sanitized
+}
+
+func sanitizeMetadataValue(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) <= MaxMetadataValueLength {
+		return v
+	}
+	end := MaxMetadataValueLength
+	for end > 0 && !utf8.RuneStart(v[end]) {
+		end--
+	}
+	return strings.TrimSpace(v[:end])
+}
+
+func (c *Collector) validMetadata(md map[string]string) bool {
 	if len(md) > MaxMetadataKeys {
 		return false
 	}
 	for k, v := range md {
-		// Reject non-allowlisted keys to prevent secrets leakage
-		if !allowedMetadataKeys[k] {
+		// When an allowlist is configured, reject non-allowlisted keys.
+		// Empty allowlist means allow-all (still enforce text/length rules).
+		if len(c.allowedKeys) > 0 && !c.allowedKeys[k] {
 			return false
 		}
 		if !validText(k, MaxOperationLength) {
