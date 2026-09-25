@@ -24,7 +24,8 @@ func TestContextWithRequestIDPrefersFirstConfiguredHeader(t *testing.T) {
 		"x-custom-request-id", "custom-id",
 		"x-request-id", "fallback-id",
 	))
-	ctx = contextWithRequestID(ctx, nil, func() string { return "generated" }, headers)
+	ctx, extracted := contextWithRequestID(ctx, nil, func() string { return "generated" }, headers)
+	require.True(t, extracted)
 	require.Equal(t, "custom-id", request.ID(ctx))
 }
 
@@ -32,29 +33,22 @@ func TestContextWithRequestIDUsesDefaultWhenEmpty(t *testing.T) {
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
 		"x-request-id", "default-id",
 	))
-	ctx = contextWithRequestID(ctx, nil, func() string { return "generated" }, nil)
+	ctx, extracted := contextWithRequestID(ctx, nil, func() string { return "generated" }, nil)
+	require.True(t, extracted)
 	require.Equal(t, "default-id", request.ID(ctx))
 }
 
-func TestDefaultRequestIDConfigPrefers3ScaleHeader(t *testing.T) {
+func TestDefaultRequestIDConfigUsesXRequestID(t *testing.T) {
 	config := DefaultRequestIDConfig()
-	require.Equal(t, []string{"x-rh-insights-request-id", "x-request-id"}, config.Headers)
-	require.Equal(t, "x-rh-insights-request-id", config.CanonicalHeader())
+	require.Equal(t, []string{"x-request-id"}, config.Headers)
+	require.Equal(t, "x-request-id", config.CanonicalHeader())
 
-	// Verify x-rh-insights-request-id takes precedence over x-request-id
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
-		"x-rh-insights-request-id", "insights-id-123",
-		"x-request-id", "fallback-id",
+		"x-request-id", "request-id-123",
 	))
-	ctx = contextWithRequestID(ctx, nil, func() string { return "generated" }, config.Headers)
-	require.Equal(t, "insights-id-123", request.ID(ctx))
-
-	// Verify fallback to x-request-id when x-rh-insights-request-id is missing
-	ctx2 := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
-		"x-request-id", "fallback-id",
-	))
-	ctx2 = contextWithRequestID(ctx2, nil, func() string { return "generated" }, config.Headers)
-	require.Equal(t, "fallback-id", request.ID(ctx2))
+	ctx, extracted := contextWithRequestID(ctx, nil, func() string { return "generated" }, config.Headers)
+	require.True(t, extracted)
+	require.Equal(t, "request-id-123", request.ID(ctx))
 }
 
 func TestAuthzRequestCompletionClassifiesTerminalOutcome(t *testing.T) {
@@ -97,9 +91,10 @@ func deniedCheckResponse(code codes.Code, httpCode typev3.StatusCode) *authv3.Ch
 
 func TestContextWithRequestIDReadsExtAuthzHeaders(t *testing.T) {
 	headers := []string{"x-custom-request-id", "x-request-id"}
-	ctx := contextWithRequestID(context.Background(), map[string]string{
+	ctx, extracted := contextWithRequestID(context.Background(), map[string]string{
 		"x-custom-request-id": "ext-authz-id",
 	}, func() string { return "generated" }, headers)
+	require.True(t, extracted)
 	require.Equal(t, "ext-authz-id", request.ID(ctx))
 }
 
@@ -108,7 +103,14 @@ func TestContextWithRequestIDGeneratesForUnsafeInput(t *testing.T) {
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
 		"x-request-id", "bad\nvalue",
 	))
-	ctx = contextWithRequestID(ctx, nil, func() string { return "generated-id" }, headers)
+	ctx, extracted := contextWithRequestID(ctx, nil, func() string { return "generated-id" }, headers)
+	require.False(t, extracted, "rejected incoming ID must be treated as generated")
+	require.Equal(t, "generated-id", request.ID(ctx))
+}
+
+func TestContextWithRequestIDGeneratedWhenMissing(t *testing.T) {
+	ctx, extracted := contextWithRequestID(context.Background(), nil, func() string { return "generated-id" }, []string{"x-request-id"})
+	require.False(t, extracted)
 	require.Equal(t, "generated-id", request.ID(ctx))
 }
 
@@ -119,6 +121,30 @@ func TestPropagateAuthzRequestID(t *testing.T) {
 	require.Equal(t, canonical, response.GetOkResponse().GetHeaders()[0].GetHeader().GetKey())
 	require.Equal(t, corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD, response.GetOkResponse().GetHeaders()[0].GetAppendAction())
 	require.Equal(t, "request-123", response.GetOkResponse().GetHeaders()[0].GetHeader().GetValue())
+}
+
+func TestGeneratedRequestIDIsNotPropagated(t *testing.T) {
+	// Mirrors authz.go: only propagate when extracted == true.
+	response := (&AuthzServer{}).okResponse(nil, nil)
+	_, extracted := contextWithRequestID(context.Background(), nil, func() string { return "generated-id" }, []string{"x-request-id"})
+	require.False(t, extracted)
+	if extracted {
+		propagateAuthzRequestID(response, "generated-id", "x-request-id")
+	}
+	require.Empty(t, response.GetOkResponse().GetHeaders(), "generated fallback IDs must not be propagated")
+}
+
+func TestExtractedRequestIDIsPropagated(t *testing.T) {
+	response := (&AuthzServer{}).okResponse(nil, nil)
+	ctx, extracted := contextWithRequestID(context.Background(), map[string]string{
+		"x-request-id": "upstream-id",
+	}, func() string { return "generated-id" }, []string{"x-request-id"})
+	require.True(t, extracted)
+	if extracted {
+		propagateAuthzRequestID(response, request.ID(ctx), "x-request-id")
+	}
+	require.Len(t, response.GetOkResponse().GetHeaders(), 1)
+	require.Equal(t, "upstream-id", response.GetOkResponse().GetHeaders()[0].GetHeader().GetValue())
 }
 
 func TestHeaderMatchersPreserveConfiguredRequestIDName(t *testing.T) {

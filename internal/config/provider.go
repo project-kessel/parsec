@@ -153,8 +153,8 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 	// diagnostic levels cannot suppress or reshape security events.
 	logger := zerolog.New(logCtx.Writer).Level(zerolog.InfoLevel)
 	prefix := audit.DefaultEventPrefix
-	if cfg.EventPrefix != nil {
-		prefix = *cfg.EventPrefix
+	if effective := effectiveEventPrefix(cfg, p.config.Observability); effective != nil {
+		prefix = *effective
 	}
 	if !audit.ValidEventPrefix(prefix) {
 		return nil, fmt.Errorf("invalid audit event prefix %q: use only letters, digits, underscore, hyphen, or dot", prefix)
@@ -163,8 +163,17 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 	opts := []audit.Option{audit.WithEventPrefix(prefix)}
 
 	classifications := p.failureClassifications()
+	for dataSourceName, classification := range classifications {
+		if !audit.ValidReasonCode(classification) {
+			return nil, fmt.Errorf("data source %q: invalid failure_classification %q: must be a known audit reason code", dataSourceName, classification)
+		}
+	}
 	if len(classifications) > 0 {
 		opts = append(opts, audit.WithFailureClassifications(classifications))
+	}
+
+	if keys := p.allowedMetadataKeys(cfg); len(keys) > 0 {
+		opts = append(opts, audit.WithAllowedMetadataKeys(keys))
 	}
 
 	return audit.New(logger, audit.Metadata{
@@ -172,6 +181,44 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 		ServiceVersion: buildinfo.Version,
 		TrustDomain:    p.config.TrustDomain,
 	}, opts...), nil
+}
+
+// effectiveEventPrefix prefers the prefix configured on the audit observer
+// entry itself (cfg), falling back to the top-level Observability config.
+// The two differ when the audit observer is a child of a `type: composite`
+// entry: cfg is the child, top is the composite parent that documents/
+// receives the --observability-event-prefix flag.
+func effectiveEventPrefix(cfg, top *ObservabilityConfig) *string {
+	if cfg != nil && cfg.EventPrefix != nil {
+		return cfg.EventPrefix
+	}
+	if top != nil && top.EventPrefix != nil {
+		return top.EventPrefix
+	}
+	return nil
+}
+
+// allowedMetadataKeys builds the optional audit metadata key allowlist,
+// preferring the allowlist configured on the audit observer entry itself
+// (cfg), falling back to the top-level Observability config. This mirrors
+// effectiveEventPrefix: for a `type: composite` observer, cfg is the child
+// `- type: audit` entry and p.config.Observability is the composite parent.
+// Empty/unset (at both levels) means allow-all at the Collector.
+func (p *Provider) allowedMetadataKeys(cfg *ObservabilityConfig) map[string]bool {
+	src := cfg.AllowedMetadataKeys
+	if len(src) == 0 && p.config.Observability != nil {
+		src = p.config.Observability.AllowedMetadataKeys
+	}
+	if len(src) == 0 {
+		return nil
+	}
+	keys := make(map[string]bool, len(src))
+	for _, key := range src {
+		if key != "" {
+			keys[key] = true
+		}
+	}
+	return keys
 }
 
 // failureClassifications builds a map from datasource name to audit failure
@@ -538,9 +585,17 @@ func (p *Provider) RequestIDConfig() server.RequestIDConfig {
 	return server.DefaultRequestIDConfig()
 }
 
-// isValidRequestIDHeaderName rejects credential and response-control headers.
+// isValidRequestIDHeaderName rejects credential and response-control headers,
+// and any name that is not a syntactically valid HTTP header field name.
+//
+// The syntax check matters on its own: a configured name that merely looks
+// like a real header (e.g. it uses a Unicode dash instead of "-", or
+// contains whitespace) can never match an actual incoming ASCII header, yet
+// it would still pass the forbidden-name check below and get accepted here.
+// RequestIDConfig then skips the built-in default because a header was
+// configured, so the upstream request ID is silently never extracted.
 func isValidRequestIDHeaderName(name string) bool {
-	if name == "" {
+	if !isValidHTTPHeaderName(name) {
 		return false
 	}
 	// Reject credential headers
@@ -559,4 +614,32 @@ func isValidRequestIDHeaderName(name string) bool {
 		}
 	}
 	return true
+}
+
+// isValidHTTPHeaderName reports whether name is a syntactically valid HTTP
+// header field name: a non-empty sequence of RFC 7230 "token" characters
+// (ASCII letters, digits, and "!#$%&'*+-.^_`|~"). Anything else — spaces,
+// Unicode look-alike separators, control characters — cannot appear as a
+// real header name on the wire.
+func isValidHTTPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if !isTokenByte(name[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTokenByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	case strings.IndexByte("!#$%&'*+-.^_`|~", b) >= 0:
+		return true
+	default:
+		return false
+	}
 }
