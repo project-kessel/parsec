@@ -10,6 +10,79 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
+func TestProvider_RequestIDConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		headers []string
+		want    []string
+	}{
+		{
+			name:    "nil falls back to default",
+			headers: nil,
+			want:    server.DefaultRequestIDConfig().Headers,
+		},
+		{
+			name:    "valid custom header is used",
+			headers: []string{"x-custom-request-id"},
+			want:    []string{"x-custom-request-id"},
+		},
+		{
+			name:    "credential header is rejected, falls back to default",
+			headers: []string{"authorization"},
+			want:    server.DefaultRequestIDConfig().Headers,
+		},
+		{
+			name:    "cookie header is rejected, falls back to default",
+			headers: []string{"Cookie"},
+			want:    server.DefaultRequestIDConfig().Headers,
+		},
+		{
+			name: "header name containing whitespace is rejected",
+			// Looks like a header name but a real HTTP header can never
+			// carry a space in its field name, so it would never match an
+			// incoming request.
+			headers: []string{"x request id"},
+			want:    server.DefaultRequestIDConfig().Headers,
+		},
+		{
+			name: "header name using a Unicode look-alike dash is rejected",
+			// U+2011 (non-breaking hyphen) renders identically to "-" but is
+			// not a valid RFC 7230 token character, so it can never match
+			// the real "x-request-id" header on the wire.
+			headers: []string{"x\u2011request\u2011id"},
+			want:    server.DefaultRequestIDConfig().Headers,
+		},
+		{
+			name:    "empty string is rejected, falls back to default",
+			headers: []string{""},
+			want:    server.DefaultRequestIDConfig().Headers,
+		},
+		{
+			name:    "valid header survives alongside a rejected one",
+			headers: []string{"authorization", "x-custom-request-id"},
+			want:    []string{"x-custom-request-id"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := NewProvider(&Config{Observability: &ObservabilityConfig{RequestIDHeaders: tt.headers}})
+			got := p.RequestIDConfig().Headers
+			if len(got) != len(tt.want) {
+				t.Fatalf("Headers = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("Headers = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestProvider_CredentialSources(t *testing.T) {
 	t.Parallel()
 

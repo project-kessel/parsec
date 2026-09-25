@@ -34,6 +34,11 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
+		// Sanitize (trim + bound length) attacker-influenced metadata values
+		// (e.g. cookies/headers/claims surfaced by the calling script) before
+		// validating, so an oversized or padded value truncates instead of
+		// silently dropping the whole signal (see auditctx.SanitizeMetadata).
+		metadata = auditctx.SanitizeMetadata(metadata)
 		signal := auditctx.Signal{
 			Source:         luaString(state.GetField(table, "source")),
 			Operation:      luaString(state.GetField(table, "operation")),

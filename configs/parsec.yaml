@@ -15,8 +15,20 @@ observability:
   # Ordered request-ID header names. First match wins on extraction; first
   # entry is the canonical header propagated on responses.
   request_id_headers:
-    - "x-rh-insights-request-id"
     - "x-request-id"
+  # Optional allowlist for audit.record() metadata keys. When omitted, all
+  # keys that pass text/length validation are accepted. When set, only listed
+  # keys are permitted (recommended for production).
+  audit_metadata_keys:
+    - "cache_status"
+    - "classification"
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_name"
+    - "dependency_status"
   observers:
     - type: audit
       # Defaults to "parsec_"; set to "insights_" for 3scale-compatible names.
