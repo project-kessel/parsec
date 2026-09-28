@@ -134,6 +134,7 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 		return nil, fmt.Errorf("failed to create http service: %w", err)
 	}
 	httpService.Register(L)
+	luaservices.RegisterAuditService(L, ctx)
 
 	configService := luaservices.NewConfigService(ds.configSource)
 	configService.Register(L)

@@ -228,6 +228,11 @@ type DataSourceConfig struct {
 
 	// Caching configuration
 	Caching *CachingConfig `koanf:"caching"`
+
+	// FailureClassification is the audit reason code to emit when this
+	// datasource fails (e.g. "compliance_failure", "supplemental_user_data_failure").
+	// Defaults to "dependency_failure" when unset.
+	FailureClassification string `koanf:"failure_classification"`
 }
 
 // HTTPClientSpec is the client configuration schema (no name).
@@ -467,8 +472,8 @@ type FixtureResponse struct {
 // ObservabilityConfig configures application observability
 type ObservabilityConfig struct {
 	// Type selects the observer implementation
-	// Options: "logging", "noop", "metrics", "composite"
-	Type string `koanf:"type" usage:"observer type: logging, noop, metrics, composite"`
+	// Options: "audit", "logging", "noop", "metrics", "composite"
+	Type string `koanf:"type" usage:"observer type: audit, logging, noop, metrics, composite"`
 
 	// LogLevel sets the default log level for logging observer
 	// Options: "debug", "info", "warn", "error"
@@ -479,6 +484,22 @@ type ObservabilityConfig struct {
 	// Options: "json", "text"
 	// Default: "json"
 	LogFormat string `koanf:"log_format" usage:"log format: json, text"`
+
+	// EventPrefix is prepended to every audit event name. When omitted, audit
+	// events use "parsec_". Set it to an empty string to disable prefixing.
+	EventPrefix *string `koanf:"event_prefix" usage:"audit event-name prefix (default: parsec_)"`
+
+	// RequestIDHeaders is an ordered list of HTTP header names used to extract
+	// and propagate request correlation identifiers. The first match wins on
+	// extraction; the first entry is the canonical header set on responses.
+	// Defaults to ["x-request-id"] when empty or unset.
+	RequestIDHeaders []string `koanf:"request_id_headers" usage:"ordered request-ID header names (default: x-request-id)"`
+
+	// AllowedMetadataKeys is an optional allowlist of metadata keys that Lua
+	// scripts and other extensions may emit via audit.record(). When empty or
+	// unset, all keys that pass text/length validation are accepted. When
+	// configured, only listed keys are permitted (prevents secrets leakage).
+	AllowedMetadataKeys []string `koanf:"audit_metadata_keys" usage:"optional allowlist of audit.record() metadata keys"`
 
 	// Event-specific logging configuration
 	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`

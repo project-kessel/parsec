@@ -78,7 +78,7 @@ func TestRegisterFlags(t *testing.T) {
 		{"server-http-port", "HTTP server port (gRPC-gateway transcoding)"},
 		{"trust-domain", "trust domain for issued tokens (audience claim)"},
 		{"trust-store-type", "trust store type: stub_store, filtered_store"},
-		{"observability-type", "observer type: logging, noop, metrics, composite"},
+		{"observability-type", "observer type: audit, logging, noop, metrics, composite"},
 	}
 
 	for _, tt := range expectedFlags {

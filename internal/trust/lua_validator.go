@@ -213,6 +213,7 @@ func (v *LuaValidator) Validate(ctx context.Context, credential Credential) (*Re
 		return nil, fmt.Errorf("failed to create http service: %w", err)
 	}
 	httpService.Register(L)
+	luaservices.RegisterAuditService(L, ctx)
 
 	configService := luaservices.NewConfigService(v.configSource)
 	configService.Register(L)

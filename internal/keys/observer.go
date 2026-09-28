@@ -41,9 +41,12 @@ type AWSKMSProviderObserver interface {
 
 // KMSRotateProbe tracks a single AWS KMS key rotation.
 type KMSRotateProbe interface {
+	KeyCreated()
 	CreateKeyFailed(err error)
+	AliasChanged(created bool)
 	AliasCheckFailed(err error)
 	AliasUpdateFailed(err error)
+	DeletionScheduled()
 	OldKeyDeletionFailed(keyID string, err error)
 	End()
 }
@@ -129,9 +132,12 @@ func (NoOpDualSlotRotatingSignerObserver) KeyCacheUpdateStarted(ctx context.Cont
 
 type NoOpKMSRotateProbe struct{}
 
+func (NoOpKMSRotateProbe) KeyCreated()                        {}
 func (NoOpKMSRotateProbe) CreateKeyFailed(error)              {}
+func (NoOpKMSRotateProbe) AliasChanged(bool)                  {}
 func (NoOpKMSRotateProbe) AliasCheckFailed(error)             {}
 func (NoOpKMSRotateProbe) AliasUpdateFailed(error)            {}
+func (NoOpKMSRotateProbe) DeletionScheduled()                 {}
 func (NoOpKMSRotateProbe) OldKeyDeletionFailed(string, error) {}
 func (NoOpKMSRotateProbe) End()                               {}
 

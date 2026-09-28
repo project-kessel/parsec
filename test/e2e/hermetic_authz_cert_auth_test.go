@@ -135,7 +135,7 @@ func TestHermeticAuthzCheckCertAuth(t *testing.T) {
 	// 3. Create the Authz Server
 	// ============================================================
 
-	authzServer := server.NewAuthzServer(trustStore, tokenService, nil, credSources, nil)
+	authzServer := server.NewAuthzServer(trustStore, tokenService, nil, credSources, nil, server.DefaultRequestIDConfig())
 
 	// ============================================================
 	// 4. Test Cases

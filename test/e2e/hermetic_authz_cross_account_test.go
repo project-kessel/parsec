@@ -134,7 +134,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}))
 
 		tokenService := service.NewTokenService("sso.redhat.com", dsRegistry, issuerRegistry, nil)
-		return server.NewAuthzServer(trustStore(t, jwksFixture, client), tokenService, nil, server.DefaultCredentialSources(), nil)
+		return server.NewAuthzServer(trustStore(t, jwksFixture, client), tokenService, nil, server.DefaultCredentialSources(), nil, server.DefaultRequestIDConfig())
 	}
 
 	t.Run("DS absent → normal identity without cross_access", func(t *testing.T) {

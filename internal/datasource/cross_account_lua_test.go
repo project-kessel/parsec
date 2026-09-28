@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	auditctx "github.com/project-kessel/parsec/internal/audit"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
@@ -85,6 +86,13 @@ func newCrossAccountDS(t *testing.T, script string, client *http.Client, cfg map
 	return ds
 }
 
+// newAuditContext returns a context wired to an audit signal collector so
+// tests can assert on the audit.record() signals emitted by cross_account.lua.
+func newAuditContext() (context.Context, *auditctx.Collector) {
+	collector := &auditctx.Collector{}
+	return auditctx.WithReporter(context.Background(), collector), collector
+}
+
 func decodeCrossAccountResult(t *testing.T, result *service.DataSourceResult) map[string]any {
 	t.Helper()
 	if result == nil {
@@ -97,14 +105,31 @@ func decodeCrossAccountResult(t *testing.T, result *service.DataSourceResult) ma
 	return payload
 }
 
+func requireSingleSignal(t *testing.T, collector *auditctx.Collector) auditctx.Signal {
+	t.Helper()
+	signals := collector.Signals()
+	if len(signals) != 1 {
+		t.Fatalf("expected exactly 1 audit signal, got %d: %+v", len(signals), signals)
+	}
+	signal := signals[0]
+	if signal.Source != auditctx.SourceDataSource {
+		t.Fatalf("signal.Source=%v, want %v", signal.Source, auditctx.SourceDataSource)
+	}
+	if signal.Operation != "cross_account_access" {
+		t.Fatalf("signal.Operation=%v, want cross_account_access", signal.Operation)
+	}
+	return signal
+}
+
 func TestCrossAccountLua_NoCookies(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	ds := newCrossAccountDS(t, script, &http.Client{Timeout: 5 * time.Second}, nil)
+	ctx, collector := newAuditContext()
 
 	input := internalEmployeeSubject()
 	input.RequestAttributes.Headers["cookie"] = ""
 
-	result, err := ds.Fetch(context.Background(), input)
+	result, err := ds.Fetch(ctx, input)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -112,40 +137,99 @@ func TestCrossAccountLua_NoCookies(t *testing.T) {
 	if payload["active"] != false {
 		t.Fatalf("active=%v, want false", payload["active"])
 	}
+	if signals := collector.Signals(); len(signals) != 0 {
+		t.Fatalf("expected no audit signal for the no-op inactive case, got %+v", signals)
+	}
 }
 
 func TestCrossAccountLua_NonInternalForbidden(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	ds := newCrossAccountDS(t, script, &http.Client{Timeout: 5 * time.Second}, nil)
+	ctx, collector := newAuditContext()
 
 	input := internalEmployeeSubject()
 	input.Subject.Claims["idp"] = "https://sso.redhat.com/auth/realms/redhat-external"
 	input.Subject.Claims["is_internal"] = false
 
-	result, err := ds.Fetch(context.Background(), input)
+	result, err := ds.Fetch(ctx, input)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "forbidden" {
 		t.Fatalf("error=%v, want forbidden", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	}
+}
+
+// TestCrossAccountLua_OversizedCookieStillAudited guards against a
+// regression where an attacker-controlled cookie value long enough to
+// exceed the audit metadata length limit (e.g. a 300-character
+// cross_access_account_number) caused the entire cross_account_access
+// audit signal to be silently dropped instead of denying the request AND
+// recording the denial, leaving no audit trail for the forbidden attempt.
+func TestCrossAccountLua_OversizedCookieStillAudited(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	ds := newCrossAccountDS(t, script, &http.Client{Timeout: 5 * time.Second}, nil)
+	ctx, collector := newAuditContext()
+
+	oversizedAccount := strings.Repeat("9", 300)
+	input := internalEmployeeSubject()
+	input.Subject.Claims["idp"] = "https://sso.redhat.com/auth/realms/redhat-external"
+	input.Subject.Claims["is_internal"] = false
+	input.RequestAttributes.Headers["cookie"] = "cross_access_account_number=" + oversizedAccount + "; cross_access_org_id=target-org"
+
+	result, err := ds.Fetch(ctx, input)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "forbidden" {
+		t.Fatalf("error=%v, want forbidden", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	}
+	if got := len(signal.Metadata["target_account_number"]); got != auditctx.MaxMetadataValueLength {
+		t.Fatalf("target_account_number length=%d, want truncated to %d", got, auditctx.MaxMetadataValueLength)
 	}
 }
 
 func TestCrossAccountLua_NonRedhatEmailForbidden(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	ds := newCrossAccountDS(t, script, &http.Client{Timeout: 5 * time.Second}, nil)
+	ctx, collector := newAuditContext()
 
 	input := internalEmployeeSubject()
 	input.Subject.Claims["email"] = "tam@example.com"
 
-	result, err := ds.Fetch(context.Background(), input)
+	result, err := ds.Fetch(ctx, input)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "forbidden" {
 		t.Fatalf("error=%v, want forbidden", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
 	}
 }
 
@@ -167,14 +251,23 @@ func TestCrossAccountLua_RBACDenied(t *testing.T) {
 		}),
 	}
 	ds := newCrossAccountDS(t, script, client, nil)
+	ctx, collector := newAuditContext()
 
-	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
+	result, err := ds.Fetch(ctx, internalEmployeeSubject())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "rbac_denied" {
 		t.Fatalf("error=%v, want rbac_denied", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
 	}
 }
 
@@ -200,8 +293,9 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 		}),
 	}
 	ds := newCrossAccountDS(t, script, client, nil)
+	ctx, collector := newAuditContext()
 
-	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
+	result, err := ds.Fetch(ctx, internalEmployeeSubject())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -249,6 +343,20 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 	if user["user_id"] != "emp-1" {
 		t.Fatalf("unexpected user_id in identity envelope: %+v", identity)
 	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeSuccess {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeSuccess)
+	}
+	if signal.ReasonCode != "" {
+		t.Fatalf("signal.ReasonCode=%v, want empty on success", signal.ReasonCode)
+	}
+	if signal.Metadata["target_account_number"] != "999999" || signal.Metadata["target_org_id"] != "target-org" {
+		t.Fatalf("unexpected signal metadata: %+v", signal.Metadata)
+	}
+	if signal.Metadata["employee_account_number"] != "111111" || signal.Metadata["employee_org_id"] != "emp-org" {
+		t.Fatalf("unexpected signal metadata: %+v", signal.Metadata)
+	}
 }
 
 func TestCrossAccountLua_RBACUnavailable(t *testing.T) {
@@ -266,14 +374,23 @@ func TestCrossAccountLua_RBACUnavailable(t *testing.T) {
 		}),
 	}
 	ds := newCrossAccountDS(t, script, client, nil)
+	ctx, collector := newAuditContext()
 
-	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
+	result, err := ds.Fetch(ctx, internalEmployeeSubject())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "infra" {
 		t.Fatalf("error=%v, want infra", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeFailure {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeFailure)
+	}
+	if signal.ReasonCode != "dependency_failure" {
+		t.Fatalf("signal.ReasonCode=%v, want dependency_failure", signal.ReasonCode)
 	}
 }
 
@@ -298,18 +415,24 @@ func TestCrossAccountLua_BypassIsInternalWithRedhatEmail(t *testing.T) {
 		}),
 	}
 	ds := newCrossAccountDS(t, script, client, cfg)
+	ctx, collector := newAuditContext()
 
 	input := internalEmployeeSubject()
 	input.Subject.Claims["idp"] = "https://sso.redhat.com/auth/realms/redhat-external"
 	input.Subject.Claims["is_internal"] = false
 
-	result, err := ds.Fetch(context.Background(), input)
+	result, err := ds.Fetch(ctx, input)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["active"] != true {
 		t.Fatalf("active=%v, want true with bypass", payload["active"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeSuccess {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeSuccess)
 	}
 }
 
@@ -329,11 +452,12 @@ func TestCrossAccountLua_AccountCookieOnlyEmptyOrg(t *testing.T) {
 		}),
 	}
 	ds := newCrossAccountDS(t, script, client, nil)
+	ctx, collector := newAuditContext()
 
 	input := internalEmployeeSubject()
 	input.RequestAttributes.Headers["cookie"] = "cross_access_account_number=999999"
 
-	result, err := ds.Fetch(context.Background(), input)
+	result, err := ds.Fetch(ctx, input)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -343,6 +467,14 @@ func TestCrossAccountLua_AccountCookieOnlyEmptyOrg(t *testing.T) {
 	}
 	if rbacCalls != 0 {
 		t.Fatalf("RBAC called %d times, want 0 when org cookie missing", rbacCalls)
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
 	}
 }
 
@@ -364,14 +496,23 @@ func TestCrossAccountLua_RBACRecordNotApproved(t *testing.T) {
 		}),
 	}
 	ds := newCrossAccountDS(t, script, client, nil)
+	ctx, collector := newAuditContext()
 
-	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
+	result, err := ds.Fetch(ctx, internalEmployeeSubject())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "rbac_denied" {
 		t.Fatalf("error=%v, want rbac_denied when RBAC record status is not approved", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
 	}
 }
 
@@ -393,13 +534,22 @@ func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 		}),
 	}
 	ds := newCrossAccountDS(t, script, client, nil)
+	ctx, collector := newAuditContext()
 
-	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
+	result, err := ds.Fetch(ctx, internalEmployeeSubject())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "rbac_denied" {
 		t.Fatalf("error=%v, want rbac_denied when cookie org differs from RBAC record", payload["error"])
+	}
+
+	signal := requireSingleSignal(t, collector)
+	if signal.Outcome != auditctx.OutcomeDenied {
+		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
+	}
+	if signal.ReasonCode != "cross_account_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
 	}
 }

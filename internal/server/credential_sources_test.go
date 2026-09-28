@@ -341,7 +341,7 @@ func TestNewAuthzServer_credentialSources(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil)
+	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	ext, err := srv.credentialSources.Extract(ctx, CredentialContext{
 		Headers: map[string]string{"authorization": "Bearer test-token"},
@@ -362,7 +362,7 @@ func TestNewExchangeServer_callerCredentialSources(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	srv := NewExchangeServer(nil, nil, nil, DefaultCredentialSources(), nil)
+	srv := NewExchangeServer(nil, nil, nil, DefaultCredentialSources(), nil, DefaultRequestIDConfig())
 
 	ext, err := srv.callerCredentialSources.Extract(ctx, CredentialContext{
 		Headers: map[string]string{"authorization": "Bearer caller-token"},
