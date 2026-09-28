@@ -1,3 +1,8 @@
+# DEVELOPMENT ONLY — DO NOT USE IN PRODUCTION.
+# This configuration example is for reference and testing purposes only.
+# It includes unsigned tokens and development validators that are NOT secure for production.
+# Always configure proper signing keys, TLS, and authentication for production deployments.
+#
 # parsec Configuration - Full Example
 #
 # This configuration demonstrates all available features including:

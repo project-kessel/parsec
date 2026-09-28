@@ -1,3 +1,7 @@
+# DEVELOPMENT ONLY — DO NOT USE IN PRODUCTION.
+# This configuration is for hermetic testing only with stubbed/fixture data sources.
+# All external dependencies are mocked. Not suitable for production.
+#
 # parsec Configuration - Hermetic Testing Example
 #
 # This configuration demonstrates hermetic testing with fixtures
