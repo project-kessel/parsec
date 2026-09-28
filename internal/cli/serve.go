@@ -186,6 +186,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	bootstrapLog.Info().Msg("Shutting down")
 
+	// Fail readiness before draining so probes stop sending new traffic
+	// while the HTTP server is still up for a final metrics scrape.
+	srv.SetNotReady()
+
 	// 9. Graceful shutdown
 	// Flush observer resources (e.g. metrics) while the HTTP server is
 	// still running so Prometheus can perform a final scrape.
@@ -195,7 +199,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
 	}
 
-	if err := srv.Stop(ctx); err != nil {
+	// Bound the drain. The pod's terminationGracePeriodSeconds must cover
+	// this plus the preStop delay, or kubelet SIGKILLs the process and
+	// drops in-flight ext_authz calls.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer stopCancel()
+	if err := srv.Stop(stopCtx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
 	}
 
