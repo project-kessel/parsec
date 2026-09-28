@@ -56,35 +56,30 @@ local function org_field(claims, field)
   return tostring(v)
 end
 
--- resolve_username extracts the username from subject claims.
--- Supports console (preferred_username), rhsm/portal (username, sub) token shapes.
-local function resolve_username(input)
-  local claims = {}
+-- resolve_claims returns subject claims, or an empty table when absent.
+local function resolve_claims(input)
   if input.subject ~= nil and input.subject.claims ~= nil then
-    claims = input.subject.claims
+    return input.subject.claims
   end
+  return {}
+end
+
+-- resolve_username extracts the username from subject claims.
+-- Supports console (preferred_username) and rhsm/portal (username) token shapes.
+local function resolve_username(claims)
   local username = claim_str(claims, "preferred_username")
   if username == "" then username = claim_str(claims, "username") end
-  if username == "" then username = claim_str(claims, "sub") end
-  if username == "" and input.subject ~= nil and input.subject.subject ~= nil then
-    username = tostring(input.subject.subject)
-  end
   return username
 end
 
 -- resolve_org_and_account extracts org_id and account_number for the minimal
 -- identity envelope. Supports console / rhsm / portal claim shapes.
-local function resolve_org_and_account(input)
-  local claims = {}
-  if input.subject ~= nil and input.subject.claims ~= nil then
-    claims = input.subject.claims
-  end
+local function resolve_org_and_account(claims)
+  local account_number = claim_str(claims, "account_number")
+  if account_number == "" then account_number = org_field(claims, "account_number") end
 
-  local account_number = org_field(claims, "account_number")
-  if account_number == "" then account_number = claim_str(claims, "account_number") end
-  if account_number == "" then account_number = claim_str(claims, "account_id") end
-
-  local org_id = org_field(claims, "id")
+  local org_id = claim_str(claims, "account_id")
+  if org_id == "" then org_id = org_field(claims, "id") end
   if org_id == "" then org_id = claim_str(claims, "org_id") end
   if org_id == "" then org_id = claim_str(claims, "rh-org-id") end
   if org_id == "" then org_id = account_number end
@@ -95,7 +90,7 @@ end
 -- build_identity_envelope builds the minimal x-rh-identity JSON for the
 -- compliance service.  Only the fields required by the compliance API are
 -- included (AC2, Risk #1: claim-shape duplication mirrors user_entitlements).
-local function build_identity_envelope(username, org_id, account_number)
+local function build_identity_envelope(username, user_id, org_id, account_number)
   return {
     identity = {
       auth_type = "jwt-auth",
@@ -103,7 +98,8 @@ local function build_identity_envelope(username, org_id, account_number)
       org_id = org_id,
       type = "User",
       user = {
-        username = username
+        username = username,
+        user_id = user_id
       },
       internal = {
         org_id = org_id,
@@ -128,14 +124,16 @@ end
 
 function fetch(input)
   local api = resolve_compliance_url()
+  local claims = resolve_claims(input)
 
-  local username = resolve_username(input)
+  local username = resolve_username(claims)
   if username == "" then
     return fail_open()
   end
 
-  local org_id, account_number = resolve_org_and_account(input)
-  local envelope = build_identity_envelope(username, org_id, account_number)
+  local org_id, account_number = resolve_org_and_account(claims)
+  local user_id = claim_str(claims, "user_id")
+  local envelope = build_identity_envelope(username, user_id, org_id, account_number)
 
   local encoded, enc_err = json.encode(envelope)
   if encoded == nil then
@@ -179,7 +177,7 @@ function fetch_cache_key(input)
     return nil
   end
 
-  local username = resolve_username(input)
+  local username = resolve_username(resolve_claims(input))
   if username == "" then
     -- No username means fetch will be nil (fail-open); do not cache (AC7).
     return nil

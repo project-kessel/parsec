@@ -61,9 +61,7 @@ local function resolve_claims(input)
 end
 
 local function resolve_user_id(claims)
-  local user_id = claim_str(claims, "user_id")
-  if user_id == "" then user_id = claim_str(claims, "sub") end
-  return user_id
+  return claim_str(claims, "user_id")
 end
 
 local function resolve_email(claims)
@@ -75,16 +73,15 @@ local function resolve_username(claims)
   if claims == nil then return "" end
   local username = claim_str(claims, "preferred_username")
   if username == "" then username = claim_str(claims, "username") end
-  if username == "" then username = claim_str(claims, "sub") end
   return username
 end
 
 local function resolve_employee_account_org(claims)
-  local account_number = org_field(claims, "account_number")
-  if account_number == "" then account_number = claim_str(claims, "account_number") end
-  if account_number == "" then account_number = claim_str(claims, "account_id") end
+  local account_number = claim_str(claims, "account_number")
+  if account_number == "" then account_number = org_field(claims, "account_number") end
 
-  local org_id = org_field(claims, "id")
+  local org_id = claim_str(claims, "account_id")
+  if org_id == "" then org_id = org_field(claims, "id") end
   if org_id == "" then org_id = claim_str(claims, "org_id") end
   if org_id == "" then org_id = claim_str(claims, "rh-org-id") end
   if org_id == "" then org_id = account_number end
