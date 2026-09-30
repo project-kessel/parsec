@@ -26,6 +26,15 @@ func mustCookieSource(t *testing.T, name, cookieName string) *CookieCredentialSo
 	return src
 }
 
+func mustHeaderSource(t *testing.T, name string, headers []HeaderSpec) *HeaderCredentialSource {
+	t.Helper()
+	src, err := NewHeaderCredentialSource(name, headers)
+	if err != nil {
+		t.Fatalf("NewHeaderCredentialSource(%q): %v", name, err)
+	}
+	return src
+}
+
 func TestCredentialSources_Extract(t *testing.T) {
 	t.Parallel()
 
@@ -155,6 +164,43 @@ func TestCredentialSources_Extract(t *testing.T) {
 		}
 		if ext.SourceName != "cs-jwt-cookie" {
 			t.Fatalf("expected cs-jwt-cookie, got %q", ext.SourceName)
+		}
+	})
+
+	// A header source whose match misses must not shadow the bearer source
+	// behind it: both sources see an Authorization header, so only the
+	// user-agent match decides which flow the request belongs to.
+	t.Run("non-matching header source falls through to bearer", func(t *testing.T) {
+		t.Parallel()
+		sources := NewCredentialSources(
+			mustHeaderSource(t, "uhc-auth", []HeaderSpec{
+				{Name: "authorization"},
+				{Name: "user-agent", Match: "^.*-operator/.* cluster/.*"},
+			}),
+			mustBearerSource(t, "authorization-bearer"),
+		)
+
+		ext, err := sources.Extract(ctx, makeCC(t, map[string]string{
+			"authorization": "Bearer jwt-token",
+			"user-agent":    "curl/8.0.1",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ext.SourceName != "authorization-bearer" {
+			t.Fatalf("SourceName=%q, want authorization-bearer", ext.SourceName)
+		}
+
+		// ...and the matching user-agent still selects the header source.
+		ext, err = sources.Extract(ctx, makeCC(t, map[string]string{
+			"authorization": "Bearer ocm-token",
+			"user-agent":    "insights-operator/abcdef cluster/1234321",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ext.SourceName != "uhc-auth" {
+			t.Fatalf("SourceName=%q, want uhc-auth", ext.SourceName)
 		}
 	})
 

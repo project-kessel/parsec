@@ -1,0 +1,98 @@
+# parsec Configuration - UHC Auth Hermetic Testing
+#
+# For testing uhc-auth without external dependencies. The OCM current_account
+# call is stubbed with a fixture.
+#
+# Usage:
+#   ./bin/parsec serve --config ./configs/examples/parsec-uhc-auth-hermetic.yaml
+#
+#   buf curl --protocol grpc --http2-prior-knowledge \
+#     -d '{"attributes":{"request":{"http":{"method":"GET","path":"/api/test","headers":{"user-agent":"insights-operator/abcdef cluster/1234321","authorization":"Bearer test-token"}}}}}' \
+#     http://localhost:9090/envoy.service.auth.v3.Authorization/Check
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+observability:
+  type: logging
+  log_level: debug
+  log_format: json
+
+trust_domain: "parsec.example.com"
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+# Fixtures replace real HTTP calls with canned responses
+fixtures:
+  # OCM current_account fixture — returns the organization for the cluster
+  - type: http_rule
+    request:
+      method: GET
+      url: "https://api.openshift.example.com/api/accounts_mgmt/v1/current_account"
+      url_type: exact
+    response:
+      status: 200
+      headers:
+        Content-Type: application/json
+      body: '{"organization":{"external_id":"12345","ebs_account_id":"540155"}}'
+
+# Credential sources — uhc-auth first, then bearer fallback.
+# A non-matching user-agent makes the header source decline so the bearer
+# source can handle the request.
+credential_sources:
+  - name: uhc-auth
+    type: header
+    headers:
+      - name: authorization
+      - name: user-agent
+        match: "^.*-operator/.* cluster/.*"
+        strip: false
+  - name: authorization-bearer
+    type: authorization_bearer_opaque
+
+trust_store:
+  type: stub_store
+  validators:
+    - name: uhc-auth
+      type: lua_validator
+      script_file: ./configs/scripts/uhc_auth.lua
+      credential_types: ["header"]
+      config:
+        current_account_url: "https://api.openshift.example.com/api/accounts_mgmt/v1/current_account"
+        trust_domain: "uhc.example.com"
+        issuer: "uhc://api.openshift.example.com"
+      caching:
+        type: in_memory
+        ttl: "2h"
+
+data_sources: []
+
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.example.com"
+    ttl: 5m
+    transaction_context:
+      - type: cel
+        name: redhat-identity-mapper
+        script_file: ./configs/scripts/redhat_identity.cel
+    request_context:
+      - type: request_attributes
+
+  - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
+    type: unsigned
+    claim_mappers:
+      - type: cel
+        name: redhat-identity-mapper
+        script_file: ./configs/scripts/redhat_identity.cel
+
+authz_server:
+  policy:
+    token_types:
+      - type: "urn:ietf:params:oauth:token-type:txn_token"
+        header_name: "Transaction-Token"
+      - type: "urn:redhat:params:oauth:token-type:rh-identity"
+        header_name: "x-rh-identity"

@@ -28,6 +28,8 @@
 //
 // Supports:
 //   - Certificate auth tokens (issuer starts with "x509://")
+//   - UHC auth tokens (issuer starts with "uhc://", OCM cluster tokens from
+//     in-cluster OpenShift operators)
 //   - Unsigned JSON subject tokens (issuer is "urn:ietf:params:oauth:token-type:unsigned_json",
 //     sub prefixed "redhat:user:sso:{user_id}", enriched via BOP)
 //   - Registry Auth tokens (issuer is "container-registry-authorizer(.stage).api.redhat.com")
@@ -52,6 +54,26 @@ has(subject.issuer) && subject.issuer.startsWith("x509://") ? {
     "system": {
       "cn": has(subject.claims) && has(subject.claims.cn) ? subject.claims.cn : "",
       "cert_type": has(subject.claims) && has(subject.claims.cert_type) ? subject.claims.cert_type : ""
+    },
+    "internal": {
+      "org_id": has(subject.claims) && has(subject.claims.org_id) ? subject.claims.org_id : "",
+      "cross_access": false,
+      "auth_time": now_ms()
+    }
+  },
+  "entitlements": {}
+} : (
+// UHC auth path: OCM cluster tokens from in-cluster OpenShift operators. Like
+// cert-auth this is a System identity, so export compliance and cross-account
+// do not apply.
+has(subject.issuer) && subject.issuer.startsWith("uhc://") ? {
+  "identity": {
+    "auth_type": "uhc-auth",
+    "account_number": has(subject.claims) && has(subject.claims.account_number) ? subject.claims.account_number : "",
+    "org_id": has(subject.claims) && has(subject.claims.org_id) ? subject.claims.org_id : "",
+    "type": "System",
+    "system": {
+      "cluster_id": has(subject.claims) && has(subject.claims.cluster_id) ? subject.claims.cluster_id : ""
     },
     "internal": {
       "org_id": has(subject.claims) && has(subject.claims.org_id) ? subject.claims.org_id : "",
@@ -374,6 +396,7 @@ isServiceAccountToken(subject.claims) ? {
       ) : unsupportedTokenType("unsupported_token_type")
     )
   )
+)
 )
 )
 )

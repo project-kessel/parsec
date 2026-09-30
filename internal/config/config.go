@@ -82,6 +82,14 @@ type AuthzCheckPolicyConfig struct {
 // HeaderSpec configures a single header for extraction
 type HeaderSpec struct {
 	Name string `koanf:"name"`
+
+	// Match is an optional regex the header value must satisfy for the source
+	// to fire; a present-but-non-matching value makes the source decline
+	Match string `koanf:"match"`
+
+	// Strip reports whether to remove the header from the upstream request
+	// (default true); set false for matched-on headers upstream still needs
+	Strip *bool `koanf:"strip"`
 }
 
 // CredentialSourceConfig configures a credential extraction source
