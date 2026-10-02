@@ -378,8 +378,10 @@ func newClaimMapper(cfg ClaimMapperConfig) (service.ClaimMapper, error) {
 		return service.NewRequestAttributesMapper(), nil
 	case "stub":
 		return newStubMapper(cfg)
+	case "lua":
+		return newLuaMapper(cfg)
 	default:
-		return nil, fmt.Errorf("unknown claim mapper type: %s (supported: cel, passthrough, request_attributes, stub)", cfg.Type)
+		return nil, fmt.Errorf("unknown claim mapper type: %s (supported: cel, passthrough, request_attributes, stub, lua)", cfg.Type)
 	}
 }
 
@@ -401,6 +403,30 @@ func newCELMapper(cfg ClaimMapperConfig) (service.ClaimMapper, error) {
 	}
 
 	return mapper.NewCELMapper(script)
+}
+
+// newLuaMapper creates a Lua-based claim mapper
+func newLuaMapper(cfg ClaimMapperConfig) (service.ClaimMapper, error) {
+	script := cfg.Script
+
+	if cfg.ScriptFile != "" {
+		content, err := os.ReadFile(cfg.ScriptFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read script file %s: %w", cfg.ScriptFile, err)
+		}
+		script = string(content)
+	}
+
+	if script == "" {
+		return nil, fmt.Errorf("lua mapper requires script or script_file")
+	}
+
+	name := cfg.Name
+	if name == "" {
+		name = cfg.ScriptFile
+	}
+
+	return mapper.NewLuaMapper(name, script)
 }
 
 // newStubMapper creates a stub claim mapper that returns fixed claims
