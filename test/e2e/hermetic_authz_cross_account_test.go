@@ -228,7 +228,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 						return fix
 					}
 					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`}
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_org":"target-org"}]}`}
 					}
 					return nil
 				}),
@@ -267,7 +267,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 						return fix
 					}
 					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`}
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_org":"target-org"}]}`}
 					}
 					return nil
 				}),
@@ -402,7 +402,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 						}
 					}
 					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`}
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_org":"target-org"}]}`}
 					}
 					return nil
 				}),
@@ -442,7 +442,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 	})
 
-	t.Run("org-only cookies + RBAC null target_account → swapped identity", func(t *testing.T) {
+	t.Run("org-only cookies + RBAC without target_account → swapped identity", func(t *testing.T) {
 		client := &http.Client{
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
@@ -450,7 +450,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 						return fix
 					}
 					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":null,"target_org":"target-org"}]}`}
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_org":"target-org"}]}`}
 					}
 					return nil
 				}),
@@ -467,7 +467,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		assertOKResponse(t, resp)
 		identity := decodeTokenIdentity(t, resp)
 		if identity["account_number"] != "" {
-			t.Errorf("account_number=%v, want empty when record and cookie omit account", identity["account_number"])
+			t.Errorf("account_number=%v, want empty when cookie omits account", identity["account_number"])
 		}
 		internal, ok := identity["internal"].(map[string]any)
 		if !ok {
@@ -481,7 +481,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 	})
 
-	t.Run("both cookies + RBAC null target_account → account from cookie", func(t *testing.T) {
+	t.Run("both cookies + RBAC without target_account → account from cookie", func(t *testing.T) {
 		client := &http.Client{
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
@@ -489,7 +489,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 						return fix
 					}
 					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":null,"target_org":"target-org"}]}`}
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_org":"target-org"}]}`}
 					}
 					return nil
 				}),
@@ -506,11 +506,11 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		assertOKResponse(t, resp)
 		identity := decodeTokenIdentity(t, resp)
 		if identity["account_number"] != "999999" {
-			t.Errorf("account_number=%v, want cookie fallback 999999", identity["account_number"])
+			t.Errorf("account_number=%v, want cookie 999999", identity["account_number"])
 		}
 	})
 
-	t.Run("cookies + populated RBAC target_account mismatch → 403", func(t *testing.T) {
+	t.Run("stale RBAC target_account is ignored", func(t *testing.T) {
 		client := &http.Client{
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
@@ -532,7 +532,11 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Check: %v", err)
 		}
-		assertCrossAccountDenied(t, resp, "Access denied from RBAC on cross-access check.")
+		assertOKResponse(t, resp)
+		identity := decodeTokenIdentity(t, resp)
+		if identity["account_number"] != "999999" {
+			t.Errorf("account_number=%v, want cookie 999999 not RBAC target_account", identity["account_number"])
+		}
 	})
 }
 

@@ -24,12 +24,10 @@
 --   { "active": true, "target_account_number", "target_org_id",
 --     "employee_account_number", "employee_org_id" } — approved (AC1)
 --
--- On success, target_org_id comes from the matched RBAC record. target_account_number
--- comes from the record when RBAC still populates target_account; otherwise from the
--- account cookie, then "". Chrome/RBAC after RHCLOUD-36475 often omit target_account
--- while querying by org_id only (Q6). Deny when the org cookie is missing or does not
--- match target_org. If the record has a non-empty target_account, the account cookie
--- must match it.
+-- On success, target_org_id comes from the matched RBAC record (target_org).
+-- target_account_number comes from the account cookie when present, else "" —
+-- RBAC no longer returns target_account (RHCLOUD-36475); query is org_id-only (Q6).
+-- Deny when the org cookie is missing or does not match target_org.
 --
 -- Optional top-level audit table on the Lua return (not in JSON data) carries AC8
 -- audit fields for generic FetchAudit probe handling in Go.
@@ -315,35 +313,19 @@ local function rbac_find_approved_record(claims, target_org_id)
     return nil, "rbac_denied"
   end
 
-  local target_account = record_field(record, "target_account")
   local target_org = record_field(record, "target_org")
   if target_org == "" then
     return nil, "rbac_denied"
   end
 
   return {
-    target_account_number = target_account,
     target_org_id = target_org,
   }, nil
 end
 
-local function cookies_match_record(target_account, target_org, record)
+local function org_matches_record(target_org, record)
   if record == nil then return false end
-  if target_org ~= record.target_org_id then
-    return false
-  end
-  -- Empty record target_account is valid after RHCLOUD-36475; only bind when present.
-  if record.target_account_number == "" then
-    return true
-  end
-  return target_account == record.target_account_number
-end
-
-local function resolved_target_account(cookie_account, record)
-  if record.target_account_number ~= "" then
-    return record.target_account_number
-  end
-  return cookie_account
+  return target_org == record.target_org_id
 end
 
 function fetch(input)
@@ -388,19 +370,18 @@ function fetch(input)
     return encode_result({ error = "rbac_denied" },
       cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
-  if not cookies_match_record(target_account, target_org, record) then
+  if not org_matches_record(target_org, record) then
     return encode_result({ error = "rbac_denied" },
       cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
 
   local employee_account, employee_org = resolve_employee_account_org(claims)
-  local account_number = resolved_target_account(target_account, record)
 
   return encode_result({
     active = true,
-    target_account_number = account_number,
+    target_account_number = target_account,
     target_org_id = record.target_org_id,
     employee_account_number = employee_account,
     employee_org_id = employee_org
-  }, cross_account_audit("approved", claims, account_number, record.target_org_id))
+  }, cross_account_audit("approved", claims, target_account, record.target_org_id))
 end

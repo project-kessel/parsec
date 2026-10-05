@@ -21,9 +21,8 @@ import (
 
 const rbacBaseURL = "https://rbac.example.internal"
 const rbacListPath = "/api/rbac/v1/cross-account-requests/"
-const rbacApprovedBody = `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`
+const rbacApprovedBody = `{"data":[{"status":"approved","target_org":"target-org"}]}`
 const rbacApprovedNullAccountBody = `{"data":[{"status":"approved","target_account":null,"target_org":"target-org"}]}`
-const rbacApprovedOmittedAccountBody = `{"data":[{"status":"approved","target_org":"target-org"}]}`
 
 func loadCrossAccountScript(t *testing.T) string {
 	t.Helper()
@@ -357,7 +356,7 @@ func TestCrossAccountLua_RBACRecordNotApproved(t *testing.T) {
 				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
 					return &httpfixture.Fixture{
 						StatusCode: 200,
-						Body:       `{"data":[{"status":"pending","target_account":"999999","target_org":"target-org"}]}`,
+						Body:       `{"data":[{"status":"pending","target_org":"target-org"}]}`,
 					}
 				}
 				return nil
@@ -386,7 +385,7 @@ func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
 					return &httpfixture.Fixture{
 						StatusCode: 200,
-						Body:       `{"data":[{"status":"approved","target_account":"999999","target_org":"wrong-org"}]}`,
+						Body:       `{"data":[{"status":"approved","target_org":"wrong-org"}]}`,
 					}
 				}
 				return nil
@@ -403,35 +402,6 @@ func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "rbac_denied" {
 		t.Fatalf("error=%v, want rbac_denied when cookie org differs from RBAC record", payload["error"])
-	}
-}
-
-func TestCrossAccountLua_RBACRecordAccountMismatch(t *testing.T) {
-	script := loadCrossAccountScript(t)
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
-			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
-				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
-					return &httpfixture.Fixture{
-						StatusCode: 200,
-						Body:       `{"data":[{"status":"approved","target_account":"111111","target_org":"target-org"}]}`,
-					}
-				}
-				return nil
-			}),
-			Strict: true,
-		}),
-	}
-	ds := newCrossAccountDS(t, script, client, nil)
-
-	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	payload := decodeCrossAccountResult(t, result)
-	if payload["error"] != "rbac_denied" {
-		t.Fatalf("error=%v, want rbac_denied when cookie account differs from populated RBAC target_account", payload["error"])
 	}
 }
 
@@ -452,16 +422,16 @@ func TestCrossAccountLua_RBACApprovedNullTargetAccount_OrgCookieOnly(t *testing.
 		t.Fatalf("active=%v payload=%v, want true for org-only cookies + null target_account", payload["active"], payload)
 	}
 	if payload["target_account_number"] != "" {
-		t.Fatalf("target_account_number=%v, want empty when record and cookie omit account", payload["target_account_number"])
+		t.Fatalf("target_account_number=%v, want empty when cookie omits account", payload["target_account_number"])
 	}
 	if payload["target_org_id"] != "target-org" {
 		t.Fatalf("target_org_id=%v", payload["target_org_id"])
 	}
 }
 
-func TestCrossAccountLua_RBACApprovedNullTargetAccount_CookieAccountFallback(t *testing.T) {
+func TestCrossAccountLua_RBACApproved_AccountFromCookieOnly(t *testing.T) {
 	script := loadCrossAccountScript(t)
-	client := rbacJSONClient(t, rbacApprovedNullAccountBody)
+	client := rbacJSONClient(t, rbacApprovedBody)
 	ds := newCrossAccountDS(t, script, client, nil)
 
 	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
@@ -473,13 +443,14 @@ func TestCrossAccountLua_RBACApprovedNullTargetAccount_CookieAccountFallback(t *
 		t.Fatalf("active=%v payload=%v, want true", payload["active"], payload)
 	}
 	if payload["target_account_number"] != "999999" {
-		t.Fatalf("target_account_number=%v, want cookie fallback 999999", payload["target_account_number"])
+		t.Fatalf("target_account_number=%v, want cookie value (RBAC has no target_account)", payload["target_account_number"])
 	}
 }
 
-func TestCrossAccountLua_RBACApprovedOmittedTargetAccount(t *testing.T) {
+func TestCrossAccountLua_IgnoresStaleRBACTargetAccount(t *testing.T) {
 	script := loadCrossAccountScript(t)
-	client := rbacJSONClient(t, rbacApprovedOmittedAccountBody)
+	// Even if an old payload still includes target_account, it must not bind or deny.
+	client := rbacJSONClient(t, `{"data":[{"status":"approved","target_account":"111111","target_org":"target-org"}]}`)
 	ds := newCrossAccountDS(t, script, client, nil)
 
 	result, err := ds.Fetch(context.Background(), internalEmployeeSubject())
@@ -488,10 +459,10 @@ func TestCrossAccountLua_RBACApprovedOmittedTargetAccount(t *testing.T) {
 	}
 	payload := decodeCrossAccountResult(t, result)
 	if payload["active"] != true {
-		t.Fatalf("active=%v payload=%v, want true when RBAC omits target_account", payload["active"], payload)
+		t.Fatalf("active=%v payload=%v, want true — RBAC target_account is ignored", payload["active"], payload)
 	}
 	if payload["target_account_number"] != "999999" {
-		t.Fatalf("target_account_number=%v, want cookie fallback", payload["target_account_number"])
+		t.Fatalf("target_account_number=%v, want cookie 999999 not RBAC field", payload["target_account_number"])
 	}
 }
 
