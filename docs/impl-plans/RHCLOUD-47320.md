@@ -372,10 +372,9 @@ Work starts from `origin/main`. **Do not** build on commit `5ec349d`.
   `approved_only=true`, and **`org_id=` from target org cookie** (org_id-only
   query mode per Sep 15 review)
 - **PR review fix (S1/S2)**: parse first approved RBAC record from `data[]` and
-  bind `target_org_id` from `target_org`; deny when the org cookie disagrees.
-  RBAC no longer returns `target_account` (RHCLOUD-36475); org_id-only query (Q6).
-  Identity `account_number` comes from the account cookie when present, else `""`.
-  Any stale `target_account` field on the RBAC payload is ignored.
+  bind `target_org_id` from `target_org`; deny when the org cookie disagrees
+  (org_id-only query Q6). Identity `account_number` / DS `target_account_number`
+  come from the account cookie when present, else `""`.
 - Return structured result table (see Approach); `nil` on infrastructure failure
 - ~~`fetch_cache_key`~~ — removed with DS caching (`26de316`; 3scale parity)
 
@@ -561,7 +560,8 @@ Per `docs/testing.md`: hermetic, no I/O, prefer fakes/fixtures over mocks.
 | `TestCrossAccountLua_NonInternal` | `internal/datasource` | AC2 — forbidden |
 | `TestCrossAccountLua_RBACDenied` | `internal/datasource` | AC3 — rbac_denied |
 | `TestCrossAccountLua_RBACApproved` | `internal/datasource` | AC1 — target + employee fields |
-| `TestCrossAccountLua_RBACRecordMismatch` | `internal/datasource` | S1/S2 — approved RBAC record but cookie org/account mismatch → deny |
+| `TestCrossAccountLua_RBACRecordMismatch` | `internal/datasource` | S1/S2 — approved RBAC record but cookie org mismatch → deny |
+| `TestCrossAccountLua_RBACApproved_OrgCookieOnly` | `internal/datasource` | Org cookie only → approved; account empty |
 | `TestCrossAccountLua_AccountCookieOnlyEmptyOrg` | `internal/datasource` | S1 — account cookie only, empty org cookie → deny (no employee org fallback) |
 | `TestCrossAccountLua_RBACUnavailable` | `internal/datasource` | AC5 — nil fetch |
 | `TestCrossAccountLua_RBACRecordNotApproved` | `internal/datasource` | R1 — record with `status != "approved"` → rbac_denied |

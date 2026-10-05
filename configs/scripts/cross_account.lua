@@ -25,8 +25,7 @@
 --     "employee_account_number", "employee_org_id" } — approved (AC1)
 --
 -- On success, target_org_id comes from the matched RBAC record (target_org).
--- target_account_number comes from the account cookie when present, else "" —
--- RBAC no longer returns target_account (RHCLOUD-36475); query is org_id-only (Q6).
+-- target_account_number comes from the account cookie when present, else "".
 -- Deny when the org cookie is missing or does not match target_org.
 --
 -- Optional top-level audit table on the Lua return (not in JSON data) carries AC8

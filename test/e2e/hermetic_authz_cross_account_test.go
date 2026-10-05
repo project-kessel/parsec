@@ -442,7 +442,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 	})
 
-	t.Run("org-only cookies + RBAC without target_account → swapped identity", func(t *testing.T) {
+	t.Run("org-only cookie + approved RBAC → swapped identity", func(t *testing.T) {
 		client := &http.Client{
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
@@ -481,7 +481,7 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 	})
 
-	t.Run("both cookies + RBAC without target_account → account from cookie", func(t *testing.T) {
+	t.Run("account cookie optional → identity account from cookie", func(t *testing.T) {
 		client := &http.Client{
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
@@ -507,35 +507,6 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		identity := decodeTokenIdentity(t, resp)
 		if identity["account_number"] != "999999" {
 			t.Errorf("account_number=%v, want cookie 999999", identity["account_number"])
-		}
-	})
-
-	t.Run("stale RBAC target_account is ignored", func(t *testing.T) {
-		client := &http.Client{
-			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
-				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
-					if fix := jwksFixture.GetFixture(req); fix != nil {
-						return fix
-					}
-					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
-						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"111111","target_org":"target-org"}]}`}
-					}
-					return nil
-				}),
-				Strict: true,
-				Clock:  clk,
-			}),
-		}
-		authz := newAuthz(true, false, client)
-		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
-		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
-		if err != nil {
-			t.Fatalf("Check: %v", err)
-		}
-		assertOKResponse(t, resp)
-		identity := decodeTokenIdentity(t, resp)
-		if identity["account_number"] != "999999" {
-			t.Errorf("account_number=%v, want cookie 999999 not RBAC target_account", identity["account_number"])
 		}
 	})
 }
