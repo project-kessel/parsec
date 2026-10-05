@@ -441,6 +441,99 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 			t.Fatalf("swapped account_number=%v, want target 999999", tokenIdentity["account_number"])
 		}
 	})
+
+	t.Run("org-only cookies + RBAC null target_account → swapped identity", func(t *testing.T) {
+		client := &http.Client{
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+					if fix := jwksFixture.GetFixture(req); fix != nil {
+						return fix
+					}
+					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":null,"target_org":"target-org"}]}`}
+					}
+					return nil
+				}),
+				Strict: true,
+				Clock:  clk,
+			}),
+		}
+		authz := newAuthz(true, false, client)
+		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
+		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_org_id=target-org"))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		assertOKResponse(t, resp)
+		identity := decodeTokenIdentity(t, resp)
+		if identity["account_number"] != "" {
+			t.Errorf("account_number=%v, want empty when record and cookie omit account", identity["account_number"])
+		}
+		internal, ok := identity["internal"].(map[string]any)
+		if !ok {
+			t.Fatalf("internal=%T", identity["internal"])
+		}
+		if internal["cross_access"] != true {
+			t.Errorf("cross_access=%v", internal["cross_access"])
+		}
+		if identity["org_id"] != "target-org" {
+			t.Errorf("org_id=%v, want target-org", identity["org_id"])
+		}
+	})
+
+	t.Run("both cookies + RBAC null target_account → account from cookie", func(t *testing.T) {
+		client := &http.Client{
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+					if fix := jwksFixture.GetFixture(req); fix != nil {
+						return fix
+					}
+					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":null,"target_org":"target-org"}]}`}
+					}
+					return nil
+				}),
+				Strict: true,
+				Clock:  clk,
+			}),
+		}
+		authz := newAuthz(true, false, client)
+		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
+		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		assertOKResponse(t, resp)
+		identity := decodeTokenIdentity(t, resp)
+		if identity["account_number"] != "999999" {
+			t.Errorf("account_number=%v, want cookie fallback 999999", identity["account_number"])
+		}
+	})
+
+	t.Run("cookies + populated RBAC target_account mismatch → 403", func(t *testing.T) {
+		client := &http.Client{
+			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+					if fix := jwksFixture.GetFixture(req); fix != nil {
+						return fix
+					}
+					if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), testRBACListURL) {
+						return &httpfixture.Fixture{StatusCode: 200, Body: `{"data":[{"status":"approved","target_account":"111111","target_org":"target-org"}]}`}
+					}
+					return nil
+				}),
+				Strict: true,
+				Clock:  clk,
+			}),
+		}
+		authz := newAuthz(true, false, client)
+		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
+		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
+		if err != nil {
+			t.Fatalf("Check: %v", err)
+		}
+		assertCrossAccountDenied(t, resp, "Access denied from RBAC on cross-access check.")
+	})
 }
 
 func checkRequestWithCrossAccountCookies(token, cookie string) *authv3.CheckRequest {

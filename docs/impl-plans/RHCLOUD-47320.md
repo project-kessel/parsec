@@ -372,8 +372,11 @@ Work starts from `origin/main`. **Do not** build on commit `5ec349d`.
   `approved_only=true`, and **`org_id=` from target org cookie** (org_id-only
   query mode per Sep 15 review)
 - **PR review fix (S1/S2)**: parse first approved RBAC record from `data[]` and
-  bind `target_account_number` / `target_org_id` from that record; deny when
-  cookies disagree with the record (3scale auth.lua L548 parity)
+  bind `target_org_id` from `target_org`; deny when the org cookie disagrees.
+  `target_account` is optional (RBAC RHCLOUD-36475 / org_id-only query Q6): empty
+  or null account still matches if org matches; when the record has an account,
+  the account cookie must match. Identity `account_number` uses the record
+  account if present, else the account cookie, else `""`.
 - Return structured result table (see Approach); `nil` on infrastructure failure
 - ~~`fetch_cache_key`~~ — removed with DS caching (`26de316`; 3scale parity)
 
