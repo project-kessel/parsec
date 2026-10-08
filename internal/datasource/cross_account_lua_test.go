@@ -249,6 +249,12 @@ func TestCrossAccountLua_RBACApproved(t *testing.T) {
 	if user["user_id"] != "emp-1" {
 		t.Fatalf("unexpected user_id in identity envelope: %+v", identity)
 	}
+	if user["is_internal"] != true {
+		t.Fatalf("expected user.is_internal true in identity envelope: %+v", user)
+	}
+	if user["is_active"] != true {
+		t.Fatalf("expected user.is_active true in identity envelope: %+v", user)
+	}
 }
 
 func TestCrossAccountLua_RBACUnavailable(t *testing.T) {
