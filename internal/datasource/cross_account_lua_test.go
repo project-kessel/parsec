@@ -21,7 +21,7 @@ import (
 
 const rbacBaseURL = "https://rbac.example.internal"
 const rbacListPath = "/api/rbac/v1/cross-account-requests/"
-const rbacApprovedBody = `{"data":[{"status":"approved","target_account":"999999","target_org":"target-org"}]}`
+const rbacApprovedBody = `{"data":[{"status":"approved","target_org":"target-org"}]}`
 
 func loadCrossAccountScript(t *testing.T) string {
 	t.Helper()
@@ -346,6 +346,39 @@ func TestCrossAccountLua_AccountCookieOnlyEmptyOrg(t *testing.T) {
 	}
 }
 
+func TestCrossAccountLua_NonNumericAccountCookieDenied(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	var rbacCalls int
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
+					rbacCalls++
+				}
+				return nil
+			}),
+			Strict: false,
+		}),
+	}
+	ds := newCrossAccountDS(t, script, client, nil)
+
+	input := internalEmployeeSubject()
+	input.RequestAttributes.Headers["cookie"] = "cross_access_account_number=abc123; cross_access_org_id=target-org"
+
+	result, err := ds.Fetch(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "rbac_denied" {
+		t.Fatalf("error=%v, want rbac_denied for non-numeric account cookie", payload["error"])
+	}
+	if rbacCalls != 0 {
+		t.Fatalf("RBAC called %d times, want 0 when account cookie is non-numeric", rbacCalls)
+	}
+}
+
 func TestCrossAccountLua_RBACRecordNotApproved(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	client := &http.Client{
@@ -355,7 +388,7 @@ func TestCrossAccountLua_RBACRecordNotApproved(t *testing.T) {
 				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
 					return &httpfixture.Fixture{
 						StatusCode: 200,
-						Body:       `{"data":[{"status":"pending","target_account":"999999","target_org":"target-org"}]}`,
+						Body:       `{"data":[{"status":"pending","target_org":"target-org"}]}`,
 					}
 				}
 				return nil
@@ -384,7 +417,7 @@ func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
 					return &httpfixture.Fixture{
 						StatusCode: 200,
-						Body:       `{"data":[{"status":"approved","target_account":"999999","target_org":"wrong-org"}]}`,
+						Body:       `{"data":[{"status":"approved","target_org":"wrong-org"}]}`,
 					}
 				}
 				return nil
@@ -401,5 +434,45 @@ func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 	payload := decodeCrossAccountResult(t, result)
 	if payload["error"] != "rbac_denied" {
 		t.Fatalf("error=%v, want rbac_denied when cookie org differs from RBAC record", payload["error"])
+	}
+}
+
+func TestCrossAccountLua_RBACApproved_OrgCookieOnly(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	client := rbacJSONClient(t, rbacApprovedBody)
+	ds := newCrossAccountDS(t, script, client, nil)
+
+	input := internalEmployeeSubject()
+	input.RequestAttributes.Headers["cookie"] = "cross_access_org_id=target-org"
+
+	result, err := ds.Fetch(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["active"] != true {
+		t.Fatalf("active=%v payload=%v, want true for org-only cookies", payload["active"], payload)
+	}
+	if payload["target_account_number"] != "" {
+		t.Fatalf("target_account_number=%v, want empty when cookie omits account", payload["target_account_number"])
+	}
+	if payload["target_org_id"] != "target-org" {
+		t.Fatalf("target_org_id=%v", payload["target_org_id"])
+	}
+}
+
+func rbacJSONClient(t *testing.T, body string) *http.Client {
+	t.Helper()
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
+					return &httpfixture.Fixture{StatusCode: 200, Body: body}
+				}
+				return nil
+			}),
+			Strict: true,
+		}),
 	}
 }
