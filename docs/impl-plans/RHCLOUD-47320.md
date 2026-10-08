@@ -629,6 +629,7 @@ Existing `LuaDataSourceConfig.Observer` — wire through registry construction
 - [x] **Review gap (S1/S2)**: bind approved target to RBAC record; reject cookie/RBAC mismatch and empty cookies
 - [x] **Review gap (Q3)**: RBAC DS caching removed (`26de316`); matches 3scale no-cache behavior
 - [x] **Review gap (R1)**: Explicit RBAC record `status == "approved"` check (defense in depth beyond query param)
+- [x] **Trust decision**: `cross_access_account_number` cookie is client-controlled and is **not** verified by RBAC (the approved request binds `target_org` only, never the account). `cross_account.lua` therefore accepts the cookie only when empty or a plain numeric string (`^%d+$`); any other value is denied as `rbac_denied` before it reaches `target_account_number`, the CEL `account_number` field, or the audit event
 
 ## Maintainability
 
@@ -761,3 +762,4 @@ See Step 4 YAML snippet above.
 | 2026-09-17 | Merge | PR #201 merged to main; `parsec-CAR` rebased | Step 14: migrate rbac_path to base_url pattern |
 | 2026-09-17 | CodeRabbit ([#206](https://github.com/project-kessel/parsec/pull/206)) | Merge risk Minimal through `4d8b3c9`; no new actionable inline comments | Config/LuaClient merge clean |
 | 2026-09-17 | Implementation | R1–R3 + Step 14 on `parsec-CAR` (local, not pushed) | `b223ce5`..`b2aab9b` |
+| 2026-10-08 | Security review | Account cookie is client-controlled and unverified by RBAC (org-only binding) — raw non-numeric values could reach `target_account_number` / CEL / audit. | `cross_account.lua` — reject non-empty, non-numeric `target_account` as `rbac_denied` immediately after the inactive check, before forbidden/infra audit calls |

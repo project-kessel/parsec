@@ -28,6 +28,12 @@
 -- target_account_number comes from the account cookie when present, else "".
 -- Deny when the org cookie is missing or does not match target_org.
 --
+-- Trust decision: the cross_access_account_number cookie is client-controlled
+-- and is never verified by RBAC (the approved request is bound on target_org
+-- only). It is therefore accepted only when empty or a plain numeric string
+-- (Lua pattern ^%d+$); any other value is denied with rbac_denied before it
+-- can reach target_account_number, the CEL account_number field, or audit.
+--
 -- Optional top-level audit table on the Lua return (not in JSON data) carries AC8
 -- audit fields for generic FetchAudit probe handling in Go.
 --
@@ -327,6 +333,13 @@ local function org_matches_record(target_org, record)
   return target_org == record.target_org_id
 end
 
+-- account_cookie_valid reports whether target_account is safe to trust: the
+-- cookie is client-controlled and RBAC only binds the org, so only empty or
+-- plain numeric values are accepted.
+local function account_cookie_valid(target_account)
+  return target_account == "" or target_account:match("^%d+$") ~= nil
+end
+
 function fetch(input)
   local claims = resolve_claims(input)
   local cookie_hdr = cookie_header(input)
@@ -336,6 +349,11 @@ function fetch(input)
 
   if target_account == "" and target_org == "" then
     return inactive()
+  end
+
+  if not account_cookie_valid(target_account) then
+    return encode_result({ error = "rbac_denied" },
+      cross_account_audit("rbac_denied", claims, "", target_org))
   end
 
   if not resolve_is_internal(claims) then

@@ -346,6 +346,39 @@ func TestCrossAccountLua_AccountCookieOnlyEmptyOrg(t *testing.T) {
 	}
 }
 
+func TestCrossAccountLua_NonNumericAccountCookieDenied(t *testing.T) {
+	script := loadCrossAccountScript(t)
+	var rbacCalls int
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
+			Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
+				if req.Method == http.MethodGet && strings.HasPrefix(req.URL.String(), rbacBaseURL+rbacListPath) {
+					rbacCalls++
+				}
+				return nil
+			}),
+			Strict: false,
+		}),
+	}
+	ds := newCrossAccountDS(t, script, client, nil)
+
+	input := internalEmployeeSubject()
+	input.RequestAttributes.Headers["cookie"] = "cross_access_account_number=abc123; cross_access_org_id=target-org"
+
+	result, err := ds.Fetch(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	payload := decodeCrossAccountResult(t, result)
+	if payload["error"] != "rbac_denied" {
+		t.Fatalf("error=%v, want rbac_denied for non-numeric account cookie", payload["error"])
+	}
+	if rbacCalls != 0 {
+		t.Fatalf("RBAC called %d times, want 0 when account cookie is non-numeric", rbacCalls)
+	}
+}
+
 func TestCrossAccountLua_RBACRecordNotApproved(t *testing.T) {
 	script := loadCrossAccountScript(t)
 	client := &http.Client{
