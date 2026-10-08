@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/project-kessel/parsec/internal/claims"
+	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/mapper"
 	"github.com/project-kessel/parsec/internal/service"
@@ -443,5 +446,110 @@ func TestRedHatIdentityCEL_CrossAccountInactiveNoEmployeeFields(t *testing.T) {
 	}
 	if internal["cross_access"] != false {
 		t.Errorf("cross_access=%v", internal["cross_access"])
+	}
+}
+
+func TestRedHatIdentityCEL_UHCAuth(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	authTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	m, err := mapper.NewCELMapper(script, mapper.WithClock(clock.NewFixtureClock(authTime)))
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := &trust.Result{
+		Subject: "1234321",
+		Issuer:  "uhc://api.openshift.com",
+		Claims: claims.Claims{
+			"org_id":         "12345",
+			"cluster_id":     "1234321",
+			"account_number": "540155",
+		},
+	}
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: service.NewDataSourceRegistry(),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if !result.Decision.IsAllow() {
+		t.Fatalf("Decision=%+v, want Allow", result.Decision)
+	}
+
+	identity, ok := result.Claims["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity=%T, want map", result.Claims["identity"])
+	}
+	if identity["type"] != "System" {
+		t.Errorf("type=%v, want System", identity["type"])
+	}
+	if identity["auth_type"] != "uhc-auth" {
+		t.Errorf("auth_type=%v, want uhc-auth", identity["auth_type"])
+	}
+	if identity["org_id"] != "12345" {
+		t.Errorf("org_id=%v, want 12345", identity["org_id"])
+	}
+	if identity["account_number"] != "540155" {
+		t.Errorf("account_number=%v, want 540155", identity["account_number"])
+	}
+
+	system, ok := identity["system"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity.system=%T, want map", identity["system"])
+	}
+	if system["cluster_id"] != "1234321" {
+		t.Errorf("cluster_id=%v, want 1234321", system["cluster_id"])
+	}
+
+	internal, ok := identity["internal"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity.internal=%T, want map", identity["internal"])
+	}
+	if internal["org_id"] != "12345" {
+		t.Errorf("internal.org_id=%v, want 12345", internal["org_id"])
+	}
+	if internal["cross_access"] != false {
+		t.Errorf("cross_access=%v, want false", internal["cross_access"])
+	}
+	// auth_time is milliseconds, unlike 3scale's raw seconds.
+	if got, want := internal["auth_time"], authTime.UnixMilli(); got != want {
+		t.Errorf("auth_time=%v (%T), want %v", got, got, want)
+	}
+
+	if _, ok := result.Claims["entitlements"]; !ok {
+		t.Error("missing entitlements key in UHC auth envelope")
+	}
+}
+
+// An organization without an EBS account still authenticates; the field is
+// simply empty.
+func TestRedHatIdentityCEL_UHCAuthWithoutAccountNumber(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := &trust.Result{
+		Subject: "1234321",
+		Issuer:  "uhc://api.openshift.com",
+		Claims:  claims.Claims{"org_id": "12345", "cluster_id": "1234321"},
+	}
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: service.NewDataSourceRegistry(),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+
+	identity := result.Claims["identity"].(map[string]any)
+	if identity["account_number"] != "" {
+		t.Errorf("account_number=%v, want empty", identity["account_number"])
 	}
 }

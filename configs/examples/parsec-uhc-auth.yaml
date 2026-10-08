@@ -1,0 +1,119 @@
+# parsec Configuration - UHC Auth Testing
+#
+# For manually testing uhc-auth: OpenShift in-cluster operators presenting an
+# OCM cluster token. The cluster id travels in the User-Agent, so both headers
+# form the credential. parsec calls OCM directly; there is no uhc-auth-proxy
+# hop and no gateway-side secret — the cluster's own token is the only
+# credential involved.
+#
+# Prerequisites:
+#   - A real OCM cluster token and the matching cluster id
+#
+# Usage:
+#   ./bin/parsec serve --config ./configs/examples/parsec-uhc-auth.yaml
+#
+#   grpcurl -plaintext \
+#     -d '{
+#       "attributes": {
+#         "request": {
+#           "http": {
+#             "method": "GET",
+#             "path": "/api/anything",
+#             "headers": {
+#               "user-agent": "insights-operator/abcdef cluster/1234321",
+#               "authorization": "Bearer <ocm-cluster-token>"
+#             }
+#           }
+#         }
+#       }
+#     }' \
+#     localhost:9090 envoy.service.auth.v3.Authorization/Check
+#
+#   Repeat with "user-agent": "curl/8.0.1" to confirm the request takes the
+#   bearer path instead — that fall-through is what the match regex buys.
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+observability:
+  type: logging
+  log_level: debug
+  log_format: json
+
+trust_domain: "parsec.example.com"
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+# Named HTTP clients — no http_auth: OCM authenticates the cluster token itself
+http_clients:
+  - name: openshift-api
+    timeout: "30s"
+
+# Credential sources — uhc-auth first, then bearer fallback.
+#
+# Both sources see an Authorization header, so the user-agent match is what
+# decides which flow a request belongs to. A present-but-non-matching
+# user-agent makes this source decline and the bearer source picks the request
+# up. The match here is deliberately loose; the Lua script enforces the exact
+# operator allowlist.
+#
+# strip: false keeps the user-agent on the request forwarded upstream, where
+# services still log and route on it.
+credential_sources:
+  - name: uhc-auth
+    type: header
+    headers:
+      - name: authorization
+      - name: user-agent
+        match: "^.*-operator/.* cluster/.*"
+        strip: false
+  - name: authorization-bearer
+    type: authorization_bearer_opaque
+
+trust_store:
+  type: stub_store
+  validators:
+    - name: uhc-auth
+      type: lua_validator
+      script_file: ./configs/scripts/uhc_auth.lua
+      credential_types: ["header"]
+      http_client: openshift-api
+      config:
+        current_account_url: "https://api.stage.openshift.com/api/accounts_mgmt/v1/current_account"
+        trust_domain: "uhc.redhat.com"
+        issuer: "uhc://api.stage.openshift.com"
+      caching:
+        type: in_memory
+        ttl: "2h"
+
+data_sources: []
+
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.example.com"
+    ttl: 5m
+    transaction_context:
+      - type: cel
+        name: redhat-identity-mapper
+        script_file: ./configs/scripts/redhat_identity.cel
+    request_context:
+      - type: request_attributes
+
+  - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
+    type: unsigned
+    claim_mappers:
+      - type: cel
+        name: redhat-identity-mapper
+        script_file: ./configs/scripts/redhat_identity.cel
+
+authz_server:
+  policy:
+    token_types:
+      - type: "urn:ietf:params:oauth:token-type:txn_token"
+        header_name: "Transaction-Token"
+      - type: "urn:redhat:params:oauth:token-type:rh-identity"
+        header_name: "x-rh-identity"
