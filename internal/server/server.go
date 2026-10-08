@@ -201,7 +201,9 @@ func (s *Server) SetNotReady() {
 	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
 }
 
-// Stop gracefully stops both servers
+// Stop drains both servers. In-flight RPCs are allowed to finish until ctx
+// is cancelled, at which point remaining connections are closed so a rollout
+// cannot block until kubelet sends SIGKILL.
 func (s *Server) Stop(ctx context.Context) error {
 	ctx, p := s.observer.StopStarted(ctx)
 	defer p.End()
@@ -213,15 +215,42 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.healthServer.Shutdown()
 	}
 
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.gracefulStop()
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		s.forceStop()
+		<-errCh
+		return ctx.Err()
+	}
+}
+
+func (s *Server) gracefulStop() error {
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
-
 	if s.httpServer != nil {
-		return s.httpServer.Shutdown(ctx)
+		// Background context: the caller's deadline is what selects forceStop,
+		// and Close unblocks Shutdown when that path runs.
+		if err := s.httpServer.Shutdown(context.Background()); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
 	}
-
 	return nil
+}
+
+func (s *Server) forceStop() {
+	if s.grpcServer != nil {
+		s.grpcServer.Stop()
+	}
+	if s.httpServer != nil {
+		_ = s.httpServer.Close()
+	}
 }
 
 // grpcDialEndpoint builds a passthrough:/// endpoint suitable for grpc-gateway

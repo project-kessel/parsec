@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -31,6 +34,39 @@ func TestStartRejectsNilHTTPListener(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing HTTP listener") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestStopForceClosesWhenContextCancelled(t *testing.T) {
+	env := startTestServer(t, stubServerConfig())
+	env.Srv.SetReady()
+
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	defer watchCancel()
+
+	stream, err := env.HealthClient.Watch(watchCtx, &healthpb.HealthCheckRequest{Service: "readiness"})
+	if err != nil {
+		t.Fatalf("Watch(readiness) failed: %v", err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("Recv() failed: %v", err)
+	}
+
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	stopCancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- env.Srv.Stop(stopCtx)
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Stop() = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop blocked with an open RPC after the context was cancelled")
 	}
 }
 
