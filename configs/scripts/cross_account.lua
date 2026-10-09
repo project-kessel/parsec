@@ -110,7 +110,12 @@ local function build_identity_envelope(claims)
       user = {
         username = username,
         email = resolve_email(claims),
-        user_id = resolve_user_id(claims)
+        user_id = resolve_user_id(claims),
+        -- Hardcoded after resolve_is_internal + email gates succeed: RBAC's
+        -- query_by=user_id CAR list requires user.is_internal. Stage IdP JWTs
+        -- often omit/false this claim even for associates Parsec already allowed.
+        is_internal = true,
+        is_active = true,
       },
       internal = {
         org_id = org_id,
