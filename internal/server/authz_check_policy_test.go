@@ -364,7 +364,10 @@ func TestStaticAuthenticatedPolicy_HostAndPathRules(t *testing.T) {
 		want             AuthzCheckAction
 	}{
 		{"match", "api.example.com", "/api/distributors/acme/openapi.json", AuthzCheckAllowWithoutIssue},
+		{"case-insensitive host", "API.EXAMPLE.COM", "/api/distributors/acme/openapi.json", AuthzCheckAllowWithoutIssue},
+		{"host with port", "api.example.com:443", "/api/distributors/acme/openapi.json", AuthzCheckAllowWithoutIssue},
 		{"wrong host", "wrong.example.com", "/api/distributors/acme/openapi.json", AuthzCheckDeny},
+		{"missing host", "", "/api/distributors/acme/openapi.json", AuthzCheckDeny},
 		{"wrong path", "api.example.com", "/api/distributors/acme/private", AuthzCheckDeny},
 		{"query retained as path normalization", "api.example.com", "/api/distributors/acme/openapi.json?x=1", AuthzCheckAllowWithoutIssue},
 	}
