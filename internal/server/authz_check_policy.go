@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -148,11 +149,15 @@ func CompilePathPatterns(patterns []string) ([]*regexp.Regexp, error) {
 type StaticAuthenticatedPolicy struct {
 	tokenTypes                      []TokenTypeSpec
 	allowAnonymousWithoutIssuePaths []*regexp.Regexp
+	allowAnonymousWithoutIssueRules []AnonymousRequestRule
 }
 
 type staticAuthenticatedConfig struct {
 	allowAnonymousWithoutIssuePaths []*regexp.Regexp
+	allowAnonymousWithoutIssueRules []AnonymousRequestRule
 }
+
+type AnonymousRequestRule struct{ Hosts, Paths []*regexp.Regexp }
 
 // StaticAuthenticatedOption configures optional behavior for
 // [NewStaticAuthenticatedPolicy].
@@ -165,6 +170,10 @@ func WithAllowAnonymousWithoutIssuePaths(patterns []*regexp.Regexp) StaticAuthen
 	return func(c *staticAuthenticatedConfig) {
 		c.allowAnonymousWithoutIssuePaths = patterns
 	}
+}
+
+func WithAllowAnonymousWithoutIssueRules(rules []AnonymousRequestRule) StaticAuthenticatedOption {
+	return func(c *staticAuthenticatedConfig) { c.allowAnonymousWithoutIssueRules = rules }
 }
 
 // NewStaticAuthenticatedPolicy creates a policy that denies anonymous subjects
@@ -184,7 +193,25 @@ func NewStaticAuthenticatedPolicy(tokenTypes []TokenTypeSpec, opts ...StaticAuth
 	return &StaticAuthenticatedPolicy{
 		tokenTypes:                      tokenTypes,
 		allowAnonymousWithoutIssuePaths: cfg.allowAnonymousWithoutIssuePaths,
+		allowAnonymousWithoutIssueRules: cfg.allowAnonymousWithoutIssueRules,
 	}
+}
+
+func requestHost(attrs *request.RequestAttributes) string {
+	if attrs == nil || attrs.Additional == nil {
+		return ""
+	}
+	host, _ := attrs.Additional["host"].(string)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	return strings.ToLower(host)
+}
+
+func matchesAnonymousRule(rule AnonymousRequestRule, host, path string) bool {
+	return (len(rule.Hosts) == 0 || matchesAnyPattern(rule.Hosts, host)) && matchesAnyPattern(rule.Paths, path)
 }
 
 // Decide denies anonymous subjects and issues the configured token types for
@@ -196,6 +223,14 @@ func (p *StaticAuthenticatedPolicy) Decide(_ context.Context, in AuthzCheckPolic
 			path := requestPath(in.Request)
 			if matchesAnyPattern(p.allowAnonymousWithoutIssuePaths, path) {
 				return AuthzCheckDecision{Action: AuthzCheckAllowWithoutIssue}, nil
+			}
+		}
+		if len(p.allowAnonymousWithoutIssueRules) > 0 {
+			host, path := requestHost(in.Request), requestPath(in.Request)
+			for _, rule := range p.allowAnonymousWithoutIssueRules {
+				if matchesAnonymousRule(rule, host, path) {
+					return AuthzCheckDecision{Action: AuthzCheckAllowWithoutIssue}, nil
+				}
 			}
 		}
 		return AuthzCheckDecision{

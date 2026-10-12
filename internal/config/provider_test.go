@@ -284,3 +284,24 @@ func TestProvider_AuthzCheckPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildStaticAuthenticatedOpts_HostRules(t *testing.T) {
+	opts, err := buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssuePaths: []string{`/global`}, AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`console\.example\.com`}, Paths: []string{`/docs`}}}})
+	if err != nil {
+		t.Fatalf("build options: %v", err)
+	}
+	if len(opts) != 2 {
+		t.Fatalf("got %d options, want 2", len(opts))
+	}
+}
+
+func TestBuildStaticAuthenticatedOpts_HostRuleErrors(t *testing.T) {
+	_, err := buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`[invalid`}, Paths: []string{`/docs`}}}})
+	if err == nil || !strings.Contains(err.Error(), "allow_anonymous_without_issue_rules[0].hosts") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`example\.com`}, Paths: []string{`[invalid`}}}})
+	if err == nil || !strings.Contains(err.Error(), "allow_anonymous_without_issue_rules[0].paths") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

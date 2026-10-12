@@ -196,6 +196,20 @@ authz_server:
 
 Without `allow_anonymous_without_issue_paths`, the policy denies all anonymous requests.
 
+For paths whose anonymous behavior differs by hostname, add host-aware rules with `allow_anonymous_without_issue_rules`. Host and path patterns are both full-match RE2 expressions. These rules are additive; existing path-only rules remain global and continue to allow their paths on every host. If a path needs host-specific behavior, do not also include that path in the global list.
+
+```yaml
+authz_server:
+  policy:
+    allow_anonymous_without_issue_rules:
+      - hosts:
+          - "console\\.redhat\\.com"
+        paths:
+          - "/api/example/openapi.json"
+```
+
+The request host is normalized case-insensitively and an optional port is ignored. Query strings are ignored for path matching.
+
 ### Exchange Server
 
 Configure the token exchange server behavior:
