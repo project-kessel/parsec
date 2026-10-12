@@ -364,7 +364,7 @@ func TestStaticAuthenticatedPolicy_HostAndPathRules(t *testing.T) {
 		want             AuthzCheckAction
 	}{
 		{"match", "api.example.com", "/api/distributors/acme/openapi.json", AuthzCheckAllowWithoutIssue},
-		{"wrong host", "evil.example.com", "/api/distributors/acme/openapi.json", AuthzCheckDeny},
+		{"wrong host", "wrong.example.com", "/api/distributors/acme/openapi.json", AuthzCheckDeny},
 		{"wrong path", "api.example.com", "/api/distributors/acme/private", AuthzCheckDeny},
 		{"query retained as path normalization", "api.example.com", "/api/distributors/acme/openapi.json?x=1", AuthzCheckAllowWithoutIssue},
 	}
