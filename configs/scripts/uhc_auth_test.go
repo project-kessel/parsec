@@ -15,13 +15,12 @@ import (
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
-const uhcCurrentAccountURL = "https://api.openshift.example.com/api/accounts_mgmt/v1/current_account"
+const uhcCurrentAccountURL = "https://api.openshift.com/api/accounts_mgmt/v1/current_account"
 
 func uhcLuaConfig() map[string]any {
 	return map[string]any{
 		"current_account_url": uhcCurrentAccountURL,
 		"trust_domain":        "uhc.example.com",
-		"issuer":              "uhc://api.openshift.example.com",
 	}
 }
 
@@ -102,8 +101,8 @@ func TestUHCAuth_HappyPath(t *testing.T) {
 	if result.Subject != "1234321" {
 		t.Errorf("Subject=%q, want 1234321", result.Subject)
 	}
-	if result.Issuer != "uhc://api.openshift.example.com" {
-		t.Errorf("Issuer=%q, want uhc://api.openshift.example.com", result.Issuer)
+	if result.Issuer != uhcCurrentAccountURL {
+		t.Errorf("Issuer=%q, want %q", result.Issuer, uhcCurrentAccountURL)
 	}
 	if result.TrustDomain != "uhc.example.com" {
 		t.Errorf("TrustDomain=%q, want uhc.example.com", result.TrustDomain)

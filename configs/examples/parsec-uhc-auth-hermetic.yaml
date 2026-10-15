@@ -31,7 +31,7 @@ fixtures:
   - type: http_rule
     request:
       method: GET
-      url: "https://api.openshift.example.com/api/accounts_mgmt/v1/current_account"
+      url: "https://api.openshift.com/api/accounts_mgmt/v1/current_account"
       url_type: exact
     response:
       status: 200
@@ -61,9 +61,8 @@ trust_store:
       script_file: ./configs/scripts/uhc_auth.lua
       credential_types: ["header"]
       config:
-        current_account_url: "https://api.openshift.example.com/api/accounts_mgmt/v1/current_account"
+        current_account_url: "https://api.openshift.com/api/accounts_mgmt/v1/current_account"
         trust_domain: "uhc.example.com"
-        issuer: "uhc://api.openshift.example.com"
       caching:
         type: in_memory
         ttl: "2h"

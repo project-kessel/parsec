@@ -28,8 +28,8 @@
 //
 // Supports:
 //   - Certificate auth tokens (issuer starts with "x509://")
-//   - UHC auth tokens (issuer starts with "uhc://", OCM cluster tokens from
-//     in-cluster OpenShift operators)
+//   - UHC auth tokens (issuer is the OCM current_account URL, OCM cluster
+//     tokens from in-cluster OpenShift operators)
 //   - Unsigned JSON subject tokens (issuer is "urn:ietf:params:oauth:token-type:unsigned_json",
 //     sub prefixed "redhat:user:sso:{user_id}", enriched via BOP)
 //   - Registry Auth tokens (issuer is "container-registry-authorizer(.stage).api.redhat.com")
@@ -66,7 +66,10 @@ has(subject.issuer) && subject.issuer.startsWith("x509://") ? {
 // UHC auth path: OCM cluster tokens from in-cluster OpenShift operators. Like
 // cert-auth this is a System identity, so export compliance and cross-account
 // do not apply.
-has(subject.issuer) && subject.issuer.startsWith("uhc://") ? {
+has(subject.issuer) && subject.issuer in [
+  "https://api.openshift.com/api/accounts_mgmt/v1/current_account",
+  "https://api.stage.openshift.com/api/accounts_mgmt/v1/current_account"
+] ? {
   "identity": {
     "auth_type": "uhc-auth",
     "account_number": has(subject.claims) && has(subject.claims.account_number) ? subject.claims.account_number : "",

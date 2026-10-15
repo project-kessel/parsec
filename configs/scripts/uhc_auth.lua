@@ -9,9 +9,11 @@
 -- credential, so the HTTP client needs no http_auth.
 --
 -- Config values:
---   current_account_url  (required) OCM current_account endpoint (absolute URL)
+--   current_account_url  (required) OCM current_account endpoint (absolute
+--                        URL). Doubles as the issuer of validated results:
+--                        it is the endpoint that vouched for the token, and
+--                        the identity mapper matches it exactly.
 --   trust_domain         (required) trust domain for validated results
---   issuer               (required) issuer URI for validated results (uhc://...)
 
 -- Operators allowed to authenticate this way. The credential source matches a
 -- looser pattern as a cheap routing decision; this table is the authoritative
@@ -72,7 +74,6 @@ end
 function validate(input)
   local current_account_url = config.get("current_account_url")
   local trust_domain = config.get("trust_domain")
-  local issuer = config.get("issuer")
 
   local headers = input.credential.headers
   if headers == nil then
@@ -137,7 +138,7 @@ function validate(input)
 
   return {
     subject = cluster_id,
-    issuer = issuer,
+    issuer = current_account_url,
     trust_domain = trust_domain,
     claims = claims
   }

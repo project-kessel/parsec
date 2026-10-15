@@ -459,7 +459,7 @@ func TestRedHatIdentityCEL_UHCAuth(t *testing.T) {
 
 	subject := &trust.Result{
 		Subject: "1234321",
-		Issuer:  "uhc://api.openshift.com",
+		Issuer:  "https://api.openshift.com/api/accounts_mgmt/v1/current_account",
 		Claims: claims.Claims{
 			"org_id":         "12345",
 			"cluster_id":     "1234321",
@@ -535,7 +535,7 @@ func TestRedHatIdentityCEL_UHCAuthWithoutAccountNumber(t *testing.T) {
 
 	subject := &trust.Result{
 		Subject: "1234321",
-		Issuer:  "uhc://api.openshift.com",
+		Issuer:  "https://api.openshift.com/api/accounts_mgmt/v1/current_account",
 		Claims:  claims.Claims{"org_id": "12345", "cluster_id": "1234321"},
 	}
 	result, err := m.Map(context.Background(), &service.MapperInput{
@@ -551,5 +551,68 @@ func TestRedHatIdentityCEL_UHCAuthWithoutAccountNumber(t *testing.T) {
 	identity := result.Claims["identity"].(map[string]any)
 	if identity["account_number"] != "" {
 		t.Errorf("account_number=%v, want empty", identity["account_number"])
+	}
+}
+
+// The stage OCM endpoint is a recognized issuer too.
+func TestRedHatIdentityCEL_UHCAuthStageIssuer(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := &trust.Result{
+		Subject: "1234321",
+		Issuer:  "https://api.stage.openshift.com/api/accounts_mgmt/v1/current_account",
+		Claims:  claims.Claims{"org_id": "12345", "cluster_id": "1234321"},
+	}
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: service.NewDataSourceRegistry(),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+
+	identity, ok := result.Claims["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity=%T, want map", result.Claims["identity"])
+	}
+	if identity["auth_type"] != "uhc-auth" {
+		t.Errorf("auth_type=%v, want uhc-auth", identity["auth_type"])
+	}
+}
+
+// The issuer is matched exactly, so another endpoint on the same OCM host does
+// not reach the uhc-auth branch.
+func TestRedHatIdentityCEL_UHCAuthOtherOpenShiftIssuerRejected(t *testing.T) {
+	script := loadScript(t, "redhat_identity.cel")
+	m, err := mapper.NewCELMapper(script)
+	if err != nil {
+		t.Fatalf("NewCELMapper: %v", err)
+	}
+
+	subject := &trust.Result{
+		Subject: "1234321",
+		Issuer:  "https://api.openshift.com/api/accounts_mgmt/v1/pull_secrets",
+		Claims:  claims.Claims{"org_id": "12345", "cluster_id": "1234321"},
+	}
+	result, err := m.Map(context.Background(), &service.MapperInput{
+		Subject:            subject,
+		Actor:              trust.AnonymousResult(),
+		DataSourceRegistry: service.NewDataSourceRegistry(),
+		DataSourceInput:    &service.DataSourceInput{Subject: subject},
+	})
+	if err != nil {
+		t.Fatalf("Map: %v", err)
+	}
+	if result.Decision.Action != service.MappingDeny {
+		t.Fatalf("Action=%q, want deny", result.Decision.Action)
+	}
+	if result.Decision.Reason != service.AbortReasonUnsupportedTokenType {
+		t.Errorf("Reason=%q, want %q", result.Decision.Reason, service.AbortReasonUnsupportedTokenType)
 	}
 }

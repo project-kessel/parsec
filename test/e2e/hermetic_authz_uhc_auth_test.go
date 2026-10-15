@@ -39,7 +39,7 @@ func TestHermeticAuthzCheckUHCAuth(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
 	clk := clock.NewFixtureClock(fixedTime)
 
-	const currentAccountURL = "https://api.openshift.example.com/api/accounts_mgmt/v1/current_account"
+	const currentAccountURL = "https://api.openshift.com/api/accounts_mgmt/v1/current_account"
 
 	ocmFixture := httpfixture.NewRuleBasedProvider([]httpfixture.HTTPFixtureRule{
 		{
@@ -111,7 +111,6 @@ func TestHermeticAuthzCheckUHCAuth(t *testing.T) {
 		trust.WithLuaConfigSource(luaservices.NewMapConfigSource(map[string]any{
 			"current_account_url": currentAccountURL,
 			"trust_domain":        "uhc.example.com",
-			"issuer":              "uhc://api.openshift.example.com",
 		})),
 	)
 	if err != nil {

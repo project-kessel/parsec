@@ -84,7 +84,6 @@ trust_store:
       config:
         current_account_url: "https://api.stage.openshift.com/api/accounts_mgmt/v1/current_account"
         trust_domain: "uhc.redhat.com"
-        issuer: "uhc://api.stage.openshift.com"
       caching:
         type: in_memory
         ttl: "2h"
