@@ -3,6 +3,7 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -62,6 +63,7 @@ type Observer struct {
 
 	logger                 zerolog.Logger
 	meta                   Metadata
+	metaJSON               json.RawMessage
 	eventPrefix            string
 	failureClassifications map[string]string
 	allowedMetadataKeys    map[string]bool
@@ -100,6 +102,7 @@ func New(logger zerolog.Logger, meta Metadata, options ...Option) *Observer {
 	for _, option := range options {
 		option(observer)
 	}
+	observer.metaJSON, _ = json.Marshal(meta)
 	return observer
 }
 
@@ -142,9 +145,24 @@ type responseInfo struct {
 }
 
 type resourceInfo struct {
-	Type        string   `json:"type"`
-	TokenTypes  []string `json:"token_types,omitempty"`
-	CacheStatus string   `json:"cache_status,omitempty"`
+	Type        string               `json:"type"`
+	TokenTypes  []string             `json:"token_types,omitempty"`
+	CacheStatus string               `json:"cache_status,omitempty"`
+	CacheLayers []request.CacheLayer `json:"cache_layers,omitempty"`
+}
+
+// emitEnvelope holds pre-serialized JSON for the shared fields that are
+// identical across all events emitted during a single request. Built once
+// in End(), then passed by pointer to every emitRaw() call, replacing
+// per-call Interface() marshaling with zero-cost RawJSON() byte copies.
+type emitEnvelope struct {
+	service  json.RawMessage
+	request  json.RawMessage
+	subject  json.RawMessage
+	actor    json.RawMessage
+	resource json.RawMessage
+	response json.RawMessage
+	signals  json.RawMessage // nil when no signals
 }
 
 type requestProbe struct {
@@ -245,75 +263,93 @@ func (p *requestProbe) End() {
 	if !p.completed {
 		p.completion = service.RequestCompletion{Outcome: service.AuditOutcomeFailure, ReasonCode: ReasonInternalError}
 	}
-	cacheStatus, failureReason := p.state.Snapshot()
+	cacheStatus, cacheLayers, failureReason := p.state.Snapshot()
 	if p.completion.Outcome == service.AuditOutcomeFailure && (p.completion.ReasonCode == "" || p.completion.ReasonCode == ReasonInternalError) && failureReason != "" {
 		p.completion.ReasonCode = failureReason
 	}
 	p.cacheStatus = cacheStatus
 	signals := p.collector.Signals()
-	p.emit("request", nil, nil)
+
+	tokenTypes := make([]string, 0, len(p.completion.TokenTypes))
+	for _, tt := range p.completion.TokenTypes {
+		if v := safeTokenType(tt); v != "" {
+			tokenTypes = append(tokenTypes, v)
+		}
+	}
+
+	env := emitEnvelope{
+		service: p.observer.metaJSON,
+	}
+	env.request, _ = json.Marshal(p.request)
+	env.subject, _ = json.Marshal(p.subject)
+	env.actor, _ = json.Marshal(p.actor)
+	env.resource, _ = json.Marshal(resourceInfo{
+		Type: resourceTypeForAction(p.action), TokenTypes: tokenTypes, CacheStatus: p.cacheStatus, CacheLayers: cacheLayers,
+	})
+	env.response, _ = json.Marshal(responseInfo{
+		GRPCCode: p.completion.GRPCCode, HTTPStatus: p.completion.HTTPStatus,
+	})
+	if len(signals) > 0 {
+		env.signals, _ = json.Marshal(signals)
+	}
+
+	p.emitRaw("request", nil, nil, &env)
 	emitted := map[string]bool{}
 
 	for _, signal := range signals {
 		if signal.Operation == "cross_account_access" {
-			p.emit("rbac_cross_access_audit", signal.Metadata, &signal)
+			p.emitRaw("rbac_cross_access_audit", signal.Metadata, &signal, &env)
 			emitted["rbac_cross_access_audit"] = true
 			break
 		}
 	}
 	if p.authorize {
-		p.emit("authorize", nil, nil)
+		p.emitRaw("authorize", nil, nil, &env)
 	}
 	if p.subject.CredentialType == string(trust.CredentialTypeMTLS) || p.subject.CredentialType == string(trust.CredentialTypeForwardedClientCert) {
-		p.emit("validate_ssl_cert", nil, nil)
+		p.emitRaw("validate_ssl_cert", nil, nil, &env)
 	}
 	if p.actor.CredentialType == string(trust.CredentialTypeHeader) {
-		p.emit("verify_psk", nil, nil)
+		p.emitRaw("verify_psk", nil, nil, &env)
 	}
 	switch p.completion.ReasonCode {
 	case ReasonComplianceDenied:
-		p.emit("auth_compliance_failure", nil, nil)
+		p.emitRaw("auth_compliance_failure", nil, nil, &env)
 		emitted["auth_compliance_failure"] = true
 	case ReasonComplianceFailure:
-		p.emit("compliance_failure", nil, nil)
+		p.emitRaw("compliance_failure", nil, nil, &env)
 		emitted["compliance_failure"] = true
 	case ReasonSupplementalFailure:
-		p.emit("supplemental_user_data_failure", nil, nil)
+		p.emitRaw("supplemental_user_data_failure", nil, nil, &env)
 		emitted["supplemental_user_data_failure"] = true
 	case ReasonDependencyFailure:
-		p.emit("dependency_failure", nil, nil)
+		p.emitRaw("dependency_failure", nil, nil, &env)
 		emitted["dependency_failure"] = true
 	}
 	for _, signal := range signals {
 		if suffix := signalEventSuffix(signal.ReasonCode); suffix != "" && !emitted[suffix] {
-			p.emit(suffix, nil, &signal)
+			p.emitRaw(suffix, nil, &signal, &env)
 			emitted[suffix] = true
 		}
 	}
 }
 
-func (p *requestProbe) emit(suffix string, signalMetadata map[string]string, signal *auditctx.Signal) {
+// emitRaw writes a single audit event record using pre-serialized envelope
+// fields. Only outcome, reason_code, and cross_account metadata vary per
+// event; the six shared Interface() fields are serialized once in End().
+func (p *requestProbe) emitRaw(suffix string, signalMetadata map[string]string, signal *auditctx.Signal, env *emitEnvelope) {
 	name := p.observer.eventName(suffix)
-	// Use signal outcome if provided, otherwise use terminal request completion
 	var outcome service.AuditOutcome
 	var reasonCode string
 	if signal != nil {
-		// Signal-derived event: use signal's outcome and reason
 		outcome = signalOutcomeToAuditOutcome(signal.Outcome)
 		reasonCode = signal.ReasonCode
 	} else {
-		// Request-level event: use terminal completion
 		outcome = p.completion.Outcome
 		reasonCode = p.completion.ReasonCode
 	}
 
 	reason := safeReasonCode(reasonCode)
-	tokenTypes := make([]string, 0, len(p.completion.TokenTypes))
-	for _, tokenType := range p.completion.TokenTypes {
-		if value := safeTokenType(tokenType); value != "" {
-			tokenTypes = append(tokenTypes, value)
-		}
-	}
 
 	event := p.observer.event(outcome).
 		Str("event", name).
@@ -322,14 +358,14 @@ func (p *requestProbe) emit(suffix string, signalMetadata map[string]string, sig
 		Str("outcome", string(outcome)).
 		Str("request_id", p.requestID).
 		Int64("duration_ms", time.Since(p.started).Milliseconds()).
-		Interface("service", p.observer.meta).
-		Interface("request", p.request).
-		Interface("subject", p.subject).
-		Interface("actor", p.actor).
-		Interface("resource", resourceInfo{Type: "authorization_request", TokenTypes: tokenTypes, CacheStatus: p.cacheStatus}).
-		Interface("response", responseInfo{GRPCCode: p.completion.GRPCCode, HTTPStatus: p.completion.HTTPStatus})
-	if signals := p.collector.Signals(); len(signals) > 0 {
-		event = event.Interface("signals", signals)
+		RawJSON("service", env.service).
+		RawJSON("request", env.request).
+		RawJSON("subject", env.subject).
+		RawJSON("actor", env.actor).
+		RawJSON("resource", env.resource).
+		RawJSON("response", env.response)
+	if len(env.signals) > 0 {
+		event = event.RawJSON("signals", env.signals)
 	}
 	if reason != "" {
 		event = event.Str("reason_code", reason)
@@ -351,6 +387,18 @@ func signalOutcomeToAuditOutcome(outcome string) service.AuditOutcome {
 		return service.AuditOutcomeFailure
 	default:
 		return service.AuditOutcomeFailure
+	}
+}
+
+// resourceTypeForAction maps the probe action to the audit resource type.
+// ext_authz authorize requests emit "authorization_request"; token exchange
+// requests emit "token_exchange_request".
+func resourceTypeForAction(action string) string {
+	switch action {
+	case "token_exchange":
+		return "token_exchange_request"
+	default:
+		return "authorization_request"
 	}
 }
 
@@ -416,9 +464,9 @@ type auditInMemoryCacheProbe struct {
 func (o *Observer) InMemoryValidateStarted(ctx context.Context, _ string) (context.Context, trust.InMemoryValidateProbe) {
 	return ctx, &auditInMemoryCacheProbe{state: request.AuditStateFrom(ctx)}
 }
-func (p *auditInMemoryCacheProbe) CacheHit()     { p.state.SetCacheStatus("hit") }
-func (p *auditInMemoryCacheProbe) CacheMiss()    { p.state.SetCacheStatus("miss") }
-func (p *auditInMemoryCacheProbe) CacheExpired() { p.state.SetCacheStatus("expired") }
+func (p *auditInMemoryCacheProbe) CacheHit()     { p.state.RecordCacheLayer("validator_memory", "hit") }
+func (p *auditInMemoryCacheProbe) CacheMiss()    { p.state.RecordCacheLayer("validator_memory", "miss") }
+func (p *auditInMemoryCacheProbe) CacheExpired() { p.state.RecordCacheLayer("validator_memory", "expired") }
 func (p *auditInMemoryCacheProbe) SourceFailed(error) {
 	p.state.SetFailureReason(ReasonDependencyFailure)
 }
@@ -431,26 +479,39 @@ type auditDistributedCacheProbe struct {
 func (o *Observer) DistributedValidateStarted(ctx context.Context, _ string) (context.Context, trust.DistributedValidateProbe) {
 	return ctx, &auditDistributedCacheProbe{state: request.AuditStateFrom(ctx)}
 }
+func (p *auditDistributedCacheProbe) CacheHit() {
+	p.state.RecordCacheLayer("validator_distributed", "hit")
+}
+func (p *auditDistributedCacheProbe) CacheMiss() {
+	p.state.RecordCacheLayer("validator_distributed", "miss")
+}
 func (p *auditDistributedCacheProbe) GetFailed(error) {
-	p.state.SetCacheStatus("failure")
+	p.state.RecordCacheLayer("validator_distributed", "failure")
 	p.state.SetFailureReason(ReasonDependencyFailure)
 }
-func (p *auditDistributedCacheProbe) ResultExpired() { p.state.SetCacheStatus("expired") }
+func (p *auditDistributedCacheProbe) ResultExpired() {
+	p.state.RecordCacheLayer("validator_distributed", "expired")
+}
 
 type auditDataSourceCacheProbe struct {
 	datasource.NoOpCacheFetchProbe
 	state         *request.AuditState
+	layer         string
 	failureReason string
 }
 
 func (o *Observer) CacheFetchStarted(ctx context.Context, name string) (context.Context, datasource.CacheFetchProbe) {
-	return ctx, &auditDataSourceCacheProbe{state: request.AuditStateFrom(ctx), failureReason: o.classificationFor(name)}
+	return ctx, &auditDataSourceCacheProbe{
+		state:         request.AuditStateFrom(ctx),
+		layer:         "datasource:" + name,
+		failureReason: o.classificationFor(name),
+	}
 }
-func (p *auditDataSourceCacheProbe) CacheHit()     { p.state.SetCacheStatus("hit") }
-func (p *auditDataSourceCacheProbe) CacheMiss()    { p.state.SetCacheStatus("miss") }
-func (p *auditDataSourceCacheProbe) CacheExpired() { p.state.SetCacheStatus("expired") }
+func (p *auditDataSourceCacheProbe) CacheHit()     { p.state.RecordCacheLayer(p.layer, "hit") }
+func (p *auditDataSourceCacheProbe) CacheMiss()    { p.state.RecordCacheLayer(p.layer, "miss") }
+func (p *auditDataSourceCacheProbe) CacheExpired() { p.state.RecordCacheLayer(p.layer, "expired") }
 func (p *auditDataSourceCacheProbe) FetchFailed(error) {
-	p.state.SetCacheStatus("failure")
+	p.state.RecordCacheLayer(p.layer, "failure")
 	p.state.SetFailureReason(p.failureReason)
 }
 

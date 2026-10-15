@@ -45,7 +45,7 @@ Override specific configuration values via command-line flags (highest precedenc
 ./bin/parsec serve --observability-type=logging --observability-log-level=debug
 
 # Use 3scale-compatible audit event names instead of the default parsec_ prefix
-./bin/parsec serve --observability-type=audit --observability-event-prefix=parsec_
+./bin/parsec serve --observability-type=audit --observability-event-prefix=insights_
 
 # Override trust store type
 ./bin/parsec serve --trust-store-type=filtered_store
