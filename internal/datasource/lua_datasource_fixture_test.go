@@ -474,7 +474,7 @@ end
 	}
 
 	// Test cache key function
-	maskedInput, useCache := ds.CacheKey(context.Background(),input)
+	maskedInput, useCache := ds.CacheKey(context.Background(), input)
 	if !useCache {
 		t.Fatal("expected cacheable key")
 	}

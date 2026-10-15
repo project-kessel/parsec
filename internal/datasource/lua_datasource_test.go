@@ -550,7 +550,7 @@ end
 		},
 	}
 
-	maskedInput, useCache := ds.CacheKey(context.Background(),input)
+	maskedInput, useCache := ds.CacheKey(context.Background(), input)
 	if !useCache {
 		t.Fatal("expected cacheable key")
 	}
@@ -749,7 +749,7 @@ end
 	}
 
 	// Test CacheKey
-	maskedInput, useCache := ds.CacheKey(context.Background(),input)
+	maskedInput, useCache := ds.CacheKey(context.Background(), input)
 	if !useCache {
 		t.Fatal("expected cacheable key")
 	}
@@ -780,7 +780,7 @@ end
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	result, useCache := ds.CacheKey(context.Background(),nil)
+	result, useCache := ds.CacheKey(context.Background(), nil)
 	if useCache {
 		t.Fatal("nil input must skip cache")
 	}
@@ -816,7 +816,7 @@ end
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	_, useCache := ds.CacheKey(context.Background(),&service.DataSourceInput{
+	_, useCache := ds.CacheKey(context.Background(), &service.DataSourceInput{
 		Subject: &trust.Result{Subject: "alice"},
 	})
 	if useCache {
