@@ -37,7 +37,6 @@ type AuthzServer struct {
 	observer          service.AuthzCheckObserver
 	credentialSources CredentialSources
 	policy            AuthzCheckPolicy
-	requestIDConfig   RequestIDConfig
 }
 
 // NewAuthzServer creates a new ext_authz server.
@@ -46,7 +45,7 @@ type AuthzServer struct {
 // is used (preserving pre-policy behavior).
 // credentialSources defines where credentials are extracted from for both
 // subject and actor authentication.
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, observer service.AuthzCheckObserver, requestIDConfig RequestIDConfig) *AuthzServer {
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
 	if policy == nil {
 		policy = NewStaticAuthenticatedPolicy(nil)
 	}
@@ -61,17 +60,14 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		policy:            policy,
 		observer:          observer,
 		credentialSources: credentialSources,
-		requestIDConfig:   requestIDConfig,
 	}
 }
 
 // Check implements the ext_authz check endpoint
 func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (response *authv3.CheckResponse, returnErr error) {
-	var headers map[string]string
-	if req != nil {
-		headers = req.GetAttributes().GetRequest().GetHttp().GetHeaders()
-	}
-	ctx, extracted := contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
+	// Request ID is extracted by the Server interceptor; read from context.
+	extracted := request.IDExtracted(ctx)
+	canonicalHeader := request.CanonicalRequestIDHeader(ctx)
 
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
@@ -80,7 +76,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 	defer func() {
 		// Do not propagate locally-generated fallback IDs upstream.
 		if extracted {
-			propagateAuthzRequestID(response, request.ID(ctx), s.requestIDConfig.CanonicalHeader())
+			propagateAuthzRequestID(response, request.ID(ctx), canonicalHeader)
 		}
 		p.RequestCompleted(authzRequestCompletion(response, reasonCode, auditTokenTypes))
 		p.End()

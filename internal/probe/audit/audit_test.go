@@ -68,6 +68,9 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	require.Equal(t, "info", records[0]["level"])
 	require.Equal(t, "parsec_rbac_cross_access_audit", records[1]["event"])
 	require.Equal(t, "parsec_authorize", records[2]["event"])
+	resource := records[0]["resource"].(map[string]any)
+	require.Equal(t, "authorization_request", resource["type"],
+		"ext_authz must emit resource type 'authorization_request'")
 
 	// Verify cross_account metadata is carried through from the signal
 	crossAccount, hasCrossAccount := records[1]["cross_account"].(map[string]any)
@@ -122,6 +125,9 @@ func TestTokenExchangeAuditEmitsSingleTerminalRequest(t *testing.T) {
 	records := decodeRecords(t, output.Bytes())
 	require.Len(t, records, 1)
 	require.Equal(t, "parsec_request", records[0]["event"])
+	resource := records[0]["resource"].(map[string]any)
+	require.Equal(t, "token_exchange_request", resource["type"],
+		"token exchange must emit resource type 'token_exchange_request', not 'authorization_request'")
 	require.NotContains(t, output.String(), "secret-password")
 }
 
@@ -320,12 +326,156 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	require.Equal(t, "error", records[0]["level"])
 	resource := records[0]["resource"].(map[string]any)
 	require.Equal(t, "hit", resource["cache_status"])
+
+	layers, hasLayers := resource["cache_layers"].([]any)
+	require.True(t, hasLayers, "cache_layers must be present when cache probes fire")
+	require.Len(t, layers, 1)
+	layer0 := layers[0].(map[string]any)
+	require.Equal(t, "validator_memory", layer0["layer"])
+	require.Equal(t, "hit", layer0["status"])
+
 	names := map[string]bool{}
 	for _, record := range records {
 		names[record["event"].(string)] = true
 	}
 	require.True(t, names["parsec_supplemental_user_data_failure"])
 	require.NotContains(t, output.String(), "secret dependency response")
+}
+
+func TestCacheLayersEmittedPerComponent(t *testing.T) {
+	var output bytes.Buffer
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "multi-layer"))
+
+	_, memProbe := obs.InMemoryValidateStarted(ctx, "jwt-validator")
+	memProbe.CacheMiss()
+
+	_, distProbe := obs.DistributedValidateStarted(ctx, "jwt-validator")
+	distProbe.ResultExpired()
+
+	_, dsProbe := obs.CacheFetchStarted(ctx, "backoffice")
+	dsProbe.CacheHit()
+
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	resource := records[0]["resource"].(map[string]any)
+
+	require.Equal(t, "hit", resource["cache_status"],
+		"terminal cache_status should be the last writer (datasource hit)")
+
+	layers := resource["cache_layers"].([]any)
+	require.Len(t, layers, 3, "all three cache layers must be recorded")
+
+	layer0 := layers[0].(map[string]any)
+	require.Equal(t, "validator_memory", layer0["layer"])
+	require.Equal(t, "miss", layer0["status"])
+
+	layer1 := layers[1].(map[string]any)
+	require.Equal(t, "validator_distributed", layer1["layer"])
+	require.Equal(t, "expired", layer1["status"])
+
+	layer2 := layers[2].(map[string]any)
+	require.Equal(t, "datasource:backoffice", layer2["layer"])
+	require.Equal(t, "hit", layer2["status"])
+}
+
+func TestDistributedGetFailedEmitsCacheLayer(t *testing.T) {
+	var output bytes.Buffer
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "distributed-get-failed"))
+
+	_, distProbe := obs.DistributedValidateStarted(ctx, "jwt-validator")
+	distProbe.GetFailed(errors.New("groupcache peer unreachable"))
+
+	probe.RequestCompleted(service.RequestCompletion{
+		Outcome:    service.AuditOutcomeFailure,
+		ReasonCode: ReasonInternalError,
+		HTTPStatus: 500,
+	})
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	resource := records[0]["resource"].(map[string]any)
+
+	require.Equal(t, "failure", resource["cache_status"])
+
+	layers := resource["cache_layers"].([]any)
+	require.Len(t, layers, 1)
+	layer0 := layers[0].(map[string]any)
+	require.Equal(t, "validator_distributed", layer0["layer"])
+	require.Equal(t, "failure", layer0["status"])
+
+	require.Equal(t, ReasonDependencyFailure, records[0]["reason_code"],
+		"GetFailed must classify as dependency_failure")
+	require.NotContains(t, output.String(), "groupcache peer unreachable")
+}
+
+func TestFirstFailureReasonWins(t *testing.T) {
+	var output bytes.Buffer
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"},
+		WithFailureClassifications(map[string]string{
+			"enrichment": ReasonSupplementalFailure,
+		}),
+	)
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "first-wins"))
+
+	_, jwtProbe := obs.JWTValidateStarted(ctx, "https://sso.example")
+	jwtProbe.JWKSLookupFailed(errors.New("JWKS timeout"))
+
+	_, dsProbe := obs.CacheFetchStarted(ctx, "enrichment")
+	dsProbe.FetchFailed(errors.New("enrichment timeout"))
+
+	probe.RequestCompleted(service.RequestCompletion{
+		Outcome:    service.AuditOutcomeFailure,
+		ReasonCode: ReasonInternalError,
+		HTTPStatus: 500,
+	})
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	require.Equal(t, ReasonDependencyFailure, records[0]["reason_code"],
+		"first failure reason (dependency_failure from JWKS) must win over supplemental_user_data_failure")
+}
+
+func TestInvalidCacheStatusDropped(t *testing.T) {
+	var output bytes.Buffer
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "invalid-status"))
+
+	state := request.AuditStateFrom(ctx)
+	state.RecordCacheLayer("test_layer", "bogus_value")
+	state.RecordCacheLayer("test_layer", "hit")
+
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	resource := records[0]["resource"].(map[string]any)
+	require.Equal(t, "hit", resource["cache_status"],
+		"only the valid status should survive")
+
+	layers := resource["cache_layers"].([]any)
+	require.Len(t, layers, 1, "invalid status must not produce a cache layer entry")
+	require.Equal(t, "hit", layers[0].(map[string]any)["status"])
+}
+
+func TestNoCacheProbeEmitsNoCacheStatus(t *testing.T) {
+	var output bytes.Buffer
+	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "no-cache"))
+	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	resource := records[0]["resource"].(map[string]any)
+	_, hasCacheStatus := resource["cache_status"]
+	require.False(t, hasCacheStatus,
+		"cache_status must be omitted (omitempty) when no cache probe fires")
+	_, hasCacheLayers := resource["cache_layers"]
+	require.False(t, hasCacheLayers,
+		"cache_layers must be omitted (omitempty) when no cache probe fires")
 }
 
 func TestAuditRejectsUnrecognizedReasonAndTokenValues(t *testing.T) {
@@ -368,4 +518,34 @@ func eventNames(records []map[string]any) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func BenchmarkRequestProbeEnd(b *testing.B) {
+	obs := New(zerolog.New(io.Discard), Metadata{ServiceName: "parsec", ServiceVersion: "v1"})
+	for i := 0; i < b.N; i++ {
+		ctx := request.WithID(context.Background(), "bench-id")
+		ctx, probe := obs.AuthzCheckStarted(ctx)
+		auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+			Source:    auditctx.SourceDataSource,
+			Operation: "cross_account_access",
+			Outcome:   auditctx.OutcomeSuccess,
+			Metadata:  map[string]string{"target_org_id": "org-1"},
+		})
+
+		_, memProbe := obs.InMemoryValidateStarted(ctx, "validator")
+		memProbe.CacheMiss()
+		_, distProbe := obs.DistributedValidateStarted(ctx, "validator")
+		distProbe.CacheHit()
+		_, dsProbe := obs.CacheFetchStarted(ctx, "backoffice")
+		dsProbe.CacheHit()
+
+		probe.SubjectCredentialExtracted(&trust.MTLSCredential{}, nil)
+		probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-psk": "test"}}, nil)
+		probe.RequestCompleted(service.RequestCompletion{
+			Outcome:    service.AuditOutcomeSuccess,
+			HTTPStatus: 200,
+			TokenTypes: []service.TokenType{service.TokenTypeTransactionToken},
+		})
+		probe.End()
+	}
 }

@@ -123,9 +123,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	requestIDConfig := provider.RequestIDConfig()
 
 	// 4. Create service handlers
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, obs, requestIDConfig)
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, obs)
 
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs, requestIDConfig)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
 		Observer:       obs,
