@@ -372,8 +372,9 @@ Work starts from `origin/main`. **Do not** build on commit `5ec349d`.
   `approved_only=true`, and **`org_id=` from target org cookie** (org_id-only
   query mode per Sep 15 review)
 - **PR review fix (S1/S2)**: parse first approved RBAC record from `data[]` and
-  bind `target_account_number` / `target_org_id` from that record; deny when
-  cookies disagree with the record (3scale auth.lua L548 parity)
+  bind `target_org_id` from `target_org`; deny when the org cookie disagrees
+  (org_id-only query Q6). Identity `account_number` / DS `target_account_number`
+  come from the account cookie when present, else `""`.
 - Return structured result table (see Approach); `nil` on infrastructure failure
 - ~~`fetch_cache_key`~~ — removed with DS caching (`26de316`; 3scale parity)
 
@@ -559,7 +560,8 @@ Per `docs/testing.md`: hermetic, no I/O, prefer fakes/fixtures over mocks.
 | `TestCrossAccountLua_NonInternal` | `internal/datasource` | AC2 — forbidden |
 | `TestCrossAccountLua_RBACDenied` | `internal/datasource` | AC3 — rbac_denied |
 | `TestCrossAccountLua_RBACApproved` | `internal/datasource` | AC1 — target + employee fields |
-| `TestCrossAccountLua_RBACRecordMismatch` | `internal/datasource` | S1/S2 — approved RBAC record but cookie org/account mismatch → deny |
+| `TestCrossAccountLua_RBACRecordMismatch` | `internal/datasource` | S1/S2 — approved RBAC record but cookie org mismatch → deny |
+| `TestCrossAccountLua_RBACApproved_OrgCookieOnly` | `internal/datasource` | Org cookie only → approved; account empty |
 | `TestCrossAccountLua_AccountCookieOnlyEmptyOrg` | `internal/datasource` | S1 — account cookie only, empty org cookie → deny (no employee org fallback) |
 | `TestCrossAccountLua_RBACUnavailable` | `internal/datasource` | AC5 — nil fetch |
 | `TestCrossAccountLua_RBACRecordNotApproved` | `internal/datasource` | R1 — record with `status != "approved"` → rbac_denied |
@@ -627,6 +629,7 @@ Existing `LuaDataSourceConfig.Observer` — wire through registry construction
 - [x] **Review gap (S1/S2)**: bind approved target to RBAC record; reject cookie/RBAC mismatch and empty cookies
 - [x] **Review gap (Q3)**: RBAC DS caching removed (`26de316`); matches 3scale no-cache behavior
 - [x] **Review gap (R1)**: Explicit RBAC record `status == "approved"` check (defense in depth beyond query param)
+- [x] **Trust decision**: `cross_access_account_number` cookie is client-controlled and is **not** verified by RBAC (the approved request binds `target_org` only, never the account). `cross_account.lua` therefore accepts the cookie only when empty or a plain numeric string (`^%d+$`); any other value is denied as `rbac_denied` before it reaches `target_account_number`, the CEL `account_number` field, or the audit event
 
 ## Maintainability
 
@@ -759,3 +762,4 @@ See Step 4 YAML snippet above.
 | 2026-09-17 | Merge | PR #201 merged to main; `parsec-CAR` rebased | Step 14: migrate rbac_path to base_url pattern |
 | 2026-09-17 | CodeRabbit ([#206](https://github.com/project-kessel/parsec/pull/206)) | Merge risk Minimal through `4d8b3c9`; no new actionable inline comments | Config/LuaClient merge clean |
 | 2026-09-17 | Implementation | R1–R3 + Step 14 on `parsec-CAR` (local, not pushed) | `b223ce5`..`b2aab9b` |
+| 2026-10-08 | Security review | Account cookie is client-controlled and unverified by RBAC (org-only binding) — raw non-numeric values could reach `target_account_number` / CEL / audit. | `cross_account.lua` — reject non-empty, non-numeric `target_account` as `rbac_denied` immediately after the inactive check, before forbidden/infra audit calls |
