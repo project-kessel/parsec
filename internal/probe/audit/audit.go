@@ -464,9 +464,11 @@ type auditInMemoryCacheProbe struct {
 func (o *Observer) InMemoryValidateStarted(ctx context.Context, _ string) (context.Context, trust.InMemoryValidateProbe) {
 	return ctx, &auditInMemoryCacheProbe{state: request.AuditStateFrom(ctx)}
 }
-func (p *auditInMemoryCacheProbe) CacheHit()     { p.state.RecordCacheLayer("validator_memory", "hit") }
-func (p *auditInMemoryCacheProbe) CacheMiss()    { p.state.RecordCacheLayer("validator_memory", "miss") }
-func (p *auditInMemoryCacheProbe) CacheExpired() { p.state.RecordCacheLayer("validator_memory", "expired") }
+func (p *auditInMemoryCacheProbe) CacheHit()  { p.state.RecordCacheLayer("validator_memory", "hit") }
+func (p *auditInMemoryCacheProbe) CacheMiss() { p.state.RecordCacheLayer("validator_memory", "miss") }
+func (p *auditInMemoryCacheProbe) CacheExpired() {
+	p.state.RecordCacheLayer("validator_memory", "expired")
+}
 func (p *auditInMemoryCacheProbe) SourceFailed(error) {
 	p.state.SetFailureReason(ReasonDependencyFailure)
 }
