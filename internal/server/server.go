@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync/atomic"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
+	"github.com/project-kessel/parsec/internal/request"
 )
 
 // healthReadinessService is the aggregate readiness key for Kubernetes gRPC
@@ -51,9 +53,11 @@ type Server struct {
 	observer        LifecycleObserver
 	muxConfigurer   MuxConfigurer
 
-	authzServer    *AuthzServer
-	exchangeServer *ExchangeServer
-	jwksServer     *JWKSServer
+	authzServer     *AuthzServer
+	exchangeServer  *ExchangeServer
+	jwksServer      *JWKSServer
+	requestIDConfig RequestIDConfig
+	activeRequests  atomic.Int64
 }
 
 // Config contains server configuration. Callers must supply pre-created
@@ -77,6 +81,9 @@ type Config struct {
 	// MuxConfigurer, when non-nil, is applied to the HTTP mux during Start
 	// to register additional handlers (e.g. /metrics for Prometheus scraping).
 	MuxConfigurer MuxConfigurer
+
+	// RequestIDConfig configures request correlation ID header names.
+	RequestIDConfig RequestIDConfig
 }
 
 // New creates a new server with the given configuration.
@@ -98,6 +105,7 @@ func New(cfg Config) *Server {
 		authzServer:     cfg.AuthzServer,
 		exchangeServer:  cfg.ExchangeServer,
 		jwksServer:      cfg.JWKSServer,
+		requestIDConfig: cfg.RequestIDConfig,
 	}
 }
 
@@ -111,7 +119,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	// Create gRPC server
-	s.grpcServer = grpc.NewServer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(s.trackSecurityRequest))
 
 	// Register services
 	authv3.RegisterAuthorizationServer(s.grpcServer, s.authzServer)
@@ -143,6 +151,8 @@ func (s *Server) Start(ctx context.Context) error {
 	gwMux := runtime.NewServeMux(
 		runtime.WithMarshalerOption("application/x-www-form-urlencoded", NewFormMarshaler()),
 		runtime.WithErrorHandler(oauthHTTPErrorHandler),
+		runtime.WithIncomingHeaderMatcher(newIncomingHeaderMatcher(s.requestIDConfig.Headers)),
+		runtime.WithOutgoingHeaderMatcher(newOutgoingHeaderMatcher(s.requestIDConfig.Headers)),
 	)
 	opts := append(
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
@@ -214,14 +224,53 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
+		stopped := make(chan struct{})
+		go func() {
+			s.grpcServer.GracefulStop()
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-ctx.Done():
+			interrupted := s.activeRequests.Load()
+			s.grpcServer.Stop()
+			if s.httpServer != nil {
+				_ = s.httpServer.Close()
+			}
+			p.ShutdownFailed(interrupted)
+			return ctx.Err()
+		}
 	}
 
 	if s.httpServer != nil {
-		return s.httpServer.Shutdown(ctx)
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			p.ShutdownFailed(s.activeRequests.Load())
+			return err
+		}
 	}
 
+	p.ShutdownCompleted(s.activeRequests.Load())
 	return nil
+}
+
+func (s *Server) trackSecurityRequest(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	switch info.FullMethod {
+	case "/envoy.service.auth.v3.Authorization/Check", "/parsec.v1.TokenExchangeService/Exchange":
+		s.activeRequests.Add(1)
+		defer s.activeRequests.Add(-1)
+
+		// Extract request ID once for both handlers. For ext_authz Check
+		// requests the HTTP headers from the CheckRequest are checked first;
+		// for token exchange only gRPC metadata is available.
+		var headers map[string]string
+		if checkReq, ok := req.(*authv3.CheckRequest); ok {
+			headers = checkReq.GetAttributes().GetRequest().GetHttp().GetHeaders()
+		}
+		var extracted bool
+		ctx, extracted = contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
+		ctx = request.WithIDExtraction(ctx, extracted, s.requestIDConfig.CanonicalHeader())
+	}
+	return handler(ctx, req)
 }
 
 // grpcDialEndpoint builds a passthrough:/// endpoint suitable for grpc-gateway

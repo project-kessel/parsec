@@ -826,6 +826,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			"SubjectCredentialExtracted",
 			"SubjectValidationSucceeded",
 			"PolicyDecisionIssue",
+			"RequestCompleted",
 			"End",
 		)
 	})
@@ -873,6 +874,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			"SubjectCredentialExtracted",
 			"SubjectValidationSucceeded", // Still succeeds even for invalid token with StubValidator
 			"PolicyDecisionIssue",
+			"RequestCompleted",
 			"End",
 		)
 	})
@@ -923,6 +925,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			"ActorValidationSucceeded",
 			"SubjectAnonymous",
 			"PolicyDecisionDeny",
+			"RequestCompleted",
 			"End",
 		)
 	})
@@ -1232,8 +1235,10 @@ func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
 			t.Fatalf("expected OK response, got %v", resp.Status)
 		}
 
-		if len(okResp.Headers) != 0 {
-			t.Errorf("expected no rewrite headers when all cookies consumed, got %v", okResp.Headers)
+		for _, header := range okResp.Headers {
+			if header.GetHeader().GetKey() == "cookie" {
+				t.Errorf("expected no cookie rewrite header when all cookies consumed, got %v", okResp.Headers)
+			}
 		}
 
 		found := false
@@ -1343,7 +1348,7 @@ func (p *stubPolicy) Decide(_ context.Context, _ AuthzCheckPolicyInput) (AuthzCh
 func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 	ctx := context.Background()
 
-	newAuthzWithMapper := func(t *testing.T, script string) *AuthzServer {
+	newAuthzWithMapper := func(t *testing.T, script string, observer service.AuthzCheckObserver) *AuthzServer {
 		t.Helper()
 		celMapper, err := mapper.NewCELMapper(script)
 		if err != nil {
@@ -1358,7 +1363,7 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 			TransactionContextMappers: []service.ClaimMapper{celMapper},
 		}))
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-		return NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+		return NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), observer)
 	}
 
 	checkReq := &authv3.CheckRequest{
@@ -1376,7 +1381,8 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 	}
 
 	t.Run("invalid_request_not_internal", func(t *testing.T) {
-		srv := newAuthzWithMapper(t, `invalidSubject("impersonated tokens are not accepted")`)
+		observer := &capturingAuthzObserver{}
+		srv := newAuthzWithMapper(t, `invalidSubject("impersonated tokens are not accepted")`, observer)
 		resp, err := srv.Check(ctx, checkReq)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -1394,10 +1400,17 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		if denied.GetStatus().GetCode() != typev3.StatusCode_BadRequest {
 			t.Errorf("HTTP status: got %d, want BadRequest (%d)", denied.GetStatus().GetCode(), typev3.StatusCode_BadRequest)
 		}
+		if observer.completion.ReasonCode != "token_issuance_denied" {
+			t.Errorf("audit reason: got %q, want token_issuance_denied", observer.completion.ReasonCode)
+		}
+		if len(observer.completion.TokenTypes) != 0 {
+			t.Errorf("audit token types must be empty on denied issuance, got %v", observer.completion.TokenTypes)
+		}
 	})
 
 	t.Run("fail_is_internal", func(t *testing.T) {
-		srv := newAuthzWithMapper(t, `fail("mapping exploded")`)
+		observer := &capturingAuthzObserver{}
+		srv := newAuthzWithMapper(t, `fail("mapping exploded")`, observer)
 		resp, err := srv.Check(ctx, checkReq)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -1412,6 +1425,12 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		if denied.GetStatus().GetCode() != typev3.StatusCode_InternalServerError {
 			t.Errorf("HTTP status: got %d, want InternalServerError (%d)", denied.GetStatus().GetCode(), typev3.StatusCode_InternalServerError)
 		}
+		if observer.completion.ReasonCode != "token_issuance_failed" {
+			t.Errorf("audit reason: got %q, want token_issuance_failed", observer.completion.ReasonCode)
+		}
+		if len(observer.completion.TokenTypes) != 0 {
+			t.Errorf("audit token types must be empty on failed issuance, got %v", observer.completion.TokenTypes)
+		}
 	})
 
 	t.Run("nil_token_is_internal", func(t *testing.T) {
@@ -1420,7 +1439,8 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		registry := service.NewSimpleRegistry()
 		registry.Register(service.TokenTypeTransactionToken, &nilTokenIssuer{})
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+		observer := &capturingAuthzObserver{}
+		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), observer)
 
 		resp, err := srv.Check(ctx, checkReq)
 		if err != nil {
@@ -1441,6 +1461,12 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		}
 		if !strings.Contains(resp.Status.Message, "no token") {
 			t.Errorf("message: got %q", resp.Status.Message)
+		}
+		if observer.completion.ReasonCode != "token_issuance_failed" {
+			t.Errorf("audit reason: got %q, want token_issuance_failed", observer.completion.ReasonCode)
+		}
+		if len(observer.completion.TokenTypes) != 0 {
+			t.Errorf("audit token types must be empty on failed issuance, got %v", observer.completion.TokenTypes)
 		}
 	})
 }
