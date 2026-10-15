@@ -339,7 +339,7 @@ func TestExportComplianceLua_CacheKey_Username(t *testing.T) {
 	script := loadExportComplianceScript(t)
 	ds := newCacheableComplianceDS(t, script, http.DefaultClient)
 
-	masked, useCache := ds.CacheKey(consoleSubjectForCompliance())
+	masked, useCache := ds.CacheKey(context.Background(),consoleSubjectForCompliance())
 	if !useCache {
 		t.Fatal("expected cacheable key for username")
 	}
@@ -367,7 +367,7 @@ func TestExportComplianceLua_CacheKey_NilForSynthetic(t *testing.T) {
 		},
 	}
 
-	_, useCache := ds.CacheKey(noUserInput)
+	_, useCache := ds.CacheKey(context.Background(),noUserInput)
 	if useCache {
 		t.Fatal("empty username must skip cache")
 	}
@@ -393,8 +393,8 @@ func TestExportComplianceLua_CacheKey_NilForBypassHeader(t *testing.T) {
 	}
 	normalInput := consoleSubjectForCompliance()
 
-	_, bypassCache := ds.CacheKey(bypassInput)
-	normalKey, normalCache := ds.CacheKey(normalInput)
+	_, bypassCache := ds.CacheKey(context.Background(),bypassInput)
+	normalKey, normalCache := ds.CacheKey(context.Background(),normalInput)
 
 	if bypassCache {
 		t.Fatal("bypass header must skip cache")
@@ -439,8 +439,8 @@ func TestExportComplianceLua_DifferentUsers(t *testing.T) {
 		},
 	}
 
-	aliceKey, aliceCache := ds.CacheKey(inputAlice)
-	bobKey, bobCache := ds.CacheKey(inputBob)
+	aliceKey, aliceCache := ds.CacheKey(context.Background(),inputAlice)
+	bobKey, bobCache := ds.CacheKey(context.Background(),inputBob)
 	if !aliceCache || !bobCache {
 		t.Fatal("expected cacheable keys for named users")
 	}
@@ -577,7 +577,7 @@ func TestExportComplianceLua_RHSMTokenShape(t *testing.T) {
 
 	// Cache key should use "sub" as username
 	cacheDs := newCacheableComplianceDS(t, script, client)
-	masked, useCache := cacheDs.CacheKey(rhsmInput)
+	masked, useCache := cacheDs.CacheKey(context.Background(),rhsmInput)
 	if !useCache {
 		t.Fatal("RHSM shape should be cacheable")
 	}

@@ -136,6 +136,47 @@ func TestLuaDataSource_Fetch_CancelledContextAbortsBusyLoop(t *testing.T) {
 	}
 }
 
+func TestCacheableLuaDataSource_CacheKey_CancelledContextAbortsBusyLoop(t *testing.T) {
+	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
+		Name: "test",
+		Script: `
+function fetch(input)
+	return {data = '{}', content_type = 'application/json'}
+end
+function fetch_cache_key(input)
+	while true do end
+	return {subject = {subject = "unreachable"}}
+end
+`,
+	})
+	if err != nil {
+		t.Fatalf("NewCacheableLuaDataSource: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct {
+		useCache bool
+	}, 1)
+	go func() {
+		_, useCache := ds.CacheKey(ctx, &service.DataSourceInput{
+			Subject: &trust.Result{Subject: "alice"},
+		})
+		done <- struct{ useCache bool }{useCache: useCache}
+	}()
+
+	select {
+	case got := <-done:
+		// CallByParam error falls back to caching under the full input.
+		if !got.useCache {
+			t.Fatal("expected useCache true after context abort (error fallback)")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CacheKey did not abort after context deadline")
+	}
+}
+
 func TestLuaDataSource_Fetch_SimpleReturn(t *testing.T) {
 	script := `
 function fetch(input)
@@ -509,7 +550,7 @@ end
 		},
 	}
 
-	maskedInput, useCache := ds.CacheKey(input)
+	maskedInput, useCache := ds.CacheKey(context.Background(),input)
 	if !useCache {
 		t.Fatal("expected cacheable key")
 	}
@@ -708,7 +749,7 @@ end
 	}
 
 	// Test CacheKey
-	maskedInput, useCache := ds.CacheKey(input)
+	maskedInput, useCache := ds.CacheKey(context.Background(),input)
 	if !useCache {
 		t.Fatal("expected cacheable key")
 	}
@@ -739,7 +780,7 @@ end
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	result, useCache := ds.CacheKey(nil)
+	result, useCache := ds.CacheKey(context.Background(),nil)
 	if useCache {
 		t.Fatal("nil input must skip cache")
 	}
@@ -775,7 +816,7 @@ end
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	_, useCache := ds.CacheKey(&service.DataSourceInput{
+	_, useCache := ds.CacheKey(context.Background(),&service.DataSourceInput{
 		Subject: &trust.Result{Subject: "alice"},
 	})
 	if useCache {

@@ -427,13 +427,14 @@ func NewCacheableLuaDataSource(config CacheableLuaDataSourceConfig) (*CacheableL
 
 // CacheKey implements the Cacheable interface.
 // A Lua nil (or non-table) from fetch_cache_key means skip the cache entirely.
-func (ds *CacheableLuaDataSource) CacheKey(input *service.DataSourceInput) (service.DataSourceInput, bool) {
+func (ds *CacheableLuaDataSource) CacheKey(ctx context.Context, input *service.DataSourceInput) (service.DataSourceInput, bool) {
 	if input == nil {
 		return service.DataSourceInput{}, false
 	}
 
 	L := lua.NewState()
 	defer L.Close()
+	L.SetContext(ctx)
 
 	configService := luaservices.NewConfigService(ds.configSource)
 	configService.Register(L)

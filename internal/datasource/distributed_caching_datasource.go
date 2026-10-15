@@ -125,7 +125,7 @@ func (c *DistributedCachingDataSource) Name() string {
 
 // Fetch checks the distributed cache first, then fetches from source on miss
 func (c *DistributedCachingDataSource) Fetch(ctx context.Context, input *service.DataSourceInput) (*service.DataSourceResult, error) {
-	maskedInput, useCache := c.cacheable.CacheKey(input)
+	maskedInput, useCache := c.cacheable.CacheKey(ctx, input)
 	if !useCache {
 		return c.source.Fetch(ctx, input)
 	}

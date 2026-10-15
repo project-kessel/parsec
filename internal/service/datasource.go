@@ -41,7 +41,8 @@ type Cacheable interface {
 	//     contain all data needed for Fetch
 	//
 	// Fields that don't affect the result should be zeroed out to reduce cache key size.
-	CacheKey(input *DataSourceInput) (key DataSourceInput, useCache bool)
+	// ctx is bound to any Lua VM so cache-key scripts abort on cancellation.
+	CacheKey(ctx context.Context, input *DataSourceInput) (key DataSourceInput, useCache bool)
 }
 
 // DataSourceContentType identifies the serialization format of data source results
