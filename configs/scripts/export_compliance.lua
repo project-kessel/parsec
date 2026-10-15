@@ -78,11 +78,12 @@ local function resolve_org_and_account(claims)
   local account_number = claim_str(claims, "account_number")
   if account_number == "" then account_number = org_field(claims, "account_number") end
 
+  -- Match redhat_identity.cel / 3scale claim shapes only — do not fall back
+  -- org_id to account_number (those are distinct fields).
   local org_id = claim_str(claims, "account_id")
   if org_id == "" then org_id = org_field(claims, "id") end
   if org_id == "" then org_id = claim_str(claims, "org_id") end
   if org_id == "" then org_id = claim_str(claims, "rh-org-id") end
-  if org_id == "" then org_id = account_number end
 
   return org_id, account_number
 end
