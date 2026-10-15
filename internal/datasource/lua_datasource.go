@@ -120,6 +120,7 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 
 	L := lua.NewState()
 	defer L.Close()
+	L.SetContext(ctx)
 
 	var httpOpts []luaservices.HTTPServiceOption
 	if ds.requestOptions != nil {

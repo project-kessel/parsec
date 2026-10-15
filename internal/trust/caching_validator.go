@@ -84,7 +84,7 @@ func (v *InMemoryCachingValidator) Validate(ctx context.Context, credential Cred
 	ctx, p := v.observer.InMemoryValidateStarted(ctx, v.name)
 	defer p.End()
 
-	cacheInput, err := v.cacheable.CacheKey(credential)
+	cacheInput, err := v.cacheable.CacheKey(ctx, credential)
 	if err != nil {
 		p.CacheKeyFailed(err)
 		return v.source.Validate(ctx, credential)
@@ -253,7 +253,7 @@ func (v *DistributedCachingValidator) Validate(ctx context.Context, credential C
 	ctx, p := v.observer.DistributedValidateStarted(ctx, v.name)
 	defer p.End()
 
-	cacheInput, err := v.cacheable.CacheKey(credential)
+	cacheInput, err := v.cacheable.CacheKey(ctx, credential)
 	if err != nil {
 		p.CacheKeyFailed(err)
 		return v.source.Validate(ctx, credential)

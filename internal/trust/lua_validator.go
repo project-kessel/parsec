@@ -199,6 +199,7 @@ func (v *LuaValidator) Validate(ctx context.Context, credential Credential) (*Re
 
 	L := lua.NewState()
 	defer L.Close()
+	L.SetContext(ctx)
 
 	var httpOpts []luaservices.HTTPServiceOption
 	if v.requestOptions != nil {
@@ -289,7 +290,7 @@ func NewCacheableLuaValidator(name ScriptName, script string, credentialTypes []
 }
 
 // CacheKey implements CacheableValidator.
-func (v *CacheableLuaValidator) CacheKey(credential Credential) (ValidatorInput, error) {
+func (v *CacheableLuaValidator) CacheKey(ctx context.Context, credential Credential) (ValidatorInput, error) {
 	if credential == nil {
 		return ValidatorInput{}, fmt.Errorf("credential cannot be nil")
 	}
@@ -301,6 +302,7 @@ func (v *CacheableLuaValidator) CacheKey(credential Credential) (ValidatorInput,
 
 	L := lua.NewState()
 	defer L.Close()
+	L.SetContext(ctx)
 
 	configService := luaservices.NewConfigService(v.configSource)
 	configService.Register(L)

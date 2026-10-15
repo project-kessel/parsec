@@ -3,10 +3,12 @@ package datasource
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/request"
@@ -100,6 +102,37 @@ func TestLuaDataSource_Name(t *testing.T) {
 
 	if got := ds.Name(); got != "my-datasource" {
 		t.Errorf("Name() = %q, want %q", got, "my-datasource")
+	}
+}
+
+func TestLuaDataSource_Fetch_CancelledContextAbortsBusyLoop(t *testing.T) {
+	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+		Name:   "test",
+		Script: "function fetch(input) while true do end return {} end",
+	})
+	if err != nil {
+		t.Fatalf("NewLuaDataSource: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := ds.Fetch(ctx, &service.DataSourceInput{})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error from cancelled Lua fetch")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "context deadline exceeded") {
+			t.Fatalf("err=%v, want context deadline exceeded", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Fetch did not abort after context deadline")
 	}
 }
 

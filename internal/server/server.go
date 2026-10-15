@@ -202,8 +202,10 @@ func (s *Server) SetNotReady() {
 }
 
 // Stop drains both servers. In-flight RPCs are allowed to finish until ctx
-// is cancelled, at which point remaining connections are closed so a rollout
-// cannot block until kubelet sends SIGKILL.
+// is cancelled, at which point forceStop closes remaining connections and
+// Stop returns. An async gRPC Stop may still run after return if a handler
+// ignores cancellation; request-scoped Lua VMs bind to ctx so runaway scripts
+// abort on cancel.
 func (s *Server) Stop(ctx context.Context) error {
 	ctx, p := s.observer.StopStarted(ctx)
 	defer p.End()
@@ -224,25 +226,25 @@ func (s *Server) Stop(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// GracefulStop can stay blocked after grpc.Stop, and gracefulStop
-		// does not reach HTTP shutdown until GracefulStop returns. Close
-		// HTTP here and return. errCh is buffered, so this does not wait
-		// out a stuck gRPC shutdown.
+		// Close HTTP and kick async gRPC Stop without waiting. errCh is
+		// buffered, so a stuck GracefulStop does not block this return.
 		s.forceStop()
 		return ctx.Err()
 	}
 }
 
 func (s *Server) gracefulStop() error {
-	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
-	}
+	// HTTP first: grpc-gateway depends on the local gRPC server, so keeping
+	// HTTP up during a gRPC drain leaves keep-alive /v1/token and /v1/jwks
+	// requests failing with Unavailable. Background context: the caller's
+	// deadline selects forceStop, and Close unblocks Shutdown on that path.
 	if s.httpServer != nil {
-		// Background context: the caller's deadline is what selects forceStop,
-		// and Close unblocks Shutdown when that path runs.
 		if err := s.httpServer.Shutdown(context.Background()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
+	}
+	if s.grpcServer != nil {
+		s.grpcServer.GracefulStop()
 	}
 	return nil
 }
