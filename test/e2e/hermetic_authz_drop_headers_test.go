@@ -73,7 +73,7 @@ func TestHermeticAuthzCheckDropHeadersAndCookies(t *testing.T) {
 	// 2. Create the Authz Server
 	// ============================================================
 
-	authzServer := server.NewAuthzServer(trustStore, tokenService, policy, credSources, dropHeaders, dropCookies, nil, server.DefaultRequestIDConfig())
+	authzServer := server.NewAuthzServer(trustStore, tokenService, policy, credSources, dropHeaders, dropCookies, nil)
 
 	// ============================================================
 	// 3. Exercise the public Check() API

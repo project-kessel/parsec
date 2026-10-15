@@ -39,7 +39,6 @@ type AuthzServer struct {
 	policy            AuthzCheckPolicy
 	dropHeaders       []string // unconditionally removed from upstream requests
 	dropCookies       []string // unconditionally removed from the Cookie header
-	requestIDConfig   RequestIDConfig
 }
 
 // NewAuthzServer creates a new ext_authz server.
@@ -57,7 +56,7 @@ type AuthzServer struct {
 // Cookie header, regardless of which credential source matched. Unlike
 // dropHeaders, cookie names are case-sensitive (RFC 6265) and are not
 // lowercased.
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, dropHeaders []string, dropCookies []string, observer service.AuthzCheckObserver, requestIDConfig RequestIDConfig) *AuthzServer {
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, dropHeaders []string, dropCookies []string, observer service.AuthzCheckObserver) *AuthzServer {
 	if policy == nil {
 		policy = NewStaticAuthenticatedPolicy(nil)
 	}
@@ -74,7 +73,6 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		credentialSources: credentialSources,
 		dropHeaders:       normalizeDropHeaders(dropHeaders),
 		dropCookies:       normalizeDropCookies(dropCookies),
-		requestIDConfig:   requestIDConfig,
 	}
 }
 
@@ -112,11 +110,9 @@ func normalizeDropCookies(cookies []string) []string {
 
 // Check implements the ext_authz check endpoint
 func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (response *authv3.CheckResponse, returnErr error) {
-	var headers map[string]string
-	if req != nil {
-		headers = req.GetAttributes().GetRequest().GetHttp().GetHeaders()
-	}
-	ctx, extracted := contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
+	// Request ID is extracted by the Server interceptor; read from context.
+	extracted := request.IDExtracted(ctx)
+	canonicalHeader := request.CanonicalRequestIDHeader(ctx)
 
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
@@ -125,7 +121,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 	defer func() {
 		// Do not propagate locally-generated fallback IDs upstream.
 		if extracted {
-			propagateAuthzRequestID(response, request.ID(ctx), s.requestIDConfig.CanonicalHeader())
+			propagateAuthzRequestID(response, request.ID(ctx), canonicalHeader)
 		}
 		p.RequestCompleted(authzRequestCompletion(response, reasonCode, auditTokenTypes))
 		p.End()

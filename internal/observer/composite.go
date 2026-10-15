@@ -610,6 +610,16 @@ func (m *compositeDistributedValidateProbe) CacheKeyFailed(err error) {
 		p.CacheKeyFailed(err)
 	}
 }
+func (m *compositeDistributedValidateProbe) CacheHit() {
+	for _, p := range m.probes {
+		p.CacheHit()
+	}
+}
+func (m *compositeDistributedValidateProbe) CacheMiss() {
+	for _, p := range m.probes {
+		p.CacheMiss()
+	}
+}
 func (m *compositeDistributedValidateProbe) GetFailed(err error) {
 	for _, p := range m.probes {
 		p.GetFailed(err)

@@ -128,9 +128,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		dropHeaders = cfg.AuthzServer.DropHeaders
 		dropCookies = cfg.AuthzServer.DropCookies
 	}
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, dropHeaders, dropCookies, obs, requestIDConfig)
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, dropHeaders, dropCookies, obs)
 
-	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs, requestIDConfig)
+	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
 		IssuerRegistry: issuerRegistry,
 		Observer:       obs,

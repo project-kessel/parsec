@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	parsecv1 "github.com/project-kessel/parsec/api/gen/parsec/v1"
+	"github.com/project-kessel/parsec/internal/request"
 )
 
 // healthReadinessService is the aggregate readiness key for Kubernetes gRPC
@@ -281,6 +282,17 @@ func (s *Server) trackSecurityRequest(ctx context.Context, req any, info *grpc.U
 	case "/envoy.service.auth.v3.Authorization/Check", "/parsec.v1.TokenExchangeService/Exchange":
 		s.activeRequests.Add(1)
 		defer s.activeRequests.Add(-1)
+
+		// Extract request ID once for both handlers. For ext_authz Check
+		// requests the HTTP headers from the CheckRequest are checked first;
+		// for token exchange only gRPC metadata is available.
+		var headers map[string]string
+		if checkReq, ok := req.(*authv3.CheckRequest); ok {
+			headers = checkReq.GetAttributes().GetRequest().GetHttp().GetHeaders()
+		}
+		var extracted bool
+		ctx, extracted = contextWithRequestID(ctx, headers, nil, s.requestIDConfig.Headers)
+		ctx = request.WithIDExtraction(ctx, extracted, s.requestIDConfig.CanonicalHeader())
 	}
 	return handler(ctx, req)
 }
