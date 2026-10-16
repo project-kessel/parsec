@@ -75,6 +75,40 @@ func TestNewLuaValidator(t *testing.T) {
 	}
 }
 
+func TestLuaValidator_Validate_CancelledContextAbortsBusyLoop(t *testing.T) {
+	const script = `
+function validate(input)
+  while true do end
+  return {subject = "unreachable"}
+end
+`
+	validator, err := NewLuaValidator("test", script, []CredentialType{CredentialTypeBearer})
+	if err != nil {
+		t.Fatalf("NewLuaValidator: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := validator.Validate(ctx, &BearerCredential{Token: "tok"})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error from cancelled Lua validate")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "context deadline exceeded") {
+			t.Fatalf("err=%v, want context deadline exceeded", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Validate did not abort after context deadline")
+	}
+}
+
 func TestLuaValidator_Validate(t *testing.T) {
 	const script = `
 function validate(input)
@@ -255,7 +289,7 @@ end
 		t.Fatalf("NewCacheableLuaValidator: %v", err)
 	}
 
-	key, err := validator.CacheKey(&BearerCredential{Token: "abc"})
+	key, err := validator.CacheKey(context.Background(), &BearerCredential{Token: "abc"})
 	if err != nil {
 		t.Fatalf("CacheKey: %v", err)
 	}
@@ -288,7 +322,7 @@ end
 		t.Fatalf("NewCacheableLuaValidator: %v", err)
 	}
 
-	_, err = validator.CacheKey(nil)
+	_, err = validator.CacheKey(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for nil credential")
 	}
@@ -317,7 +351,7 @@ end
 		t.Fatalf("NewCacheableLuaValidator: %v", err)
 	}
 
-	_, err = validator.CacheKey(&BearerCredential{Token: "tok"})
+	_, err = validator.CacheKey(context.Background(), &BearerCredential{Token: "tok"})
 	if err == nil {
 		t.Fatal("expected error for unsupported credential type")
 	}
@@ -572,7 +606,7 @@ end
 		t.Fatalf("NewCacheableLuaValidator: %v", err)
 	}
 
-	_, err = validator.CacheKey(&BearerCredential{Token: "tok"})
+	_, err = validator.CacheKey(context.Background(), &BearerCredential{Token: "tok"})
 	if err == nil {
 		t.Fatal("expected error from cache key script")
 	}
@@ -593,7 +627,7 @@ end
 		t.Fatalf("NewCacheableLuaValidator: %v", err)
 	}
 
-	_, err = validator.CacheKey(&BearerCredential{Token: "tok"})
+	_, err = validator.CacheKey(context.Background(), &BearerCredential{Token: "tok"})
 	if err == nil {
 		t.Fatal("expected error for non-table return from cache key")
 	}
@@ -641,7 +675,7 @@ func (v *countingCacheableValidator) Validate(_ context.Context, credential Cred
 	}, nil
 }
 
-func (v *countingCacheableValidator) CacheKey(credential Credential) (ValidatorInput, error) {
+func (v *countingCacheableValidator) CacheKey(_ context.Context, credential Credential) (ValidatorInput, error) {
 	return ValidatorInput{Credential: credential}, nil
 }
 

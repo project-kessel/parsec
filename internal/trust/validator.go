@@ -34,8 +34,9 @@ type CacheableValidator interface {
 	// CacheKey returns a masked validator input containing only the fields that
 	// affect the validation result. For distributed caches, the returned input
 	// must be sufficient to reconstruct a Credential and call Validate on a
-	// cache miss.
-	CacheKey(credential Credential) (ValidatorInput, error)
+	// cache miss. ctx is bound to any Lua VM so cache-key scripts abort on
+	// cancellation.
+	CacheKey(ctx context.Context, credential Credential) (ValidatorInput, error)
 }
 
 // Result contains the validated information about the subject.
