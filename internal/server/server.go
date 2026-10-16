@@ -144,6 +144,11 @@ func (s *Server) Start(ctx context.Context) error {
 		runtime.WithMarshalerOption("application/x-www-form-urlencoded", NewFormMarshaler()),
 		runtime.WithErrorHandler(oauthHTTPErrorHandler),
 	)
+	// NOTE: insecure.NewCredentials() is used here for the internal grpc-gateway → gRPC server connection.
+	// This is intentional and safe because:
+	// 1. This connection never leaves the process (in-memory via bufconn in tests, loopback in production)
+	// 2. External TLS termination happens at the HTTP ingress layer
+	// 3. The gRPC server itself does not expose ports directly to external networks
 	opts := append(
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		s.grpcDialOptions...,
