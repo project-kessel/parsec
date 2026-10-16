@@ -348,3 +348,35 @@ func TestCompilePathPatterns_InvalidPatternAfterValid(t *testing.T) {
 		t.Fatalf("expected indexed pattern error, got: %v", err)
 	}
 }
+
+func TestStaticAuthenticatedPolicy_HostAndPathRules(t *testing.T) {
+	paths, err := CompilePathPatterns([]string{`/api/distributors/.*/openapi.json`})
+	if err != nil {
+		t.Fatalf("compile paths: %v", err)
+	}
+	hosts, err := CompilePathPatterns([]string{`api\.example\.com`})
+	if err != nil {
+		t.Fatalf("compile hosts: %v", err)
+	}
+	policy := NewStaticAuthenticatedPolicy(nil, WithAllowAnonymousWithoutIssueRules([]AnonymousRequestRule{{Hosts: hosts, Paths: paths}}))
+	cases := []struct {
+		name, host, path string
+		want             AuthzCheckAction
+	}{
+		{"match", "api.example.com", "/api/distributors/acme/openapi.json", AuthzCheckAllowWithoutIssue},
+		{"case-insensitive host", "API.EXAMPLE.COM", "/api/distributors/acme/openapi.json", AuthzCheckAllowWithoutIssue},
+		{"host with port", "api.example.com:443", "/api/distributors/acme/openapi.json", AuthzCheckAllowWithoutIssue},
+		{"wrong host", "wrong.example.com", "/api/distributors/acme/openapi.json", AuthzCheckDeny},
+		{"missing host", "", "/api/distributors/acme/openapi.json", AuthzCheckDeny},
+		{"wrong path", "api.example.com", "/api/distributors/acme/private", AuthzCheckDeny},
+		{"query retained as path normalization", "api.example.com", "/api/distributors/acme/openapi.json?x=1", AuthzCheckAllowWithoutIssue},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := policy.Decide(context.Background(), AuthzCheckPolicyInput{Subject: anonymousPrincipal(), Request: &request.RequestAttributes{Path: tc.path, Additional: map[string]any{"host": tc.host}}})
+			if err != nil || d.Action != tc.want {
+				t.Fatalf("got decision=%+v err=%v, want %s", d, err, tc.want)
+			}
+		})
+	}
+}
