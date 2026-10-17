@@ -36,6 +36,8 @@ type AuthzServer struct {
 	observer          service.AuthzCheckObserver
 	credentialSources CredentialSources
 	policy            AuthzCheckPolicy
+	dropHeaders       []string // unconditionally removed from upstream requests
+	dropCookies       []string // unconditionally removed from the Cookie header
 }
 
 // NewAuthzServer creates a new ext_authz server.
@@ -44,7 +46,16 @@ type AuthzServer struct {
 // is used (preserving pre-policy behavior).
 // credentialSources defines where credentials are extracted from for both
 // subject and actor authentication.
-func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, observer service.AuthzCheckObserver) *AuthzServer {
+// dropHeaders lists header names that are unconditionally removed from
+// upstream requests, regardless of which credential source matched. On the
+// Issue path, any entry matching an issued token's header name is excluded
+// from removal (see excludeIssuedHeaders) so the issued token is not deleted
+// by Envoy's header mutation order.
+// dropCookies lists cookie names that are unconditionally removed from the
+// Cookie header, regardless of which credential source matched. Unlike
+// dropHeaders, cookie names are case-sensitive (RFC 6265) and are not
+// lowercased.
+func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, policy AuthzCheckPolicy, credentialSources CredentialSources, dropHeaders []string, dropCookies []string, observer service.AuthzCheckObserver) *AuthzServer {
 	if policy == nil {
 		policy = NewStaticAuthenticatedPolicy(nil)
 	}
@@ -59,7 +70,41 @@ func NewAuthzServer(trustStore trust.Store, tokenService *service.TokenService, 
 		policy:            policy,
 		observer:          observer,
 		credentialSources: credentialSources,
+		dropHeaders:       normalizeDropHeaders(dropHeaders),
+		dropCookies:       normalizeDropCookies(dropCookies),
 	}
+}
+
+// normalizeDropHeaders lowercases and trims header names, dropping blank
+// entries. Returns nil when there is nothing to normalize, avoiding a
+// zero-length allocation for the common case of no configured drop_headers.
+func normalizeDropHeaders(headers []string) []string {
+	if len(headers) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(headers))
+	for _, h := range headers {
+		if trimmed := strings.ToLower(strings.TrimSpace(h)); trimmed != "" {
+			normalized = append(normalized, trimmed)
+		}
+	}
+	return normalized
+}
+
+// normalizeDropCookies trims cookie names, dropping blank entries. Cookie
+// names are case-sensitive per RFC 6265, so unlike normalizeDropHeaders this
+// does not lowercase them.
+func normalizeDropCookies(cookies []string) []string {
+	if len(cookies) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(cookies))
+	for _, c := range cookies {
+		if trimmed := strings.TrimSpace(c); trimmed != "" {
+			normalized = append(normalized, trimmed)
+		}
+	}
+	return normalized
 }
 
 // Check implements the ext_authz check endpoint
@@ -150,12 +195,17 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 	case AuthzCheckAllowWithoutIssue:
 		p.PolicyDecisionAllowWithoutIssue(decision.Reason)
-		rewrite, remove := removeCredentialPresentation(subjectExt, cc.Cookies)
+		rewrite, remove := s.mergeDropHeaders(subjectExt, cc.Cookies)
 		return s.okResponse(rewrite, remove), nil
 
 	case AuthzCheckIssue:
 		p.PolicyDecisionIssue(len(decision.TokenTypes), decision.Scope, decision.Reason)
-		rewrite, remove := removeCredentialPresentation(subjectExt, cc.Cookies)
+		rewrite, remove := s.mergeDropHeaders(subjectExt, cc.Cookies)
+		// Exclude headers that will carry issued tokens. Envoy applies
+		// Headers (set) before HeadersToRemove, so including an issued
+		// token's header name here would delete the token immediately
+		// after it is set.
+		remove = excludeIssuedHeaders(remove, decision.TokenTypes)
 		return s.issueResponse(ctx, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
 
 	default:
@@ -256,6 +306,118 @@ func removeCredentialPresentation(ext *CredentialExtraction, cookies []*http.Coo
 	}
 
 	return headers, headersToRemove
+}
+
+// excludeIssuedHeaders removes, from the removal list, any header name that
+// matches a token type about to be issued. Envoy applies Headers (set)
+// before HeadersToRemove, so a header present in both lists would be set
+// and then immediately deleted, silently dropping the issued token.
+func excludeIssuedHeaders(remove []string, tokenTypes []TokenTypeSpec) []string {
+	if len(remove) == 0 || len(tokenTypes) == 0 {
+		return remove
+	}
+
+	issued := make(map[string]struct{}, len(tokenTypes))
+	for _, spec := range tokenTypes {
+		issued[strings.ToLower(spec.HeaderName)] = struct{}{}
+	}
+
+	filtered := make([]string, 0, len(remove))
+	for _, h := range remove {
+		if _, ok := issued[h]; !ok {
+			filtered = append(filtered, h)
+		}
+	}
+	return filtered
+}
+
+// mergeDropHeaders combines credential-source-driven header/cookie removal
+// with the unconditional drop_headers and drop_cookies deny-lists. Entries
+// that already appear in the credential-driven removal are deduplicated.
+func (s *AuthzServer) mergeDropHeaders(ext *CredentialExtraction, cookies []*http.Cookie) ([]*corev3.HeaderValueOption, []string) {
+	rewrite, remove := removeCredentialPresentation(ext, cookies)
+
+	if len(s.dropHeaders) > 0 {
+		seen := make(map[string]struct{}, len(remove))
+		for _, h := range remove {
+			seen[h] = struct{}{}
+		}
+		for _, h := range s.dropHeaders {
+			if _, exists := seen[h]; !exists {
+				remove = append(remove, h)
+			}
+		}
+	}
+
+	if len(s.dropCookies) > 0 && len(cookies) > 0 {
+		rewrite, remove = applyDropCookies(ext, cookies, s.dropCookies, rewrite, remove)
+	}
+
+	return rewrite, remove
+}
+
+// applyDropCookies rewrites (or schedules removal of) the Cookie header to
+// additionally strip dropCookies entries, on top of any cookie already
+// sanitized by the matched credential source (ext.CookiesUsed). This closes
+// the gap where a credential presented via an unmatched channel (e.g. a
+// cs_jwt cookie alongside a matched Authorization bearer header) would
+// otherwise pass through untouched: drop_headers only removes HTTP headers
+// by name and cannot reach into the Cookie header's individual values.
+func applyDropCookies(ext *CredentialExtraction, cookies []*http.Cookie, dropCookies []string, rewrite []*corev3.HeaderValueOption, remove []string) ([]*corev3.HeaderValueOption, []string) {
+	omit := append([]string(nil), dropCookies...)
+	if ext != nil {
+		omit = append(omit, ext.CookiesUsed...)
+	}
+
+	sanitized := sanitizeCookieHeader(cookies, omit...)
+
+	// Discard any cookie rewrite already produced by removeCredentialPresentation;
+	// it will be superseded by the combined sanitization below.
+	rewrite = removeHeaderOption(rewrite, "cookie")
+	remove = removeString(remove, "cookie")
+
+	if sanitized == "" {
+		remove = append(remove, "cookie")
+		return rewrite, remove
+	}
+
+	rewrite = append(rewrite, &corev3.HeaderValueOption{
+		Header: &corev3.HeaderValue{
+			Key:   "cookie",
+			Value: sanitized,
+		},
+		AppendAction: corev3.HeaderValueOption_OVERWRITE_IF_EXISTS_OR_ADD,
+	})
+	return rewrite, remove
+}
+
+// removeHeaderOption returns headers with any entry matching key (case-insensitive)
+// removed.
+func removeHeaderOption(headers []*corev3.HeaderValueOption, key string) []*corev3.HeaderValueOption {
+	if len(headers) == 0 {
+		return headers
+	}
+	filtered := make([]*corev3.HeaderValueOption, 0, len(headers))
+	for _, h := range headers {
+		if !strings.EqualFold(h.GetHeader().GetKey(), key) {
+			filtered = append(filtered, h)
+		}
+	}
+	return filtered
+}
+
+// removeString returns values with any entry equal to target removed.
+func removeString(values []string, target string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	filtered := make([]string, 0, len(values))
+	for _, v := range values {
+		if v != target {
+			filtered = append(filtered, v)
+		}
+	}
+	return filtered
 }
 
 // sanitizeCookieHeader rebuilds a Cookie header value without the named

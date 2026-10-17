@@ -120,7 +120,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Create service handlers
-	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, obs)
+	var dropHeaders, dropCookies []string
+	if cfg.AuthzServer != nil {
+		dropHeaders = cfg.AuthzServer.DropHeaders
+		dropCookies = cfg.AuthzServer.DropCookies
+	}
+	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, dropHeaders, dropCookies, obs)
 
 	exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 	jwksServer := server.NewJWKSServer(server.JWKSServerConfig{
