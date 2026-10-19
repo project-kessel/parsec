@@ -1,3 +1,7 @@
+# DEVELOPMENT ONLY — DO NOT USE IN PRODUCTION.
+# This configuration is for hermetic testing with stubbed data sources and test fixtures.
+# It bypasses real authentication and uses hardcoded test data.
+#
 # parsec Configuration - Cert Auth Hermetic Testing
 #
 # For testing cert auth (certificate authentication) without external dependencies.

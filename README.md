@@ -9,6 +9,15 @@ parsec is an implementation of [ext_authz](https://pkg.go.dev/github.com/envoypr
 
 It is intended to be used as part of a general federated trust architecture that defines a (1) workload trust domain (expected to be abstracted in the network e.g. through a service mesh) and (2) a [potentially wider] transaction trust domain, established by this service as a transction token issuer.
 
+## Security & Deployment Model
+
+**TLS Termination**: parsec is designed to run within a service mesh (Envoy/Istio) or behind a TLS-terminating ingress controller. The gRPC and HTTP servers bind to plaintext listeners and rely on the mesh/sidecar for TLS termination, mTLS between services, and network-level authentication.
+
+- **In-mesh deployment (production)**: TLS is handled by the Envoy sidecar or mesh proxy. Parsec exposes plaintext gRPC (port 9090) and HTTP (port 8080) endpoints that are only accessible within the mesh.
+- **Standalone/non-mesh deployment**: Not recommended for production. If parsec must run outside a service mesh, implement external TLS termination (e.g., via Nginx, HAProxy, or cloud load balancer) before deploying to production.
+
+For vulnerability reporting and security policy, see [SECURITY.md](SECURITY.md).
+
 ## Building and Pushing the Container Image
 
 Log in to the required registries, then run the `docker-build-push` target with your image destination. The base image is pulled from `registry.access.redhat.com` during the build, so both logins are required.
