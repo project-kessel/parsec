@@ -445,16 +445,36 @@ func buildTokenTypeSpecs(cfgs []TokenTypeConfig) ([]server.TokenTypeSpec, error)
 // buildStaticAuthenticatedOpts converts policy config fields into functional
 // options for NewStaticAuthenticatedPolicy.
 func buildStaticAuthenticatedOpts(cfg AuthzCheckPolicyConfig) ([]server.StaticAuthenticatedOption, error) {
-	if len(cfg.AllowAnonymousWithoutIssuePaths) == 0 {
+	if len(cfg.AllowAnonymousWithoutIssuePaths) == 0 && len(cfg.AllowAnonymousWithoutIssueRules) == 0 {
 		return nil, nil
 	}
 	compiled, err := server.CompilePathPatterns(cfg.AllowAnonymousWithoutIssuePaths)
 	if err != nil {
 		return nil, err
 	}
-	return []server.StaticAuthenticatedOption{
-		server.WithAllowAnonymousWithoutIssuePaths(compiled),
-	}, nil
+	opts := []server.StaticAuthenticatedOption{}
+	if len(compiled) > 0 {
+		opts = append(opts, server.WithAllowAnonymousWithoutIssuePaths(compiled))
+	}
+	rules := make([]server.AnonymousRequestRule, 0, len(cfg.AllowAnonymousWithoutIssueRules))
+	for i, rule := range cfg.AllowAnonymousWithoutIssueRules {
+		if len(rule.Hosts) == 0 {
+			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].hosts: at least one host is required", i)
+		}
+		paths, err := server.CompilePathPatterns(rule.Paths)
+		if err != nil {
+			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].paths: %w", i, err)
+		}
+		hosts, err := server.CompilePathPatterns(rule.Hosts)
+		if err != nil {
+			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].hosts: %w", i, err)
+		}
+		rules = append(rules, server.AnonymousRequestRule{Hosts: hosts, Paths: paths})
+	}
+	if len(rules) > 0 {
+		opts = append(opts, server.WithAllowAnonymousWithoutIssueRules(rules))
+	}
+	return opts, nil
 }
 
 // CredentialSources returns the global credential extraction sources shared by

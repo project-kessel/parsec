@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
@@ -282,5 +284,83 @@ func TestProvider_AuthzCheckPolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildStaticAuthenticatedOpts_HostRules(t *testing.T) {
+	opts, err := buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssuePaths: []string{`/global`}, AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`console\.example\.com`}, Paths: []string{`/docs`}}}})
+	if err != nil {
+		t.Fatalf("build options: %v", err)
+	}
+	if len(opts) != 2 {
+		t.Fatalf("got %d options, want 2", len(opts))
+	}
+}
+
+func TestBuildStaticAuthenticatedOpts_HostRuleErrors(t *testing.T) {
+	_, err := buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Paths: []string{`/docs`}}}})
+	if err == nil || !strings.Contains(err.Error(), "allow_anonymous_without_issue_rules[0].hosts") {
+		t.Fatalf("unexpected missing-host error: %v", err)
+	}
+	_, err = buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`[invalid`}, Paths: []string{`/docs`}}}})
+	if err == nil || !strings.Contains(err.Error(), "allow_anonymous_without_issue_rules[0].hosts") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`example\.com`}, Paths: []string{`[invalid`}}}})
+	if err == nil || !strings.Contains(err.Error(), "allow_anonymous_without_issue_rules[0].paths") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProvider_HostRulesReachAuthzServer(t *testing.T) {
+	t.Parallel()
+
+	policy, err := NewProvider(&Config{AuthzServer: &AuthzServerConfig{
+		Policy: AuthzCheckPolicyConfig{
+			Type:                            "static_authenticated",
+			AllowAnonymousWithoutIssuePaths: []string{`^/global$`},
+			AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{
+				Hosts: []string{`^console\.example\.com$`},
+				Paths: []string{`^/docs$`},
+			}},
+		},
+	}}).AuthzCheckPolicy()
+	if err != nil {
+		t.Fatalf("build policy: %v", err)
+	}
+
+	authzServer := server.NewAuthzServer(
+		trust.NewStubStore(),
+		service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), service.NewSimpleRegistry(), nil),
+		policy,
+		server.DefaultCredentialSources(),
+		nil,
+	)
+
+	check := func(host, path string) int32 {
+		t.Helper()
+		resp, err := authzServer.Check(context.Background(), &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{Http: &authv3.AttributeContext_HttpRequest{
+					Method: "GET",
+					Host:   host,
+					Path:   path,
+				}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Check(%q, %q): %v", host, path, err)
+		}
+		return resp.Status.Code
+	}
+
+	if got := check("console.example.com", "/docs"); got != 0 {
+		t.Errorf("host-scoped rule: got status %d, want OK", got)
+	}
+	if got := check("packages.example.com", "/docs"); got != 16 {
+		t.Errorf("wrong host: got status %d, want Unauthenticated (16)", got)
+	}
+	if got := check("packages.example.com", "/global"); got != 0 {
+		t.Errorf("global path rule: got status %d, want OK", got)
 	}
 }

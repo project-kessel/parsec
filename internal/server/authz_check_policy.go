@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -146,13 +147,15 @@ func CompilePathPatterns(patterns []string) ([]*regexp.Regexp, error) {
 // authenticated subjects. Optionally, configured path patterns allow
 // anonymous access without issuing tokens on matching URL paths.
 type StaticAuthenticatedPolicy struct {
-	tokenTypes                      []TokenTypeSpec
-	allowAnonymousWithoutIssuePaths []*regexp.Regexp
+	tokenTypes            []TokenTypeSpec
+	anonymousRequestRules []AnonymousRequestRule
 }
 
 type staticAuthenticatedConfig struct {
-	allowAnonymousWithoutIssuePaths []*regexp.Regexp
+	anonymousRequestRules []AnonymousRequestRule
 }
+
+type AnonymousRequestRule struct{ Hosts, Paths []*regexp.Regexp }
 
 // StaticAuthenticatedOption configures optional behavior for
 // [NewStaticAuthenticatedPolicy].
@@ -163,7 +166,13 @@ type StaticAuthenticatedOption func(*staticAuthenticatedConfig)
 // via [CompilePathPatterns].
 func WithAllowAnonymousWithoutIssuePaths(patterns []*regexp.Regexp) StaticAuthenticatedOption {
 	return func(c *staticAuthenticatedConfig) {
-		c.allowAnonymousWithoutIssuePaths = patterns
+		c.anonymousRequestRules = append(c.anonymousRequestRules, AnonymousRequestRule{Paths: patterns})
+	}
+}
+
+func WithAllowAnonymousWithoutIssueRules(rules []AnonymousRequestRule) StaticAuthenticatedOption {
+	return func(c *staticAuthenticatedConfig) {
+		c.anonymousRequestRules = append(c.anonymousRequestRules, rules...)
 	}
 }
 
@@ -182,9 +191,26 @@ func NewStaticAuthenticatedPolicy(tokenTypes []TokenTypeSpec, opts ...StaticAuth
 	}
 
 	return &StaticAuthenticatedPolicy{
-		tokenTypes:                      tokenTypes,
-		allowAnonymousWithoutIssuePaths: cfg.allowAnonymousWithoutIssuePaths,
+		tokenTypes:            tokenTypes,
+		anonymousRequestRules: cfg.anonymousRequestRules,
 	}
+}
+
+func requestHost(attrs *request.RequestAttributes) string {
+	if attrs == nil || attrs.Additional == nil {
+		return ""
+	}
+	host, _ := attrs.Additional["host"].(string)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	return strings.ToLower(host)
+}
+
+func matchesAnonymousRule(rule AnonymousRequestRule, host, path string) bool {
+	return (len(rule.Hosts) == 0 || matchesAnyPattern(rule.Hosts, host)) && matchesAnyPattern(rule.Paths, path)
 }
 
 // Decide denies anonymous subjects and issues the configured token types for
@@ -192,9 +218,9 @@ func NewStaticAuthenticatedPolicy(tokenTypes []TokenTypeSpec, opts ...StaticAuth
 // anonymous requests on matching paths are allowed without issuing tokens.
 func (p *StaticAuthenticatedPolicy) Decide(_ context.Context, in AuthzCheckPolicyInput) (AuthzCheckDecision, error) {
 	if in.Subject.Anonymous {
-		if len(p.allowAnonymousWithoutIssuePaths) > 0 {
-			path := requestPath(in.Request)
-			if matchesAnyPattern(p.allowAnonymousWithoutIssuePaths, path) {
+		host, path := requestHost(in.Request), requestPath(in.Request)
+		for _, rule := range p.anonymousRequestRules {
+			if matchesAnonymousRule(rule, host, path) {
 				return AuthzCheckDecision{Action: AuthzCheckAllowWithoutIssue}, nil
 			}
 		}
