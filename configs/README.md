@@ -203,12 +203,12 @@ authz_server:
   policy:
     allow_anonymous_without_issue_rules:
       - hosts:
-          - "console\\.redhat\\.com"
+          - "nsgw\\.apps\\.rosa\\.hccs01ue1\\.t2w6\\.p3\\.openshiftapps\\.com"
         paths:
           - "/api/example/openapi.json"
 ```
 
-The request host is normalized case-insensitively and an optional port is ignored. Query strings are ignored for path matching.
+The request host is the cluster gateway hostname that Parsec receives, not the customer-facing hostname. Host matching is normalized case-insensitively and an optional port is ignored. Query strings are ignored for path matching. A future change may support matching a configurable header such as `x-rh-edge-host` for customer-facing hostnames.
 
 ### Exchange Server
 

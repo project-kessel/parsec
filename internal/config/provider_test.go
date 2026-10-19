@@ -298,7 +298,11 @@ func TestBuildStaticAuthenticatedOpts_HostRules(t *testing.T) {
 }
 
 func TestBuildStaticAuthenticatedOpts_HostRuleErrors(t *testing.T) {
-	_, err := buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`[invalid`}, Paths: []string{`/docs`}}}})
+	_, err := buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Paths: []string{`/docs`}}}})
+	if err == nil || !strings.Contains(err.Error(), "allow_anonymous_without_issue_rules[0].hosts") {
+		t.Fatalf("unexpected missing-host error: %v", err)
+	}
+	_, err = buildStaticAuthenticatedOpts(AuthzCheckPolicyConfig{AllowAnonymousWithoutIssueRules: []AllowAnonymousRuleConfig{{Hosts: []string{`[invalid`}, Paths: []string{`/docs`}}}})
 	if err == nil || !strings.Contains(err.Error(), "allow_anonymous_without_issue_rules[0].hosts") {
 		t.Fatalf("unexpected error: %v", err)
 	}

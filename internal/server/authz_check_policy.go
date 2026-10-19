@@ -147,14 +147,12 @@ func CompilePathPatterns(patterns []string) ([]*regexp.Regexp, error) {
 // authenticated subjects. Optionally, configured path patterns allow
 // anonymous access without issuing tokens on matching URL paths.
 type StaticAuthenticatedPolicy struct {
-	tokenTypes                      []TokenTypeSpec
-	allowAnonymousWithoutIssuePaths []*regexp.Regexp
-	allowAnonymousWithoutIssueRules []AnonymousRequestRule
+	tokenTypes            []TokenTypeSpec
+	anonymousRequestRules []AnonymousRequestRule
 }
 
 type staticAuthenticatedConfig struct {
-	allowAnonymousWithoutIssuePaths []*regexp.Regexp
-	allowAnonymousWithoutIssueRules []AnonymousRequestRule
+	anonymousRequestRules []AnonymousRequestRule
 }
 
 type AnonymousRequestRule struct{ Hosts, Paths []*regexp.Regexp }
@@ -168,12 +166,14 @@ type StaticAuthenticatedOption func(*staticAuthenticatedConfig)
 // via [CompilePathPatterns].
 func WithAllowAnonymousWithoutIssuePaths(patterns []*regexp.Regexp) StaticAuthenticatedOption {
 	return func(c *staticAuthenticatedConfig) {
-		c.allowAnonymousWithoutIssuePaths = patterns
+		c.anonymousRequestRules = append(c.anonymousRequestRules, AnonymousRequestRule{Paths: patterns})
 	}
 }
 
 func WithAllowAnonymousWithoutIssueRules(rules []AnonymousRequestRule) StaticAuthenticatedOption {
-	return func(c *staticAuthenticatedConfig) { c.allowAnonymousWithoutIssueRules = rules }
+	return func(c *staticAuthenticatedConfig) {
+		c.anonymousRequestRules = append(c.anonymousRequestRules, rules...)
+	}
 }
 
 // NewStaticAuthenticatedPolicy creates a policy that denies anonymous subjects
@@ -191,9 +191,8 @@ func NewStaticAuthenticatedPolicy(tokenTypes []TokenTypeSpec, opts ...StaticAuth
 	}
 
 	return &StaticAuthenticatedPolicy{
-		tokenTypes:                      tokenTypes,
-		allowAnonymousWithoutIssuePaths: cfg.allowAnonymousWithoutIssuePaths,
-		allowAnonymousWithoutIssueRules: cfg.allowAnonymousWithoutIssueRules,
+		tokenTypes:            tokenTypes,
+		anonymousRequestRules: cfg.anonymousRequestRules,
 	}
 }
 
@@ -219,18 +218,10 @@ func matchesAnonymousRule(rule AnonymousRequestRule, host, path string) bool {
 // anonymous requests on matching paths are allowed without issuing tokens.
 func (p *StaticAuthenticatedPolicy) Decide(_ context.Context, in AuthzCheckPolicyInput) (AuthzCheckDecision, error) {
 	if in.Subject.Anonymous {
-		if len(p.allowAnonymousWithoutIssuePaths) > 0 {
-			path := requestPath(in.Request)
-			if matchesAnyPattern(p.allowAnonymousWithoutIssuePaths, path) {
+		host, path := requestHost(in.Request), requestPath(in.Request)
+		for _, rule := range p.anonymousRequestRules {
+			if matchesAnonymousRule(rule, host, path) {
 				return AuthzCheckDecision{Action: AuthzCheckAllowWithoutIssue}, nil
-			}
-		}
-		if len(p.allowAnonymousWithoutIssueRules) > 0 {
-			host, path := requestHost(in.Request), requestPath(in.Request)
-			for _, rule := range p.allowAnonymousWithoutIssueRules {
-				if matchesAnonymousRule(rule, host, path) {
-					return AuthzCheckDecision{Action: AuthzCheckAllowWithoutIssue}, nil
-				}
 			}
 		}
 		return AuthzCheckDecision{

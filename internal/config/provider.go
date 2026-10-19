@@ -458,6 +458,9 @@ func buildStaticAuthenticatedOpts(cfg AuthzCheckPolicyConfig) ([]server.StaticAu
 	}
 	rules := make([]server.AnonymousRequestRule, 0, len(cfg.AllowAnonymousWithoutIssueRules))
 	for i, rule := range cfg.AllowAnonymousWithoutIssueRules {
+		if len(rule.Hosts) == 0 {
+			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].hosts: at least one host is required", i)
+		}
 		paths, err := server.CompilePathPatterns(rule.Paths)
 		if err != nil {
 			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].paths: %w", i, err)
