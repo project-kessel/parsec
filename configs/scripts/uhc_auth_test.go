@@ -278,7 +278,7 @@ func TestUHCAuth_CacheKey(t *testing.T) {
 
 	keyFor := func(t *testing.T, userAgent, authorization string) string {
 		t.Helper()
-		input, err := v.CacheKey(uhcCredential(userAgent, authorization))
+		input, err := v.CacheKey(context.Background(), uhcCredential(userAgent, authorization))
 		if err != nil {
 			t.Fatalf("CacheKey: %v", err)
 		}
@@ -319,7 +319,7 @@ func TestUHCAuth_CacheKeyCredentialStillValidates(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 
-	input, err := v.CacheKey(cred)
+	input, err := v.CacheKey(context.Background(), cred)
 	if err != nil {
 		t.Fatalf("CacheKey: %v", err)
 	}
