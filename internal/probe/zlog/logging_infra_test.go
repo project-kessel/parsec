@@ -269,7 +269,7 @@ func TestLoggingTrustValidationObserver_AllValidatorsFailed(t *testing.T) {
 
 	p.AllValidatorsFailed(trust.CredentialTypeBearer, 3, errors.New("no match"))
 
-	assertLog(t, buf.String(), "warn", "all validators failed for credential type",
+	assertLog(t, buf.String(), "debug", "all validators failed for credential type",
 		`"credential_type":"bearer"`, `"attempted":3`)
 }
 

@@ -351,6 +351,57 @@ func TestNewHTTPClientRegistry_HeadersAuth_NonStringHeaderErrors(t *testing.T) {
 	}
 }
 
+func TestResolveClientSpec_MaxIdleConnsPerHost(t *testing.T) {
+	spec, err := resolveClientSpec(HTTPClientSpec{MaxIdleConnsPerHost: 20})
+	if err != nil {
+		t.Fatalf("resolveClientSpec() error: %v", err)
+	}
+	if spec.MaxIdleConnsPerHost != 20 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 20", spec.MaxIdleConnsPerHost)
+	}
+}
+
+func TestResolveClientSpec_MaxIdleConnsPerHostZeroPassedThrough(t *testing.T) {
+	spec, err := resolveClientSpec(HTTPClientSpec{})
+	if err != nil {
+		t.Fatalf("resolveClientSpec() error: %v", err)
+	}
+	// Zero is passed to ClientSpec; the registry applies the default.
+	if spec.MaxIdleConnsPerHost != 0 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 0 (registry applies default)", spec.MaxIdleConnsPerHost)
+	}
+}
+
+func TestNewHTTPClientRegistry_MaxIdleConnsPerHostApplied(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{
+			Name: "pooled",
+			HTTPClientSpec: HTTPClientSpec{
+				Timeout:             "5s",
+				MaxIdleConnsPerHost: 30,
+			},
+		},
+	}
+
+	registry, err := NewHTTPClientRegistry(cfgs, nil)
+	if err != nil {
+		t.Fatalf("NewHTTPClientRegistry() error: %v", err)
+	}
+
+	client, err := registry.Get("pooled")
+	if err != nil {
+		t.Fatalf("Get(pooled) error: %v", err)
+	}
+
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.MaxIdleConnsPerHost != 30 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 30", transport.MaxIdleConnsPerHost)
+	}
+}
+
 func TestResolveClientSpec_CACertSetsRootCAPath(t *testing.T) {
 	spec, err := resolveClientSpec(HTTPClientSpec{CACert: "/tmp/ca.pem"})
 	if err != nil {

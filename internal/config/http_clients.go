@@ -118,6 +118,7 @@ func resolveClientSpec(cfg HTTPClientSpec) (httpclient.ClientSpec, error) {
 	}
 
 	spec.RootCAPath = cfg.CACert
+	spec.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
 
 	return spec, nil
 }

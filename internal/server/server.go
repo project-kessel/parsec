@@ -206,7 +206,11 @@ func (s *Server) SetNotReady() {
 	s.healthServer.SetServingStatus(healthReadinessService, healthpb.HealthCheckResponse_NOT_SERVING)
 }
 
-// Stop gracefully stops both servers
+// Stop drains both servers. In-flight RPCs are allowed to finish until ctx
+// is cancelled, at which point forceStop closes remaining connections and
+// Stop returns. An async gRPC Stop may still run after return if a handler
+// ignores cancellation; request-scoped Lua VMs bind to ctx so runaway scripts
+// abort on cancel.
 func (s *Server) Stop(ctx context.Context) error {
 	ctx, p := s.observer.StopStarted(ctx)
 	defer p.End()
@@ -218,15 +222,47 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.healthServer.Shutdown()
 	}
 
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.gracefulStop()
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		// Close HTTP and kick async gRPC Stop without waiting. errCh is
+		// buffered, so a stuck GracefulStop does not block this return.
+		s.forceStop()
+		return ctx.Err()
+	}
+}
+
+func (s *Server) gracefulStop() error {
+	// HTTP first: grpc-gateway depends on the local gRPC server, so keeping
+	// HTTP up during a gRPC drain leaves keep-alive /v1/token and /v1/jwks
+	// requests failing with Unavailable. Background context: the caller's
+	// deadline selects forceStop, and Close unblocks Shutdown on that path.
+	if s.httpServer != nil {
+		if err := s.httpServer.Shutdown(context.Background()); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+	}
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
-
-	if s.httpServer != nil {
-		return s.httpServer.Shutdown(ctx)
-	}
-
 	return nil
+}
+
+func (s *Server) forceStop() {
+	if s.httpServer != nil {
+		_ = s.httpServer.Close()
+	}
+	// Stop can block alongside a stuck GracefulStop. Do not run it on the
+	// Stop caller, or the context deadline is missed.
+	if s.grpcServer != nil {
+		go s.grpcServer.Stop()
+	}
 }
 
 // grpcDialEndpoint builds a passthrough:/// endpoint suitable for grpc-gateway

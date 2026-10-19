@@ -25,15 +25,22 @@ type ClientName string
 // Used to compose concerns like authentication atop a resolved base transport.
 type TransportMiddleware func(base http.RoundTripper) http.RoundTripper
 
+// DefaultMaxIdleConnsPerHost is the project-wide default for
+// [net/http.Transport.MaxIdleConnsPerHost]. Go's stdlib default is 2;
+// parsec raises it to 10 so bursty concurrent callers reuse connections
+// instead of re-establishing TCP+TLS on every request.
+const DefaultMaxIdleConnsPerHost = 10
+
 // ClientSpec holds resolved parameters for building an [*http.Client].
 // It is the runtime equivalent of the configuration-level HTTPClientSpec,
 // with durations parsed and abstractions instantiated.
 type ClientSpec struct {
 	Timeout             time.Duration
-	CertSource          CertSource          // nil = share default transport
+	CertSource          CertSource          // nil = no client certificate
 	TransportMiddleware TransportMiddleware // nil = no wrapping
 	RootCAPath          string              // PEM-encoded CA cert file to trust; empty = system roots
 	BaseURL             string              // optional origin for relative Lua URLs; empty = none
+	MaxIdleConnsPerHost int                 // 0 = DefaultMaxIdleConnsPerHost
 }
 
 // RegistryOption configures optional parameters for [NewRegistry].
@@ -135,40 +142,47 @@ func (r *Registry) build(clientName string, spec ClientSpec) (*http.Client, erro
 	if r.fixtureTransport != nil {
 		// Hermetic mode: fixture transport overrides everything
 		base = r.fixtureTransport
-	} else if spec.CertSource != nil || spec.RootCAPath != "" {
-		// Clone the default transport so we keep standard behavior
-		// (proxy handling, HTTP/2, idle connection reuse, timeouts)
-		// and customize TLS settings.
+	} else {
+		// Clone the default transport so each client gets its own
+		// connection pool with configurable MaxIdleConnsPerHost,
+		// while inheriting standard behavior (proxy, HTTP/2, timeouts).
 		customTransport := http.DefaultTransport.(*http.Transport).Clone()
-		if customTransport.TLSClientConfig == nil {
-			customTransport.TLSClientConfig = &tls.Config{}
+
+		maxIdle := spec.MaxIdleConnsPerHost
+		if maxIdle <= 0 {
+			maxIdle = DefaultMaxIdleConnsPerHost
 		}
-		if spec.CertSource != nil {
-			customTransport.TLSClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-				cert, err := spec.CertSource.Certificate()
-				if err != nil {
-					return nil, err
+		customTransport.MaxIdleConnsPerHost = maxIdle
+
+		if spec.CertSource != nil || spec.RootCAPath != "" {
+			if customTransport.TLSClientConfig == nil {
+				customTransport.TLSClientConfig = &tls.Config{}
+			}
+			if spec.CertSource != nil {
+				customTransport.TLSClientConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+					cert, err := spec.CertSource.Certificate()
+					if err != nil {
+						return nil, err
+					}
+					return &cert, nil
 				}
-				return &cert, nil
 			}
-		}
-		if spec.RootCAPath != "" {
-			pem, err := os.ReadFile(spec.RootCAPath)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read CA cert %q: %w", spec.RootCAPath, err)
+			if spec.RootCAPath != "" {
+				pem, err := os.ReadFile(spec.RootCAPath)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read CA cert %q: %w", spec.RootCAPath, err)
+				}
+				pool, err := x509.SystemCertPool()
+				if err != nil {
+					pool = x509.NewCertPool()
+				}
+				if !pool.AppendCertsFromPEM(pem) {
+					return nil, fmt.Errorf("failed to parse CA cert from %q", spec.RootCAPath)
+				}
+				customTransport.TLSClientConfig.RootCAs = pool
 			}
-			pool, err := x509.SystemCertPool()
-			if err != nil {
-				pool = x509.NewCertPool()
-			}
-			if !pool.AppendCertsFromPEM(pem) {
-				return nil, fmt.Errorf("failed to parse CA cert from %q", spec.RootCAPath)
-			}
-			customTransport.TLSClientConfig.RootCAs = pool
 		}
 		base = customTransport
-	} else {
-		base = http.DefaultTransport
 	}
 
 	// 2. Apply transport middleware (e.g. auth)

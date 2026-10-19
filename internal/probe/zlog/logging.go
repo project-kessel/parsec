@@ -346,7 +346,7 @@ func (p *loggingAuthzCheckProbe) SubjectValidationSucceeded(subject *trust.Resul
 }
 
 func (p *loggingAuthzCheckProbe) SubjectValidationFailed(err error) {
-	p.logger.Error().
+	p.logger.Info().
 		Err(err).
 		Msg("Subject validation failed")
 }

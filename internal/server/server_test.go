@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -31,6 +35,108 @@ func TestStartRejectsNilHTTPListener(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing HTTP listener") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestStopForceClosesWhenContextCancelled(t *testing.T) {
+	env := startTestServer(t, stubServerConfig())
+	env.Srv.SetReady()
+
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	defer watchCancel()
+
+	stream, err := env.HealthClient.Watch(watchCtx, &healthpb.HealthCheckRequest{Service: "readiness"})
+	if err != nil {
+		t.Fatalf("Watch(readiness) failed: %v", err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("Recv() failed: %v", err)
+	}
+
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	stopCancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- env.Srv.Stop(stopCtx)
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Stop() = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop blocked with an open RPC after the context was cancelled")
+	}
+}
+
+// TestStopShutsDownHTTPBeforeGRPCDrain verifies that HTTP is closed while a
+// long-lived gRPC stream still holds GracefulStop, so keep-alive HTTP clients
+// are not left talking to a draining gateway for the whole gRPC drain.
+func TestStopShutsDownHTTPBeforeGRPCDrain(t *testing.T) {
+	env := startTestServer(t, stubServerConfig())
+	env.Srv.SetReady()
+
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	defer watchCancel()
+
+	stream, err := env.HealthClient.Watch(watchCtx, &healthpb.HealthCheckRequest{Service: "readiness"})
+	if err != nil {
+		t.Fatalf("Watch(readiness) failed: %v", err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("Recv() failed: %v", err)
+	}
+
+	liveReq, err := http.NewRequestWithContext(env.Ctx, http.MethodGet, env.HTTPBaseURL+"/healthz/live", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp, err := env.HTTPClient.Do(liveReq); err != nil {
+		t.Fatalf("pre-stop /healthz/live: %v", err)
+	} else {
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("pre-stop /healthz/live status=%d", resp.StatusCode)
+		}
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopCancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- env.Srv.Stop(stopCtx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, env.HTTPBaseURL+"/healthz/live", nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		resp, err := env.HTTPClient.Do(req)
+		if err != nil {
+			break
+		}
+		_ = resp.Body.Close()
+		if time.Now().After(deadline) {
+			watchCancel()
+			t.Fatal("HTTP still accepting after Stop started with an open gRPC stream")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	watchCancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Stop() = %v, want nil after watch cancelled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after watch cancelled")
 	}
 }
 
