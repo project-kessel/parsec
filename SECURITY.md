@@ -2,69 +2,38 @@
 
 ## Supported Versions
 
-This project follows semantic versioning. Security updates are provided for:
+Security updates are provided for the default branch and the latest stable
+release only.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| Latest release on `main` | :white_check_mark: |
+| Version | Supported |
+| --- | --- |
+| Default branch | :white_check_mark: |
+| Latest stable release | :white_check_mark: |
+| Older releases | :x: |
 
 ## Reporting a Vulnerability
 
-**Do not open public issues for security vulnerabilities.**
+Do not open a public issue for a suspected vulnerability.
 
-To report a security vulnerability in Parsec, please contact the Red Hat Product Security team:
+Report vulnerabilities privately to Red Hat Product Security:
 
-- **Email**: secalert@redhat.com
-- **PGP Key**: https://access.redhat.com/security/team/contact/#contact
+- Email: [secalert@redhat.com](mailto:secalert@redhat.com)
+- Secure contact and OpenPGP key: [Red Hat Security Contacts and Procedures](https://access.redhat.com/security/team/contact)
 
-### What to Include
+Include the affected Parsec version, deployment environment, reproduction
+steps, exploitation scenario, and potential impact when known. See Red Hat's
+[Coordinated Vulnerability Disclosure policy](https://access.redhat.com/articles/red-hat-coordinated-vulnerability-disclosure)
+for the complete reporting guidance.
 
-Please provide as much information as possible:
+## Response and Coordinated Disclosure
 
-- A description of the vulnerability
-- Steps to reproduce the issue
-- Potential impact and severity assessment
-- Any suggested fixes or mitigations
+Red Hat Product Security handles acknowledgment, triage, CVE assignment,
+response timing, confidentiality, and coordinated disclosure according to its
+[Coordinated Vulnerability Disclosure policy](https://access.redhat.com/articles/red-hat-coordinated-vulnerability-disclosure).
+Parsec does not make a separate response-time or disclosure-schedule promise.
 
-### Response Timeline
+## Deployment Security
 
-- You will receive an acknowledgment within 2 business days
-- The security team will investigate and provide an initial assessment within 5 business days
-- Updates on remediation progress will be provided as appropriate
-
-## Disclosure Policy
-
-- Security issues are disclosed publicly only after patches are available
-- Credit will be given to security researchers who responsibly disclose vulnerabilities
-- CVE identifiers will be assigned for confirmed vulnerabilities when appropriate
-
-## Security Best Practices
-
-When deploying Parsec:
-
-1. **TLS Configuration**: Always configure TLS for production gRPC and HTTP endpoints
-2. **Network Policies**: Restrict network access to Parsec services using Kubernetes network policies or firewall rules
-3. **Authentication**: Use strong authentication mechanisms (mTLS, JWT with strong signing keys)
-4. **Regular Updates**: Keep Parsec and its dependencies up to date
-5. **Least Privilege**: Run Parsec containers with minimal required privileges
-6. **Secret Management**: Use secure secret management solutions (e.g., Kubernetes Secrets, HashiCorp Vault)
-7. **Monitoring**: Enable audit logging and monitor for suspicious activity
-
-## Security Scanning
-
-This project uses:
-
-- **OpenSSF Scorecard**: Automated security posture assessment
-- **CodeQL**: Static analysis for security vulnerabilities
-- **Dependabot**: Automated dependency vulnerability scanning
-- **gosec**: Go security checker for common security issues
-
-## Contact
-
-For general security questions or concerns (non-vulnerability):
-
-- Project maintainers: https://github.com/project-kessel/parsec
-- Red Hat Security: https://access.redhat.com/security/
-
-For more information about Red Hat's security practices, visit:
-https://access.redhat.com/security/
+Parsec expects production TLS to terminate at the service mesh, sidecar, or
+ingress. See the [deployment security model](README.md#security--deployment-model)
+and [architecture documentation](ARCHITECTURE.md#tls-and-network-security).
