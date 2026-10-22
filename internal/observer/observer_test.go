@@ -146,6 +146,8 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 	{
 		_, p := obs.DistributedValidateStarted(ctx, "v")
 		p.CacheKeyFailed(errors.New("x"))
+		p.CacheHit()
+		p.CacheMiss()
 		p.GetFailed(errors.New("x"))
 		p.ResultExpired()
 		p.End()

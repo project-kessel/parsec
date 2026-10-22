@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/config"
 	"github.com/project-kessel/parsec/internal/server"
 )
@@ -119,6 +120,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create issuer registry: %w", err)
 	}
 
+	requestIDConfig, err := provider.RequestIDConfig()
+	if err != nil {
+		return fmt.Errorf("failed to validate request ID config: %w", err)
+	}
+
 	// 4. Create service handlers
 	authzServer := server.NewAuthzServer(trustStore, tokenService, authzCheckPolicy, credentialSources, obs)
 
@@ -148,13 +154,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 6. Create and start server
 	srv := server.New(server.Config{
-		GRPCListener:   grpcListener,
-		HTTPListener:   httpListener,
-		AuthzServer:    authzServer,
-		ExchangeServer: exchangeServer,
-		JWKSServer:     jwksServer,
-		Observer:       obs,
-		MuxConfigurer:  obs.ConfigureHTTPMux,
+		GRPCListener:    grpcListener,
+		HTTPListener:    httpListener,
+		AuthzServer:     authzServer,
+		ExchangeServer:  exchangeServer,
+		JWKSServer:      jwksServer,
+		Observer:        obs,
+		MuxConfigurer:   obs.ConfigureHTTPMux,
+		RequestIDConfig: requestIDConfig,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -165,6 +172,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 7. Log startup information
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
+	obs.ProcessReady(server.ProcessInfo{
+		Version:     buildinfo.Version,
+		Commit:      buildinfo.Commit,
+		TrustDomain: provider.TrustDomain(),
+		GRPCAddress: grpcAddr,
+		HTTPAddress: httpAddr,
+	})
 	logEvent := bootstrapLog.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).

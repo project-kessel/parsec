@@ -1,0 +1,62 @@
+# parsec Configuration - Audit Event Verification (RHCLOUD-50612)
+#
+# Fully hermetic (no fixtures, no network) configuration used to demonstrate
+# and verify structured audit logging end-to-end for both the ext_authz
+# Check path and the TokenExchange path. Uses stub_validator (accepts any
+# bearer token) and stub issuers (no signing) so the full request lifecycle
+# can be exercised with plain curl/grpcurl and no external dependencies.
+#
+# Usage:
+#   go build -o bin/parsec ./cmd/parsec
+#   ./bin/parsec serve --config ./configs/examples/parsec-audit-verification.yaml
+#
+# See docs/audit-events-verification.md for captured curl/grpcurl output
+# alongside the corresponding structured audit log lines.
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+observability:
+  type: composite
+  log_level: debug
+  log_format: json
+  # Default is ["x-request-id"]. Listed explicitly here for clarity.
+  request_id_headers:
+    - "x-request-id"
+  observers:
+    - type: audit
+    - type: logging
+
+trust_domain: "parsec.demo.local"
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+# Accepts any bearer token as subject "test-subject" (see trust.NewStubValidator).
+# Sufficient to exercise the full authz/exchange/audit pipeline without JWKS.
+trust_store:
+  type: stub_store
+  validators:
+    - name: any-bearer
+      type: stub_validator
+
+# Stub issuers: no signing, deterministic token values, no external calls.
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.demo.local"
+    ttl: 5m
+  - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
+    type: stub
+    issuer_url: "https://parsec.demo.local"
+    ttl: 5m
+
+credential_sources:
+  - name: authorization-bearer
+    type: authorization_bearer_opaque
+
+# authz_server.policy is omitted: defaults to StaticAuthenticatedPolicy issuing
+# a transaction token via the "Transaction-Token" header for authenticated
+# subjects, and denying anonymous subjects (credential_missing).

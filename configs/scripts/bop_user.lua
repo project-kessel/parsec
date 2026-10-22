@@ -39,6 +39,12 @@ function fetch(input)
 
   local bop_url = config.get("bop_url")
   if bop_url == nil or bop_url == "" then
+    audit.record({
+      source = "data_source",
+      operation = "user_enrichment",
+      outcome = "failure",
+      reason_code = "supplemental_user_data_failure",
+    })
     return nil
   end
 
@@ -58,19 +64,43 @@ function fetch(input)
   local response, err = http.post(url, body, headers)
 
   if response == nil then
+    audit.record({
+      source = "data_source",
+      operation = "user_enrichment",
+      outcome = "failure",
+      reason_code = "supplemental_user_data_failure",
+    })
     return nil
   end
 
   if response.status ~= 200 then
+    audit.record({
+      source = "data_source",
+      operation = "user_enrichment",
+      outcome = "failure",
+      reason_code = "supplemental_user_data_failure",
+    })
     return nil
   end
 
   local users, decode_err = json.decode(response.body)
   if users == nil then
+    audit.record({
+      source = "data_source",
+      operation = "user_enrichment",
+      outcome = "failure",
+      reason_code = "supplemental_user_data_failure",
+    })
     return nil
   end
 
   if type(users) ~= "table" then
+    audit.record({
+      source = "data_source",
+      operation = "user_enrichment",
+      outcome = "failure",
+      reason_code = "supplemental_user_data_failure",
+    })
     return nil
   end
 

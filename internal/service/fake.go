@@ -224,6 +224,10 @@ func (p *FakeProbe) SubjectTokenValidationFailed(err error) {
 	p.recordCall("SubjectTokenValidationFailed", err)
 }
 
+func (p *FakeProbe) RequestCompleted(completion RequestCompletion) {
+	p.recordCall("RequestCompleted", completion)
+}
+
 // AuthzCheckProbe methods
 func (p *FakeProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
 	p.recordCall("RequestAttributesParsed", attrs)

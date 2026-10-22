@@ -3,12 +3,15 @@ package config
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/rs/zerolog"
 
+	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
+	"github.com/project-kessel/parsec/internal/probe/audit"
 	"github.com/project-kessel/parsec/internal/probe/otel"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -107,6 +110,13 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 	}
 
 	switch cfg.Type {
+	case "audit":
+		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
+		if err != nil {
+			return nil, err
+		}
+		return p.newAuditObserver(cfg, lc)
+
 	case "logging":
 		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
 		if err != nil {
@@ -133,8 +143,94 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 		return p.buildCompositeObserver(cfg, parentLogCtx)
 
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: audit, logging, noop, metrics, composite)", cfg.Type)
 	}
+}
+
+func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	// Audit records are always structured JSON at production-visible levels.
+	// Writer is the raw sink, so parent console formatting and restrictive
+	// diagnostic levels cannot suppress or reshape security events.
+	logger := zerolog.New(logCtx.Writer).Level(zerolog.InfoLevel)
+	prefix := audit.DefaultEventPrefix
+	if effective := effectiveEventPrefix(cfg, p.config.Observability); effective != nil {
+		prefix = *effective
+	}
+	if !audit.ValidEventPrefix(prefix) {
+		return nil, fmt.Errorf("invalid audit event prefix %q: use only letters, digits, underscore, hyphen, or dot", prefix)
+	}
+
+	opts := []audit.Option{audit.WithEventPrefix(prefix)}
+
+	classifications := p.failureClassifications()
+	for dataSourceName, classification := range classifications {
+		if !audit.ValidReasonCode(classification) {
+			return nil, fmt.Errorf("data source %q: invalid failure_classification %q: must be a known audit reason code", dataSourceName, classification)
+		}
+	}
+	if len(classifications) > 0 {
+		opts = append(opts, audit.WithFailureClassifications(classifications))
+	}
+
+	if keys := p.allowedMetadataKeys(cfg); len(keys) > 0 {
+		opts = append(opts, audit.WithAllowedMetadataKeys(keys))
+	}
+
+	return audit.New(logger, audit.Metadata{
+		ServiceName:    "parsec",
+		ServiceVersion: buildinfo.Version,
+		TrustDomain:    p.config.TrustDomain,
+	}, opts...), nil
+}
+
+// effectiveEventPrefix prefers the prefix configured on the audit observer
+// entry itself (cfg), falling back to the top-level Observability config.
+// The two differ when the audit observer is a child of a `type: composite`
+// entry: cfg is the child, top is the composite parent that documents/
+// receives the --observability-event-prefix flag.
+func effectiveEventPrefix(cfg, top *ObservabilityConfig) *string {
+	if cfg != nil && cfg.EventPrefix != nil {
+		return cfg.EventPrefix
+	}
+	if top != nil && top.EventPrefix != nil {
+		return top.EventPrefix
+	}
+	return nil
+}
+
+// allowedMetadataKeys builds the optional audit metadata key allowlist,
+// preferring the allowlist configured on the audit observer entry itself
+// (cfg), falling back to the top-level Observability config. This mirrors
+// effectiveEventPrefix: for a `type: composite` observer, cfg is the child
+// `- type: audit` entry and p.config.Observability is the composite parent.
+// Empty/unset (at both levels) means allow-all at the Collector.
+func (p *Provider) allowedMetadataKeys(cfg *ObservabilityConfig) map[string]bool {
+	src := cfg.AllowedMetadataKeys
+	if len(src) == 0 && p.config.Observability != nil {
+		src = p.config.Observability.AllowedMetadataKeys
+	}
+	if len(src) == 0 {
+		return nil
+	}
+	keys := make(map[string]bool, len(src))
+	for _, key := range src {
+		if key != "" {
+			keys[key] = true
+		}
+	}
+	return keys
+}
+
+// failureClassifications builds a map from datasource name to audit failure
+// classification from the DataSources config.
+func (p *Provider) failureClassifications() map[string]string {
+	result := make(map[string]string)
+	for _, ds := range p.config.DataSources {
+		if ds.FailureClassification != "" {
+			result[ds.Name] = ds.FailureClassification
+		}
+	}
+	return result
 }
 
 func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {
@@ -466,4 +562,67 @@ func (p *Provider) CredentialSources() (server.CredentialSources, error) {
 	}
 
 	return newCredentialSources(p.config.CredentialSources)
+}
+
+// RequestIDConfig returns the configured request-ID header config. Returns
+// the default (["x-request-id"]) when no headers are configured.
+// Returns an error if any configured header is syntactically invalid or
+// refers to a forbidden credential/response-control header.
+func (p *Provider) RequestIDConfig() (server.RequestIDConfig, error) {
+	if p.config.Observability == nil || len(p.config.Observability.RequestIDHeaders) == 0 {
+		return server.DefaultRequestIDConfig(), nil
+	}
+	validated := make([]string, 0, len(p.config.Observability.RequestIDHeaders))
+	for i, header := range p.config.Observability.RequestIDHeaders {
+		if !isValidHTTPHeaderName(header) {
+			return server.RequestIDConfig{}, fmt.Errorf("request_id_headers[%d]: %q is not a valid HTTP header name", i, header)
+		}
+		if isForbiddenRequestIDHeader(header) {
+			return server.RequestIDConfig{}, fmt.Errorf("request_id_headers[%d]: %q is a credential or response-control header and cannot be used as a request ID source", i, header)
+		}
+		validated = append(validated, header)
+	}
+	return server.RequestIDConfig{Headers: validated}, nil
+}
+
+// isForbiddenRequestIDHeader reports whether name is a credential or
+// response-control header that must not be used as a request ID source.
+// Callers should check isValidHTTPHeaderName separately for syntax.
+func isForbiddenRequestIDHeader(name string) bool {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "authorization", "proxy-authorization",
+		"cookie", "set-cookie",
+		"www-authenticate", "proxy-authenticate":
+		return true
+	}
+	return false
+}
+
+// isValidHTTPHeaderName reports whether name is a syntactically valid HTTP
+// header field name: a non-empty sequence of RFC 7230 "token" characters
+// (ASCII letters, digits, and "!#$%&'*+-.^_`|~"). Anything else — spaces,
+// Unicode look-alike separators, control characters — cannot appear as a
+// real header name on the wire.
+func isValidHTTPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if !isTokenByte(name[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTokenByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	case strings.IndexByte("!#$%&'*+-.^_`|~", b) >= 0:
+		return true
+	default:
+		return false
+	}
 }
