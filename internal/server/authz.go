@@ -264,7 +264,7 @@ func (s *AuthzServer) issueResponse(
 	if err != nil {
 		response := s.denyResponseWithHTTPStatus(codes.Internal,
 			typev3.StatusCode_InternalServerError,
-			"token issuance failed")
+			fmt.Sprintf("failed to issue tokens: %v", err))
 		return response, nil, "token_issuance_failed", nil
 	}
 
