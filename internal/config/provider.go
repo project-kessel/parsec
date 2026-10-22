@@ -566,54 +566,37 @@ func (p *Provider) CredentialSources() (server.CredentialSources, error) {
 
 // RequestIDConfig returns the configured request-ID header config. Returns
 // the default (["x-request-id"]) when no headers are configured.
-// Validates that no credential or response-control headers are used.
-func (p *Provider) RequestIDConfig() server.RequestIDConfig {
-	if p.config.Observability != nil && len(p.config.Observability.RequestIDHeaders) > 0 {
-		// Validate headers before using them
-		validated := make([]string, 0, len(p.config.Observability.RequestIDHeaders))
-		for _, header := range p.config.Observability.RequestIDHeaders {
-			if isValidRequestIDHeaderName(header) {
-				validated = append(validated, header)
-			}
-		}
-		// If all headers were rejected, fall back to default
-		if len(validated) == 0 {
-			return server.DefaultRequestIDConfig()
-		}
-		return server.RequestIDConfig{Headers: validated}
+// Returns an error if any configured header is syntactically invalid or
+// refers to a forbidden credential/response-control header.
+func (p *Provider) RequestIDConfig() (server.RequestIDConfig, error) {
+	if p.config.Observability == nil || len(p.config.Observability.RequestIDHeaders) == 0 {
+		return server.DefaultRequestIDConfig(), nil
 	}
-	return server.DefaultRequestIDConfig()
+	validated := make([]string, 0, len(p.config.Observability.RequestIDHeaders))
+	for i, header := range p.config.Observability.RequestIDHeaders {
+		if !isValidHTTPHeaderName(header) {
+			return server.RequestIDConfig{}, fmt.Errorf("request_id_headers[%d]: %q is not a valid HTTP header name", i, header)
+		}
+		if isForbiddenRequestIDHeader(header) {
+			return server.RequestIDConfig{}, fmt.Errorf("request_id_headers[%d]: %q is a credential or response-control header and cannot be used as a request ID source", i, header)
+		}
+		validated = append(validated, header)
+	}
+	return server.RequestIDConfig{Headers: validated}, nil
 }
 
-// isValidRequestIDHeaderName rejects credential and response-control headers,
-// and any name that is not a syntactically valid HTTP header field name.
-//
-// The syntax check matters on its own: a configured name that merely looks
-// like a real header (e.g. it uses a Unicode dash instead of "-", or
-// contains whitespace) can never match an actual incoming ASCII header, yet
-// it would still pass the forbidden-name check below and get accepted here.
-// RequestIDConfig then skips the built-in default because a header was
-// configured, so the upstream request ID is silently never extracted.
-func isValidRequestIDHeaderName(name string) bool {
-	if !isValidHTTPHeaderName(name) {
-		return false
-	}
-	// Reject credential headers
+// isForbiddenRequestIDHeader reports whether name is a credential or
+// response-control header that must not be used as a request ID source.
+// Callers should check isValidHTTPHeaderName separately for syntax.
+func isForbiddenRequestIDHeader(name string) bool {
 	lower := strings.ToLower(name)
-	forbidden := []string{
-		"authorization",
-		"proxy-authorization",
-		"cookie",
-		"set-cookie",
-		"www-authenticate",
-		"proxy-authenticate",
+	switch lower {
+	case "authorization", "proxy-authorization",
+		"cookie", "set-cookie",
+		"www-authenticate", "proxy-authenticate":
+		return true
 	}
-	for _, f := range forbidden {
-		if lower == f {
-			return false
-		}
-	}
-	return true
+	return false
 }
 
 // isValidHTTPHeaderName reports whether name is a syntactically valid HTTP

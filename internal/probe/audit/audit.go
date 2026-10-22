@@ -300,7 +300,6 @@ func (p *requestProbe) End() {
 		if signal.Operation == "cross_account_access" {
 			p.emitRaw("rbac_cross_access_audit", signal.Metadata, &signal, &env)
 			emitted["rbac_cross_access_audit"] = true
-			break
 		}
 	}
 	if p.authorize {

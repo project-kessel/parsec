@@ -17,6 +17,7 @@ func TestProvider_RequestIDConfig(t *testing.T) {
 		name    string
 		headers []string
 		want    []string
+		wantErr string
 	}{
 		{
 			name:    "nil falls back to default",
@@ -29,40 +30,40 @@ func TestProvider_RequestIDConfig(t *testing.T) {
 			want:    []string{"x-custom-request-id"},
 		},
 		{
-			name:    "credential header is rejected, falls back to default",
+			name:    "credential header is rejected at startup",
 			headers: []string{"authorization"},
-			want:    server.DefaultRequestIDConfig().Headers,
+			wantErr: "credential or response-control header",
 		},
 		{
-			name:    "cookie header is rejected, falls back to default",
+			name:    "cookie header is rejected at startup",
 			headers: []string{"Cookie"},
-			want:    server.DefaultRequestIDConfig().Headers,
+			wantErr: "credential or response-control header",
 		},
 		{
-			name: "header name containing whitespace is rejected",
+			name: "header name containing whitespace is rejected at startup",
 			// Looks like a header name but a real HTTP header can never
 			// carry a space in its field name, so it would never match an
 			// incoming request.
 			headers: []string{"x request id"},
-			want:    server.DefaultRequestIDConfig().Headers,
+			wantErr: "not a valid HTTP header name",
 		},
 		{
-			name: "header name using a Unicode look-alike dash is rejected",
+			name: "header name using a Unicode look-alike dash is rejected at startup",
 			// U+2011 (non-breaking hyphen) renders identically to "-" but is
 			// not a valid RFC 7230 token character, so it can never match
 			// the real "x-request-id" header on the wire.
 			headers: []string{"x\u2011request\u2011id"},
-			want:    server.DefaultRequestIDConfig().Headers,
+			wantErr: "not a valid HTTP header name",
 		},
 		{
-			name:    "empty string is rejected, falls back to default",
+			name:    "empty string is rejected at startup",
 			headers: []string{""},
-			want:    server.DefaultRequestIDConfig().Headers,
+			wantErr: "not a valid HTTP header name",
 		},
 		{
-			name:    "valid header survives alongside a rejected one",
+			name:    "forbidden header alongside valid header is rejected at startup",
 			headers: []string{"authorization", "x-custom-request-id"},
-			want:    []string{"x-custom-request-id"},
+			wantErr: "credential or response-control header",
 		},
 	}
 
@@ -70,13 +71,25 @@ func TestProvider_RequestIDConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			p := NewProvider(&Config{Observability: &ObservabilityConfig{RequestIDHeaders: tt.headers}})
-			got := p.RequestIDConfig().Headers
-			if len(got) != len(tt.want) {
-				t.Fatalf("Headers = %v, want %v", got, tt.want)
+			got, err := p.RequestIDConfig()
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
 			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Fatalf("Headers = %v, want %v", got, tt.want)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got.Headers) != len(tt.want) {
+				t.Fatalf("Headers = %v, want %v", got.Headers, tt.want)
+			}
+			for i := range got.Headers {
+				if got.Headers[i] != tt.want[i] {
+					t.Fatalf("Headers = %v, want %v", got.Headers, tt.want)
 				}
 			}
 		})
