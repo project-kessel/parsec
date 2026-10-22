@@ -120,7 +120,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create issuer registry: %w", err)
 	}
 
-	requestIDConfig := provider.RequestIDConfig()
+	requestIDConfig, err := provider.RequestIDConfig()
+	if err != nil {
+		return fmt.Errorf("failed to validate request ID config: %w", err)
+	}
 
 	// 4. Create service handlers
 	var dropHeaders, dropCookies []string

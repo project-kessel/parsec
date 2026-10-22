@@ -11,7 +11,10 @@ import (
 
 type recordingReporter struct{ signals []auditctx.Signal }
 
-func (r *recordingReporter) Record(signal auditctx.Signal) { r.signals = append(r.signals, signal) }
+func (r *recordingReporter) Record(signal auditctx.Signal) bool {
+	r.signals = append(r.signals, signal)
+	return true
+}
 
 func TestRegisterAuditServiceRecordsValidatedSignal(t *testing.T) {
 	L := lua.NewState()

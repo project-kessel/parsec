@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 
 	"github.com/project-kessel/parsec/internal/trust"
@@ -96,28 +95,4 @@ func mtlsExtractionFromPeer(peer *TLSPeerInfo) *CredentialExtraction {
 
 func extractIssuerFromCert(cert *x509.Certificate) string {
 	return cert.Issuer.String()
-}
-
-//nolint:unused // kept for debugging/logging use
-func encodeCertToPEM(certDER []byte) string {
-	pemBlock := &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: certDER,
-	}
-	return string(pem.EncodeToMemory(pemBlock))
-}
-
-//nolint:unused // kept for testing use
-func parseCertFromPEM(pemData string) (*x509.Certificate, error) {
-	block, _ := pem.Decode([]byte(pemData))
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM block")
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %w", err)
-	}
-
-	return cert, nil
 }

@@ -37,12 +37,12 @@ type Signal struct {
 }
 
 // Reporter accepts validated audit signals for the current request.
-type Reporter interface{ Record(Signal) }
+type Reporter interface{ Record(Signal) bool }
 
 // NoOpReporter is safe to use when audit collection is disabled.
 type NoOpReporter struct{}
 
-func (NoOpReporter) Record(Signal) {}
+func (NoOpReporter) Record(Signal) bool { return true }
 
 // Collector stores a bounded list of valid signals for one request.
 // When allowedKeys is empty, metadata keys are accepted after text/length
@@ -59,21 +59,23 @@ func NewCollector(allowedKeys map[string]bool) *Collector {
 	return &Collector{allowedKeys: allowedKeys}
 }
 
-func (c *Collector) Record(signal Signal) {
+func (c *Collector) Record(signal Signal) bool {
 	if c == nil {
-		return
+		return false
 	}
 	// Sanitize metadata values before validating/storing. This also clones
 	// the map, preventing caller mutations from bypassing validation.
 	signal.Metadata = SanitizeMetadata(signal.Metadata)
 	if !c.valid(signal) {
-		return
+		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.signals) < 32 {
 		c.signals = append(c.signals, signal)
+		return true
 	}
+	return false
 }
 
 func (c *Collector) Signals() []Signal {

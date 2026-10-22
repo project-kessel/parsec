@@ -51,8 +51,11 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
-		auditctx.ReporterFrom(ctx).Record(signal)
-		state.Push(gopherlua.LTrue)
+		if auditctx.ReporterFrom(ctx).Record(signal) {
+			state.Push(gopherlua.LTrue)
+		} else {
+			state.Push(gopherlua.LFalse)
+		}
 		return 1
 	}))
 	L.SetGlobal("audit", service)

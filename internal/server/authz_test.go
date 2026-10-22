@@ -601,8 +601,8 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 			t.Error("expected denial for invalid actor credentials, got OK")
 		}
 
-		if !strings.Contains(resp.Status.Message, "actor validation failed") {
-			t.Errorf("expected 'actor validation failed' in message, got: %s", resp.Status.Message)
+		if !strings.Contains(resp.Status.Message, "authentication failed") {
+			t.Errorf("expected 'authentication failed' in message, got: %s", resp.Status.Message)
 		}
 	})
 }
@@ -1459,7 +1459,7 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		if denied.GetStatus().GetCode() != typev3.StatusCode_InternalServerError {
 			t.Errorf("HTTP status: got %d, want InternalServerError (%d)", denied.GetStatus().GetCode(), typev3.StatusCode_InternalServerError)
 		}
-		if !strings.Contains(resp.Status.Message, "no token") {
+		if !strings.Contains(resp.Status.Message, "token issuance failed") {
 			t.Errorf("message: got %q", resp.Status.Message)
 		}
 		if observer.completion.ReasonCode != "token_issuance_failed" {

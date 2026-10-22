@@ -72,14 +72,14 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// 1. Validate the grant type
 	if req.GrantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
 		reasonCode = "grant_type_unsupported"
-		return nil, fmt.Errorf("unsupported grant_type: %s", req.GrantType)
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported grant_type: %s", req.GrantType)
 	}
 
 	// 2. Authenticate actor (caller) from gRPC context
 	actor, err := authenticateActor(ctx, s.callerCredentialSources, s.trustStore, p)
 	if err != nil {
 		reasonCode = "credential_invalid"
-		return nil, err
+		return nil, status.Errorf(codes.Unauthenticated, "authentication failed")
 	}
 
 	// 3. Parse and filter client-provided request_context claims
@@ -91,7 +91,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		if err != nil {
 			reasonCode = "invalid_request"
 			p.RequestContextParseFailed(err)
-			return nil, err
+			return nil, status.Errorf(codes.InvalidArgument, "invalid request_context")
 		}
 
 		// Get the claims filter for this actor
@@ -99,7 +99,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		if err != nil {
 			reasonCode = auditReasonFromError(err, "internal_error")
 			p.RequestContextParseFailed(err)
-			return nil, fmt.Errorf("failed to get claims filter for actor: %w", err)
+			return nil, status.Errorf(codes.Internal, "internal error")
 		}
 
 		// Filter the claims based on actor permissions
@@ -127,7 +127,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	filteredStore, err := s.trustStore.ForActor(ctx, actor, reqAttrs)
 	if err != nil {
 		reasonCode = auditReasonFromError(err, "scheme_not_allowed")
-		return nil, fmt.Errorf("failed to filter trust store: %w", err)
+		return nil, status.Errorf(codes.PermissionDenied, "request denied")
 	}
 
 	// 5. Validate subject_token
@@ -141,19 +141,19 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 			reasonCode = "credential_expired"
 		}
 		p.SubjectTokenValidationFailed(err)
-		return nil, fmt.Errorf("token validation failed: %w", err)
+		return nil, status.Errorf(codes.Unauthenticated, "token validation failed")
 	}
 	p.SubjectTokenValidationSucceeded(result)
 
-	// 7. Validate audience matches trust domain (per transaction token spec)
+	// 6. Validate audience matches trust domain (per transaction token spec)
 	// The audience for transaction tokens is always the trust domain
 	if req.Audience != "" && req.Audience != s.tokenService.TrustDomain() {
 		reasonCode = "policy_denied"
-		return nil, fmt.Errorf("requested audience %q does not match trust domain %q",
+		return nil, status.Errorf(codes.PermissionDenied, "requested audience %q does not match trust domain %q",
 			req.Audience, s.tokenService.TrustDomain())
 	}
 
-	// 8. Issue the token via TokenService
+	// 7. Issue the token via TokenService
 	results, err := s.tokenService.IssueTokens(ctx, &service.IssueRequest{
 		Subject:           result,
 		Actor:             actor,
@@ -180,7 +180,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		return nil, status.Errorf(codes.Internal, "token service returned no token for type %s", requestedTokenType)
 	}
 
-	// 9. Return response
+	// 8. Return response
 	reasonCode = ""
 	return &parsecv1.ExchangeResponse{
 		AccessToken:     r.Token.Value,
