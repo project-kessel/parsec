@@ -100,7 +100,7 @@ func (p *loggingValidationProbe) ValidatorFailed(validatorName string, credType 
 }
 
 func (p *loggingValidationProbe) AllValidatorsFailed(credType trust.CredentialType, attempted int, lastErr error) {
-	p.logger.Warn().
+	p.logger.Debug().
 		Err(lastErr).
 		Str("credential_type", string(credType)).
 		Int("attempted", attempted).
@@ -249,7 +249,7 @@ func (p *loggingInMemoryValidateProbe) CacheMiss() {
 }
 
 func (p *loggingInMemoryValidateProbe) SourceFailed(err error) {
-	p.logger.Warn().Err(err).Msg("source validation failed on cache miss")
+	p.logger.Debug().Err(err).Msg("source validation failed on cache miss")
 }
 
 func (p *loggingInMemoryValidateProbe) End() {

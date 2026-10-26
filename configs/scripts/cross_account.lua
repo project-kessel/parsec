@@ -24,9 +24,15 @@
 --   { "active": true, "target_account_number", "target_org_id",
 --     "employee_account_number", "employee_org_id" } — approved (AC1)
 --
--- On success, target_account_number and target_org_id come from the matched RBAC
--- record (target_account / target_org), not directly from cookies. Requests are
--- denied when either cookie is missing or does not match that record (3scale parity).
+-- On success, target_org_id comes from the matched RBAC record (target_org).
+-- target_account_number comes from the account cookie when present, else "".
+-- Deny when the org cookie is missing or does not match target_org.
+--
+-- Trust decision: the cross_access_account_number cookie is client-controlled
+-- and is never verified by RBAC (the approved request is bound on target_org
+-- only). It is therefore accepted only when empty or a plain numeric string
+-- (Lua pattern ^%d+$); any other value is denied with rbac_denied before it
+-- can reach target_account_number, the CEL account_number field, or audit.
 --
 -- Optional top-level audit table on the Lua return (not in JSON data) carries AC8
 -- audit fields for generic FetchAudit probe handling in Go.
@@ -61,9 +67,7 @@ local function resolve_claims(input)
 end
 
 local function resolve_user_id(claims)
-  local user_id = claim_str(claims, "user_id")
-  if user_id == "" then user_id = claim_str(claims, "sub") end
-  return user_id
+  return claim_str(claims, "user_id")
 end
 
 local function resolve_email(claims)
@@ -75,19 +79,19 @@ local function resolve_username(claims)
   if claims == nil then return "" end
   local username = claim_str(claims, "preferred_username")
   if username == "" then username = claim_str(claims, "username") end
-  if username == "" then username = claim_str(claims, "sub") end
   return username
 end
 
 local function resolve_employee_account_org(claims)
-  local account_number = org_field(claims, "account_number")
-  if account_number == "" then account_number = claim_str(claims, "account_number") end
-  if account_number == "" then account_number = claim_str(claims, "account_id") end
+  local account_number = claim_str(claims, "account_number")
+  if account_number == "" then account_number = org_field(claims, "account_number") end
 
-  local org_id = org_field(claims, "id")
+  -- Match redhat_identity.cel / 3scale claim shapes only — do not fall back
+  -- org_id to account_number (those are distinct fields).
+  local org_id = claim_str(claims, "account_id")
+  if org_id == "" then org_id = org_field(claims, "id") end
   if org_id == "" then org_id = claim_str(claims, "org_id") end
   if org_id == "" then org_id = claim_str(claims, "rh-org-id") end
-  if org_id == "" then org_id = account_number end
 
   return account_number, org_id
 end
@@ -104,7 +108,12 @@ local function build_identity_envelope(claims)
       user = {
         username = username,
         email = resolve_email(claims),
-        user_id = resolve_user_id(claims)
+        user_id = resolve_user_id(claims),
+        -- Hardcoded after resolve_is_internal + email gates succeed: RBAC's
+        -- query_by=user_id CAR list requires user.is_internal. Stage IdP JWTs
+        -- often omit/false this claim even for associates Parsec already allowed.
+        is_internal = true,
+        is_active = true,
       },
       internal = {
         org_id = org_id,
@@ -312,22 +321,26 @@ local function rbac_find_approved_record(claims, target_org_id)
     return nil, "rbac_denied"
   end
 
-  local target_account = record_field(record, "target_account")
   local target_org = record_field(record, "target_org")
-  if target_account == "" or target_org == "" then
+  if target_org == "" then
     return nil, "rbac_denied"
   end
 
   return {
-    target_account_number = target_account,
     target_org_id = target_org,
   }, nil
 end
 
-local function cookies_match_record(target_account, target_org, record)
+local function org_matches_record(target_org, record)
   if record == nil then return false end
-  return target_account == record.target_account_number
-    and target_org == record.target_org_id
+  return target_org == record.target_org_id
+end
+
+-- account_cookie_valid reports whether target_account is safe to trust: the
+-- cookie is client-controlled and RBAC only binds the org, so only empty or
+-- plain numeric values are accepted.
+local function account_cookie_valid(target_account)
+  return target_account == "" or target_account:match("^%d+$") ~= nil
 end
 
 function fetch(input)
@@ -339,6 +352,11 @@ function fetch(input)
 
   if target_account == "" and target_org == "" then
     return inactive()
+  end
+
+  if not account_cookie_valid(target_account) then
+    return encode_result({ error = "rbac_denied" },
+      cross_account_audit("rbac_denied", claims, "", target_org))
   end
 
   if not resolve_is_internal(claims) then
@@ -358,7 +376,7 @@ function fetch(input)
       cross_account_audit("infra", claims, target_account, target_org))
   end
 
-  if target_account == "" or target_org == "" then
+  if target_org == "" then
     return encode_result({ error = "rbac_denied" },
       cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
@@ -372,7 +390,7 @@ function fetch(input)
     return encode_result({ error = "rbac_denied" },
       cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
-  if not cookies_match_record(target_account, target_org, record) then
+  if not org_matches_record(target_org, record) then
     return encode_result({ error = "rbac_denied" },
       cross_account_audit("rbac_denied", claims, target_account, target_org))
   end
@@ -381,9 +399,9 @@ function fetch(input)
 
   return encode_result({
     active = true,
-    target_account_number = record.target_account_number,
+    target_account_number = target_account,
     target_org_id = record.target_org_id,
     employee_account_number = employee_account,
     employee_org_id = employee_org
-  }, cross_account_audit("approved", claims, record.target_account_number, record.target_org_id))
+  }, cross_account_audit("approved", claims, target_account, record.target_org_id))
 end

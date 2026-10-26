@@ -582,7 +582,7 @@ func TestBOPUser_CacheKey(t *testing.T) {
 		},
 	}
 
-	masked, useCache := ds.CacheKey(input)
+	masked, useCache := ds.CacheKey(context.Background(), input)
 	if !useCache {
 		t.Fatal("expected cacheable key for username")
 	}

@@ -53,7 +53,7 @@ func newCredentialSource(cfg CredentialSourceConfig) (server.CredentialSource, e
 	case server.CredentialSourceTypeHeader:
 		headers := make([]server.HeaderSpec, len(cfg.Headers))
 		for i, h := range cfg.Headers {
-			headers[i] = server.HeaderSpec{Name: h.Name}
+			headers[i] = server.HeaderSpec{Name: h.Name, Match: h.Match, Strip: h.Strip}
 		}
 		return server.NewHeaderCredentialSource(cfg.Name, headers)
 	case server.CredentialSourceTypeForwardedClientCert:

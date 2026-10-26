@@ -61,6 +61,8 @@ func startTestServer(t *testing.T, cfg Config) *testEnv {
 		t.Fatalf("failed to start server: %v", err)
 	}
 
+	// NOTE: insecure.NewCredentials() is appropriate for test-only in-memory connections (bufconn).
+	// Production deployments must configure proper TLS credentials.
 	grpcConn, err := grpc.NewClient(
 		"passthrough:///bufnet",
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {

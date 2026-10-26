@@ -1,3 +1,7 @@
+# DEVELOPMENT ONLY — DO NOT USE IN PRODUCTION.
+# This ephemeral configuration is for testing and development environments only.
+# It may include relaxed security settings, insecure defaults, or simplified configurations
+# that are NOT suitable for production deployments.
 apiVersion: template.openshift.io/v1
 kind: Template
 metadata:
@@ -254,6 +258,11 @@ objects:
             image: ${PARSEC_IMAGE}:${IMAGE_TAG}
             command: ["parsec"]
             args: ["serve", "--config", "/etc/parsec/parsec.yaml"]
+            terminationGracePeriodSeconds: 40
+            lifecycle:
+              preStop:
+                exec:
+                  command: ["sleep", "10"]
             livenessProbe:
               httpGet:
                 path: /healthz/live

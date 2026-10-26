@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -46,6 +47,61 @@ func Test_newCredentialSource(t *testing.T) {
 			}
 		})
 	}
+
+	// match/strip are compiled inside the server package, so assert them
+	// through Extract rather than by inspecting unexported state.
+	t.Run("header match and strip reach the source", func(t *testing.T) {
+		t.Parallel()
+		noStrip := false
+		got, err := newCredentialSource(CredentialSourceConfig{
+			Name: "uhc-auth",
+			Type: "header",
+			Headers: []HeaderSpec{
+				{Name: "authorization"},
+				{Name: "user-agent", Match: "^.*-operator/.* cluster/.*", Strip: &noStrip},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		ext, err := got.Extract(context.Background(), server.CredentialContext{Headers: map[string]string{
+			"authorization": "Bearer ocm-token",
+			"user-agent":    "curl/8.0.1",
+		}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ext != nil {
+			t.Fatal("expected the source to decline a non-matching user-agent")
+		}
+
+		ext, err = got.Extract(context.Background(), server.CredentialContext{Headers: map[string]string{
+			"authorization": "Bearer ocm-token",
+			"user-agent":    "insights-operator/abcdef cluster/1234321",
+		}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ext == nil {
+			t.Fatal("expected extraction for a matching user-agent")
+		}
+		if len(ext.HeadersUsed) != 1 || ext.HeadersUsed[0] != "authorization" {
+			t.Errorf("HeadersUsed=%v, want [authorization] only", ext.HeadersUsed)
+		}
+	})
+
+	t.Run("invalid header match", func(t *testing.T) {
+		t.Parallel()
+		_, err := newCredentialSource(CredentialSourceConfig{
+			Name:    "bad",
+			Type:    "header",
+			Headers: []HeaderSpec{{Name: "user-agent", Match: "([unclosed"}},
+		})
+		if err == nil {
+			t.Fatal("expected error for an invalid match regex")
+		}
+	})
 
 	t.Run("missing name", func(t *testing.T) {
 		t.Parallel()

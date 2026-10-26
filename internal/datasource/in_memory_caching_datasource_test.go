@@ -29,7 +29,7 @@ func (m *mockCacheableDataSource) Fetch(ctx context.Context, input *service.Data
 	}, nil
 }
 
-func (m *mockCacheableDataSource) CacheKey(input *service.DataSourceInput) (service.DataSourceInput, bool) {
+func (m *mockCacheableDataSource) CacheKey(_ context.Context, input *service.DataSourceInput) (service.DataSourceInput, bool) {
 	// Only cache by subject
 	masked := service.DataSourceInput{}
 	if input.Subject != nil {
@@ -324,6 +324,6 @@ type mockSkipCacheDataSource struct {
 	mockCacheableDataSource
 }
 
-func (m *mockSkipCacheDataSource) CacheKey(_ *service.DataSourceInput) (service.DataSourceInput, bool) {
+func (m *mockSkipCacheDataSource) CacheKey(_ context.Context, _ *service.DataSourceInput) (service.DataSourceInput, bool) {
 	return service.DataSourceInput{}, false
 }
