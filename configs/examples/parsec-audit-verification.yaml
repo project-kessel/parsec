@@ -1,5 +1,10 @@
 # parsec Configuration - Audit Event Verification (RHCLOUD-50612)
 #
+# WARNING: This configuration uses stub_validator (accepts ANY bearer token)
+# and listens on all network interfaces. It MUST only be run in an isolated
+# development environment (e.g. localhost-only or a local container). Do NOT
+# expose this configuration to untrusted networks or production environments.
+#
 # Fully hermetic (no fixtures, no network) configuration used to demonstrate
 # and verify structured audit logging end-to-end for both the ext_authz
 # Check path and the TokenExchange path. Uses stub_validator (accepts any

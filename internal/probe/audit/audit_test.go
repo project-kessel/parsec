@@ -14,7 +14,6 @@ import (
 	auditctx "github.com/project-kessel/parsec/internal/audit"
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/server"
-	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
 )
 
@@ -51,12 +50,7 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 			"email":  "secret@example.com",
 		},
 	})
-	probe.RequestCompleted(service.RequestCompletion{
-		Outcome:    service.AuditOutcomeSuccess,
-		GRPCCode:   0,
-		HTTPStatus: 200,
-		TokenTypes: []service.TokenType{"rh-identity"},
-	})
+	probe.PolicyDecisionIssue(1, "", "")
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -90,12 +84,6 @@ func TestAuthzAuditEmitsNamedFailureEventsWithoutRawError(t *testing.T) {
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-456"))
 	probe.RequestAttributesParsed(&request.RequestAttributes{Method: "GET", Path: "/api/widgets"})
 	probe.SubjectValidationFailed(errors.New("validator leaked secret-token"))
-	probe.RequestCompleted(service.RequestCompletion{
-		Outcome:    service.AuditOutcomeDenied,
-		ReasonCode: ReasonCredentialInvalid,
-		GRPCCode:   16,
-		HTTPStatus: 401,
-	})
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -114,12 +102,6 @@ func TestTokenExchangeAuditEmitsSingleTerminalRequest(t *testing.T) {
 	probe.ActorCredentialExtracted(&trust.BasicAuthCredential{Username: "user", Password: "secret-password"}, []string{"authorization"})
 	probe.ActorValidationSucceeded(&trust.Result{Subject: "actor-1", TrustDomain: "actor.example"})
 	probe.SubjectTokenValidationSucceeded(&trust.Result{Subject: "subject-1", TrustDomain: "subject.example"})
-	probe.RequestCompleted(service.RequestCompletion{
-		Outcome:    service.AuditOutcomeSuccess,
-		GRPCCode:   0,
-		HTTPStatus: 200,
-		TokenTypes: []service.TokenType{"requested"},
-	})
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -139,7 +121,7 @@ func TestAuditReporterPropagatesSignalsIntoRequestRecord(t *testing.T) {
 		Source: auditctx.SourceDataSource, Operation: "user_enrichment",
 		Outcome: auditctx.OutcomeFailure, ReasonCode: ReasonSupplementalFailure,
 	})
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeFailure, ReasonCode: ReasonSupplementalFailure, HTTPStatus: 503})
+	probe.PolicyEvaluationFailed(errors.New("data source failed"))
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -162,7 +144,7 @@ func TestCrossAccountDeniedSignalPreservesReasonCode(t *testing.T) {
 		Outcome:    auditctx.OutcomeDenied,
 		ReasonCode: ReasonCrossAccountDenied,
 	})
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeDenied, ReasonCode: "policy_denied", HTTPStatus: 403})
+	probe.PolicyDecisionDeny("policy denied")
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -199,7 +181,6 @@ func TestAuditEventPrefixCanBeCustomizedOrRemoved(t *testing.T) {
 			var output bytes.Buffer
 			obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"}, WithEventPrefix(tt.prefix))
 			_, probe := obs.TokenExchangeStarted(request.WithID(context.Background(), "prefix-test"), "", "", "", "")
-			probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
 			probe.End()
 			obs.ProcessReady(server.ProcessInfo{})
 			_, rotation := obs.RotationCheckStarted(context.Background())
@@ -275,8 +256,14 @@ func TestAuditEmitsEveryThreeScaleFailureName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
 			obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
-			_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-failure"))
-			probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeFailure, ReasonCode: tt.reason, GRPCCode: 13, HTTPStatus: 500})
+			ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-failure"))
+			auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+				Source:     auditctx.SourceDataSource,
+				Operation:  "test",
+				Outcome:    auditctx.OutcomeFailure,
+				ReasonCode: tt.reason,
+			})
+			probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
 			probe.End()
 
 			names := map[string]bool{}
@@ -294,7 +281,7 @@ func TestAuditEmitsCertificateAndInternalAuthenticationNames(t *testing.T) {
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-auth"))
 	probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("secret-certificate")}, nil)
 	probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-psk": "secret-psk"}}, nil)
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
 	names := map[string]bool{}
@@ -319,7 +306,7 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	cacheProbe.CacheHit()
 	_, dataProbe := obs.LuaFetchStarted(ctx, "backoffice-proxy")
 	dataProbe.ScriptExecutionFailed(errors.New("secret dependency response"))
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeFailure, ReasonCode: ReasonInternalError, HTTPStatus: 500})
+	probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -356,7 +343,7 @@ func TestCacheLayersEmittedPerComponent(t *testing.T) {
 	_, dsProbe := obs.CacheFetchStarted(ctx, "backoffice")
 	dsProbe.CacheHit()
 
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -389,11 +376,7 @@ func TestDistributedGetFailedEmitsCacheLayer(t *testing.T) {
 	_, distProbe := obs.DistributedValidateStarted(ctx, "jwt-validator")
 	distProbe.GetFailed(errors.New("groupcache peer unreachable"))
 
-	probe.RequestCompleted(service.RequestCompletion{
-		Outcome:    service.AuditOutcomeFailure,
-		ReasonCode: ReasonInternalError,
-		HTTPStatus: 500,
-	})
+	probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -427,11 +410,7 @@ func TestFirstFailureReasonWins(t *testing.T) {
 	_, dsProbe := obs.CacheFetchStarted(ctx, "enrichment")
 	dsProbe.FetchFailed(errors.New("enrichment timeout"))
 
-	probe.RequestCompleted(service.RequestCompletion{
-		Outcome:    service.AuditOutcomeFailure,
-		ReasonCode: ReasonInternalError,
-		HTTPStatus: 500,
-	})
+	probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -448,7 +427,7 @@ func TestInvalidCacheStatusDropped(t *testing.T) {
 	state.RecordCacheLayer("test_layer", "bogus_value")
 	state.RecordCacheLayer("test_layer", "hit")
 
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -465,7 +444,7 @@ func TestNoCacheProbeEmitsNoCacheStatus(t *testing.T) {
 	var output bytes.Buffer
 	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "no-cache"))
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess, HTTPStatus: 200})
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -478,21 +457,135 @@ func TestNoCacheProbeEmitsNoCacheStatus(t *testing.T) {
 		"cache_layers must be omitted (omitempty) when no cache probe fires")
 }
 
+func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(probe *requestProbe)
+		wantOutcome AuditOutcome
+		wantReason  string
+	}{
+		{
+			name:        "happy path — no callbacks → success",
+			setup:       func(_ *requestProbe) {},
+			wantOutcome: AuditOutcomeSuccess,
+			wantReason:  "",
+		},
+		{
+			name: "token issuance failed overrides policy issue",
+			setup: func(p *requestProbe) {
+				p.policyIssue = true
+				p.tokenIssuanceFailed = true
+			},
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  ReasonTokenIssuanceFailed,
+		},
+		{
+			name: "token issuance failed without policy issue",
+			setup: func(p *requestProbe) {
+				p.tokenIssuanceFailed = true
+			},
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  ReasonTokenIssuanceFailed,
+		},
+		{
+			name: "request failed with grant_type error",
+			setup: func(p *requestProbe) {
+				p.requestFailed = true
+				p.requestFailedErr = errors.New("unsupported grant_type: foo")
+			},
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  ReasonGrantTypeUnsupported,
+		},
+		{
+			name: "request failed with generic error",
+			setup: func(p *requestProbe) {
+				p.requestFailed = true
+				p.requestFailedErr = errors.New("something unexpected")
+			},
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  ReasonInternalError,
+		},
+		{
+			name: "actor extraction failed → denied credential_malformed",
+			setup: func(p *requestProbe) {
+				p.actorExtractionFailed = true
+			},
+			wantOutcome: AuditOutcomeDenied,
+			wantReason:  ReasonCredentialMalformed,
+		},
+		{
+			name: "policy denied → ReasonPolicyDenied regardless of deny reason text",
+			setup: func(p *requestProbe) {
+				p.policyDenied = true
+				p.policyDenyReason = "something with jwks in it"
+			},
+			wantOutcome: AuditOutcomeDenied,
+			wantReason:  ReasonPolicyDenied,
+		},
+		{
+			name: "policy allowed → success",
+			setup: func(p *requestProbe) {
+				p.policyAllowed = true
+			},
+			wantOutcome: AuditOutcomeSuccess,
+			wantReason:  "",
+		},
+		{
+			name: "policy issue → success",
+			setup: func(p *requestProbe) {
+				p.policyIssue = true
+			},
+			wantOutcome: AuditOutcomeSuccess,
+			wantReason:  "",
+		},
+		{
+			name: "subject extraction failed → denied credential_malformed",
+			setup: func(p *requestProbe) {
+				p.subjectExtractionFailed = true
+			},
+			wantOutcome: AuditOutcomeDenied,
+			wantReason:  ReasonCredentialMalformed,
+		},
+		{
+			name: "request context parse failed → failure internal_error",
+			setup: func(p *requestProbe) {
+				p.requestContextParseFailed = true
+			},
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  ReasonInternalError,
+		},
+		{
+			name: "policy eval error → failure",
+			setup: func(p *requestProbe) {
+				p.policyEvalErr = errors.New("evaluation error")
+			},
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  ReasonInternalError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &requestProbe{}
+			tt.setup(p)
+			outcome, reason := p.deriveCompletion()
+			require.Equal(t, tt.wantOutcome, outcome, "outcome")
+			require.Equal(t, tt.wantReason, reason, "reason")
+		})
+	}
+}
+
 func TestAuditRejectsUnrecognizedReasonAndTokenValues(t *testing.T) {
 	var output bytes.Buffer
 	obs := New(zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	_, probe := obs.TokenExchangeStarted(request.WithID(context.Background(), "request-safe"), "", "secret-requested-type", "", "")
-	probe.RequestCompleted(service.RequestCompletion{
-		Outcome:    service.AuditOutcomeFailure,
-		ReasonCode: "secret-arbitrary-error",
-		TokenTypes: []service.TokenType{"secret-issued-token-type"},
-	})
+	probe.ActorValidationFailed(errors.New("secret-arbitrary-error"))
 	probe.End()
 
 	require.NotContains(t, output.String(), "secret-arbitrary-error")
 	require.NotContains(t, output.String(), "secret-requested-type")
 	require.NotContains(t, output.String(), "secret-issued-token-type")
-	require.Contains(t, output.String(), ReasonInternalError)
+	require.Contains(t, output.String(), ReasonCredentialInvalid)
 }
 
 func decodeRecords(t *testing.T, data []byte) []map[string]any {
@@ -541,11 +634,7 @@ func BenchmarkRequestProbeEnd(b *testing.B) {
 
 		probe.SubjectCredentialExtracted(&trust.MTLSCredential{}, nil)
 		probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-psk": "test"}}, nil)
-		probe.RequestCompleted(service.RequestCompletion{
-			Outcome:    service.AuditOutcomeSuccess,
-			HTTPStatus: 200,
-			TokenTypes: []service.TokenType{service.TokenTypeTransactionToken},
-		})
+		probe.PolicyDecisionIssue(1, "", "")
 		probe.End()
 	}
 }

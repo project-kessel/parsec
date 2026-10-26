@@ -85,8 +85,14 @@ type TokenExchangeProbe interface {
 	// SubjectTokenValidationFailed is called when subject token validation fails.
 	SubjectTokenValidationFailed(err error)
 
-	// RequestCompleted records the terminal externally-visible request outcome.
-	RequestCompleted(completion RequestCompletion)
+	// TokenIssuanceFailed is called when token issuance fails after all
+	// validations have passed (e.g. signing error, nil token).
+	TokenIssuanceFailed(err error)
+
+	// RequestFailed signals that the exchange request failed for a reason
+	// not covered by a more specific callback (e.g. unsupported grant type,
+	// audience mismatch, trust store filter failure).
+	RequestFailed(err error)
 
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
@@ -150,8 +156,9 @@ type AuthzCheckProbe interface {
 	// evaluate (as opposed to a deliberate denial).
 	PolicyEvaluationFailed(err error)
 
-	// RequestCompleted records the terminal externally-visible request outcome.
-	RequestCompleted(completion RequestCompletion)
+	// TokenIssuanceFailed is called when token issuance fails after the
+	// policy decided to issue (e.g. signing error, nil token, exchange error).
+	TokenIssuanceFailed(err error)
 
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
@@ -164,26 +171,6 @@ type ServiceObserver interface {
 	TokenServiceObserver
 	TokenExchangeObserver
 	AuthzCheckObserver
-}
-
-// AuditOutcome is the externally-visible result of a security-relevant request.
-type AuditOutcome string
-
-const (
-	AuditOutcomeSuccess AuditOutcome = "success"
-	AuditOutcomeDenied  AuditOutcome = "denied"
-	AuditOutcomeFailure AuditOutcome = "failure"
-)
-
-// RequestCompletion contains only safe, machine-readable terminal metadata.
-// It deliberately excludes errors and response bodies because those can carry
-// credentials or other sensitive request material.
-type RequestCompletion struct {
-	Outcome    AuditOutcome
-	ReasonCode string
-	GRPCCode   int32
-	HTTPStatus int
-	TokenTypes []TokenType
 }
 
 // --- NoOp probe implementations ---
@@ -211,7 +198,8 @@ func (NoOpTokenExchangeProbe) RequestContextParsed(*request.RequestAttributes)  
 func (NoOpTokenExchangeProbe) RequestContextParseFailed(error)                     {}
 func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)       {}
 func (NoOpTokenExchangeProbe) SubjectTokenValidationFailed(error)                  {}
-func (NoOpTokenExchangeProbe) RequestCompleted(RequestCompletion)                  {}
+func (NoOpTokenExchangeProbe) TokenIssuanceFailed(error)                           {}
+func (NoOpTokenExchangeProbe) RequestFailed(error)                                 {}
 func (NoOpTokenExchangeProbe) End()                                                {}
 
 // NoOpAuthzCheckProbe is a no-op implementation of AuthzCheckProbe.
@@ -232,7 +220,7 @@ func (NoOpAuthzCheckProbe) PolicyDecisionIssue(int, string, string)             
 func (NoOpAuthzCheckProbe) PolicyDecisionAllowWithoutIssue(string)                {}
 func (NoOpAuthzCheckProbe) PolicyDecisionDeny(string)                             {}
 func (NoOpAuthzCheckProbe) PolicyEvaluationFailed(error)                          {}
-func (NoOpAuthzCheckProbe) RequestCompleted(RequestCompletion)                    {}
+func (NoOpAuthzCheckProbe) TokenIssuanceFailed(error)                             {}
 func (NoOpAuthzCheckProbe) End()                                                  {}
 
 // --- NoOp observer implementations ---

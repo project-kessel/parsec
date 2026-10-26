@@ -224,10 +224,6 @@ func (p *FakeProbe) SubjectTokenValidationFailed(err error) {
 	p.recordCall("SubjectTokenValidationFailed", err)
 }
 
-func (p *FakeProbe) RequestCompleted(completion RequestCompletion) {
-	p.recordCall("RequestCompleted", completion)
-}
-
 // AuthzCheckProbe methods
 func (p *FakeProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
 	p.recordCall("RequestAttributesParsed", attrs)
@@ -267,6 +263,14 @@ func (p *FakeProbe) PolicyDecisionDeny(reason string) {
 
 func (p *FakeProbe) PolicyEvaluationFailed(err error) {
 	p.recordCall("PolicyEvaluationFailed", err)
+}
+
+func (p *FakeProbe) TokenIssuanceFailed(err error) {
+	p.recordCall("TokenIssuanceFailed", err)
+}
+
+func (p *FakeProbe) RequestFailed(err error) {
+	p.recordCall("RequestFailed", err)
 }
 
 // End is common to all probes

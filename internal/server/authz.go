@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -109,23 +108,10 @@ func normalizeDropCookies(cookies []string) []string {
 }
 
 // Check implements the ext_authz check endpoint
-func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (response *authv3.CheckResponse, returnErr error) {
-	// Request ID is extracted by the Server interceptor; read from context.
-	extracted := request.IDExtracted(ctx)
-	canonicalHeader := request.CanonicalRequestIDHeader(ctx)
-
+func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
-	reasonCode := "internal_error"
-	var auditTokenTypes []service.TokenType
-	defer func() {
-		// Do not propagate locally-generated fallback IDs upstream.
-		if extracted {
-			propagateAuthzRequestID(response, request.ID(ctx), canonicalHeader)
-		}
-		p.RequestCompleted(authzRequestCompletion(response, reasonCode, auditTokenTypes))
-		p.End()
-	}()
+	defer p.End()
 
 	// 1. Build request attributes
 	reqAttrs := s.buildRequestAttributes(req)
@@ -134,8 +120,8 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 	// 2. Authenticate actor from gRPC context
 	actorResult, actorExt, err := authenticateActorWithExtraction(ctx, s.credentialSources, s.trustStore, p)
 	if err != nil {
-		reasonCode = "credential_invalid"
-		return s.denyResponse(codes.Unauthenticated, "authentication failed"), nil
+		return s.denyResponse(codes.Unauthenticated,
+			fmt.Sprintf("%v", err)), nil
 	}
 
 	var actorPrin Principal
@@ -153,16 +139,14 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 
 	cc, err := CredentialContextFromCheckRequest(req)
 	if err != nil {
-		reasonCode = "credential_malformed"
 		p.SubjectCredentialExtractionFailed(err)
-		return s.denyResponse(codes.Unauthenticated, "credential extraction failed"), nil
+		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
 	subjectExt, err = s.credentialSources.Extract(ctx, cc)
 	if err != nil {
-		reasonCode = "credential_malformed"
 		p.SubjectCredentialExtractionFailed(err)
-		return s.denyResponse(codes.Unauthenticated, "credential extraction failed"), nil
+		return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("failed to extract credentials: %v", err)), nil
 	}
 
 	if subjectExt == nil {
@@ -174,18 +158,15 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 
 		filteredStore, filterErr := s.trustStore.ForActor(ctx, actorResult, reqAttrs)
 		if filterErr != nil {
-			reasonCode = auditReasonFromError(filterErr, "scheme_not_allowed")
-			return s.denyResponse(codes.PermissionDenied, "request denied"), nil
+			p.PolicyEvaluationFailed(filterErr)
+			return s.denyResponse(codes.PermissionDenied,
+				fmt.Sprintf("failed to filter trust store: %v", filterErr)), nil
 		}
 
 		result, validationErr := filteredStore.Validate(ctx, subjectExt.Credential)
 		if validationErr != nil {
-			reasonCode = "credential_invalid"
-			if errors.Is(validationErr, trust.ErrExpiredToken) {
-				reasonCode = "credential_expired"
-			}
 			p.SubjectValidationFailed(validationErr)
-			return s.denyResponse(codes.Unauthenticated, "validation failed"), nil
+			return s.denyResponse(codes.Unauthenticated, fmt.Sprintf("validation failed: %v", validationErr)), nil
 		}
 		p.SubjectValidationSucceeded(result)
 		subjectPrin = newPrincipal(result, subjectExt)
@@ -198,25 +179,22 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 		Request: reqAttrs,
 	})
 	if err != nil {
-		reasonCode = auditReasonFromError(err, "internal_error")
 		p.PolicyEvaluationFailed(err)
-		return s.denyResponse(codes.Internal, "internal error"), nil
+		return s.denyResponse(codes.Internal,
+			fmt.Sprintf("policy evaluation failed: %v", err)), nil
 	}
 
 	// 5. Handle policy decision
 	switch decision.Action {
 	case AuthzCheckDeny:
-		reasonCode = auditReasonFromText(decision.Reason, "policy_denied")
 		p.PolicyDecisionDeny(decision.Reason)
 		denyCode := codes.PermissionDenied
 		if subjectPrin.Anonymous {
 			denyCode = codes.Unauthenticated
-			reasonCode = "credential_missing"
 		}
 		return s.denyResponse(denyCode, decision.Reason), nil
 
 	case AuthzCheckAllowWithoutIssue:
-		reasonCode = ""
 		p.PolicyDecisionAllowWithoutIssue(decision.Reason)
 		rewrite, remove := s.mergeDropHeaders(subjectExt, cc.Cookies)
 		return s.okResponse(rewrite, remove), nil
@@ -229,11 +207,10 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 		// token's header name here would delete the token immediately
 		// after it is set.
 		remove = excludeIssuedHeaders(remove, decision.TokenTypes)
-		response, auditTokenTypes, reasonCode, returnErr = s.issueResponse(ctx, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
-		return response, returnErr
+		return s.issueResponse(ctx, p, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
 
 	default:
-		reasonCode = "internal_error"
+		p.PolicyEvaluationFailed(fmt.Errorf("unknown policy action: %s", decision.Action))
 		return s.denyResponse(codes.Internal,
 			fmt.Sprintf("unknown policy action: %s", decision.Action)), nil
 	}
@@ -243,12 +220,13 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (resp
 // with the issued tokens appended to any credential sanitization headers.
 func (s *AuthzServer) issueResponse(
 	ctx context.Context,
+	p service.AuthzCheckProbe,
 	decision AuthzCheckDecision,
 	subject, actor Principal,
 	reqAttrs *request.RequestAttributes,
 	credHeaders []*corev3.HeaderValueOption,
 	headersToRemove []string,
-) (*authv3.CheckResponse, []service.TokenType, string, error) {
+) (*authv3.CheckResponse, error) {
 	tokenTypes := make([]service.TokenType, len(decision.TokenTypes))
 	for i, spec := range decision.TokenTypes {
 		tokenTypes[i] = spec.Type
@@ -262,19 +240,19 @@ func (s *AuthzServer) issueResponse(
 		Scope:             decision.Scope,
 	})
 	if err != nil {
-		response := s.denyResponseWithHTTPStatus(codes.Internal,
+		p.TokenIssuanceFailed(err)
+		return s.denyResponseWithHTTPStatus(codes.Internal,
 			typev3.StatusCode_InternalServerError,
-			fmt.Sprintf("failed to issue tokens: %v", err))
-		return response, nil, "token_issuance_failed", nil
+			fmt.Sprintf("failed to issue tokens: %v", err)), nil
 	}
 
 	// Any token-type denial denies the entire ext_authz request.
 	// Iterate in request order for deterministic error selection.
 	for _, spec := range decision.TokenTypes {
 		if r, ok := results[spec.Type]; ok && r.ExchangeErr != nil {
+			p.TokenIssuanceFailed(r.ExchangeErr)
 			grpcCode, httpStatus, msg := exchangeErrToAuthzDenial(r.ExchangeErr)
-			response := s.denyResponseWithHTTPStatus(grpcCode, httpStatus, msg)
-			return response, nil, "token_issuance_denied", nil
+			return s.denyResponseWithHTTPStatus(grpcCode, httpStatus, msg), nil
 		}
 	}
 
@@ -283,12 +261,10 @@ func (s *AuthzServer) issueResponse(
 	for _, spec := range decision.TokenTypes {
 		r, ok := results[spec.Type]
 		if !ok || r.Token == nil {
-			// Fail closed: never return OK without every requested token.
-			// A missing/nil token with no ExchangeErr is a programmer error.
-			response := s.denyResponseWithHTTPStatus(codes.Internal,
+			p.TokenIssuanceFailed(fmt.Errorf("token service returned no token for type %s", spec.Type))
+			return s.denyResponseWithHTTPStatus(codes.Internal,
 				typev3.StatusCode_InternalServerError,
-				"token issuance failed")
-			return response, nil, "token_issuance_failed", nil
+				fmt.Sprintf("token service returned no token for type %s", spec.Type)), nil
 		}
 		headers = append(headers, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
@@ -299,7 +275,7 @@ func (s *AuthzServer) issueResponse(
 		})
 	}
 
-	return s.okResponse(headers, headersToRemove), tokenTypes, "", nil
+	return s.okResponse(headers, headersToRemove), nil
 }
 
 // removeCredentialPresentation builds the Envoy header mutations needed to
@@ -517,7 +493,7 @@ func (s *AuthzServer) buildRequestAttributes(req *authv3.CheckRequest) *request.
 
 	return &request.RequestAttributes{
 		Method:     httpReq.GetMethod(),
-		Path:       normalizeRequestPath(httpReq.GetPath()),
+		Path:       httpReq.GetPath(),
 		IPAddress:  req.GetAttributes().GetSource().GetAddress().GetSocketAddress().GetAddress(),
 		UserAgent:  httpReq.GetHeaders()["user-agent"],
 		Headers:    httpReq.GetHeaders(),

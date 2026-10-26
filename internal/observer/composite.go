@@ -777,12 +777,16 @@ func (m *compositeTokenExchangeProbe) SubjectTokenValidationFailed(err error) {
 		p.SubjectTokenValidationFailed(err)
 	}
 }
-func (m *compositeTokenExchangeProbe) RequestCompleted(completion service.RequestCompletion) {
+func (m *compositeTokenExchangeProbe) TokenIssuanceFailed(err error) {
 	for _, p := range m.probes {
-		p.RequestCompleted(completion)
+		p.TokenIssuanceFailed(err)
 	}
 }
-
+func (m *compositeTokenExchangeProbe) RequestFailed(err error) {
+	for _, p := range m.probes {
+		p.RequestFailed(err)
+	}
+}
 func (m *compositeTokenExchangeProbe) End() {
 	for _, p := range m.probes {
 		p.End()
@@ -877,12 +881,11 @@ func (m *compositeAuthzCheckProbe) PolicyEvaluationFailed(err error) {
 	}
 }
 
-func (m *compositeAuthzCheckProbe) RequestCompleted(completion service.RequestCompletion) {
+func (m *compositeAuthzCheckProbe) TokenIssuanceFailed(err error) {
 	for _, p := range m.probes {
-		p.RequestCompleted(completion)
+		p.TokenIssuanceFailed(err)
 	}
 }
-
 func (m *compositeAuthzCheckProbe) End() {
 	for _, p := range m.probes {
 		p.End()

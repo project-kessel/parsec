@@ -12,13 +12,15 @@ observability:
   type: composite
   log_level: info
   log_format: json
-  # Ordered request-ID header names. First match wins on extraction; first
-  # entry is the canonical header propagated on responses.
+  # Ordered request-ID header names. First match wins on extraction.
+  # The first entry is the canonical header used for response propagation
+  # (only when the ID was extracted from the incoming request, not when
+  # generated locally).
   request_id_headers:
     - "x-request-id"
-  # Optional allowlist for audit.record() metadata keys. When omitted, all
-  # keys that pass text/length validation are accepted. When set, only listed
-  # keys are permitted (recommended for production).
+  # Allowlist for audit.record() metadata keys. When omitted, all metadata
+  # keys are rejected (fail-closed). When set, only listed keys are
+  # permitted. An explicit list is required for production use.
   audit_metadata_keys:
     - "cache_status"
     - "classification"
@@ -31,7 +33,9 @@ observability:
     - "dependency_status"
   observers:
     - type: audit
-      # Defaults to "parsec_"; set to "insights_" for 3scale-compatible names.
+      # event_prefix defaults to "parsec_" (e.g. parsec_request,
+      # parsec_authorize). Override with event_prefix: "insights_" or
+      # via --observability-event-prefix for deployment-specific names.
     - type: logging
     - type: metrics
 

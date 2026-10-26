@@ -91,7 +91,7 @@ func TestCollectorEnforcesMetadataAllowlist(t *testing.T) {
 	require.Len(t, collector.Signals(), 1, "all allowlisted keys should be accepted")
 }
 
-func TestCollectorAllowAllWhenAllowlistEmpty(t *testing.T) {
+func TestCollectorAllowAllWhenAllowlistNil(t *testing.T) {
 	collector := NewCollector(nil)
 	signal := Signal{
 		Source:    SourceValidator,
@@ -100,7 +100,27 @@ func TestCollectorAllowAllWhenAllowlistEmpty(t *testing.T) {
 		Metadata:  map[string]string{"custom_key": "custom-value"},
 	}
 	collector.Record(signal)
-	require.Len(t, collector.Signals(), 1, "empty allowlist must accept any valid key")
+	require.Len(t, collector.Signals(), 1, "nil allowlist must accept any valid key")
+}
+
+func TestCollectorRejectsAllWhenAllowlistEmptyNonNil(t *testing.T) {
+	collector := NewCollector(map[string]bool{})
+	signal := Signal{
+		Source:    SourceValidator,
+		Operation: "cross_account_access",
+		Outcome:   OutcomeSuccess,
+		Metadata:  map[string]string{"custom_key": "custom-value"},
+	}
+	collector.Record(signal)
+	require.Empty(t, collector.Signals(), "empty non-nil allowlist must reject all metadata keys")
+
+	noMeta := Signal{
+		Source:    SourceValidator,
+		Operation: "cross_account_access",
+		Outcome:   OutcomeSuccess,
+	}
+	collector.Record(noMeta)
+	require.Len(t, collector.Signals(), 1, "signals without metadata must still be accepted")
 }
 
 func TestSanitizeMetadataTrimsAndTruncatesLongValues(t *testing.T) {

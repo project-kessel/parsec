@@ -21,6 +21,26 @@
 --   users_path  (optional) path for user lookup, defaults to "/v1/users"
 --   bop_env     (optional) x-rh-insights-env value, defaults to "stage"
 
+-- audit_bop_failure emits a structured audit signal for a BOP enrichment
+-- failure. classification distinguishes the failure cause (e.g. "missing_config",
+-- "http_error", "decode_error"); dependency_status carries the HTTP status
+-- when available.
+local function audit_bop_failure(classification, dependency_status)
+  local record = {
+    source = "data_source",
+    operation = "user_enrichment",
+    outcome = "failure",
+    reason_code = "supplemental_user_data_failure",
+  }
+  if classification ~= nil and classification ~= "" then
+    record.classification = classification
+  end
+  if dependency_status ~= nil then
+    record.metadata = { dependency_status = tostring(dependency_status) }
+  end
+  audit.record(record)
+end
+
 function fetch(input)
   local username = input.subject.subject
   if username == nil or username == "" then
@@ -39,12 +59,7 @@ function fetch(input)
 
   local bop_url = config.get("bop_url")
   if bop_url == nil or bop_url == "" then
-    audit.record({
-      source = "data_source",
-      operation = "user_enrichment",
-      outcome = "failure",
-      reason_code = "supplemental_user_data_failure",
-    })
+    audit_bop_failure("missing_config")
     return nil
   end
 
@@ -64,43 +79,23 @@ function fetch(input)
   local response, err = http.post(url, body, headers)
 
   if response == nil then
-    audit.record({
-      source = "data_source",
-      operation = "user_enrichment",
-      outcome = "failure",
-      reason_code = "supplemental_user_data_failure",
-    })
+    audit_bop_failure("http_error")
     return nil
   end
 
   if response.status ~= 200 then
-    audit.record({
-      source = "data_source",
-      operation = "user_enrichment",
-      outcome = "failure",
-      reason_code = "supplemental_user_data_failure",
-    })
+    audit_bop_failure("http_error", response.status)
     return nil
   end
 
   local users, decode_err = json.decode(response.body)
   if users == nil then
-    audit.record({
-      source = "data_source",
-      operation = "user_enrichment",
-      outcome = "failure",
-      reason_code = "supplemental_user_data_failure",
-    })
+    audit_bop_failure("decode_error")
     return nil
   end
 
   if type(users) ~= "table" then
-    audit.record({
-      source = "data_source",
-      operation = "user_enrichment",
-      outcome = "failure",
-      reason_code = "supplemental_user_data_failure",
-    })
+    audit_bop_failure("invalid_response")
     return nil
   end
 

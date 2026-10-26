@@ -180,8 +180,8 @@ func TestExchangeServer_WithActorFiltering(t *testing.T) {
 			t.Error("expected error for invalid actor credentials, got nil")
 		}
 
-		if !strings.Contains(err.Error(), "authentication failed") {
-			t.Errorf("expected 'authentication failed' in error, got: %v", err)
+		if !strings.Contains(err.Error(), "actor validation failed") {
+			t.Errorf("expected 'actor validation failed' in error, got: %v", err)
 		}
 	})
 
@@ -757,8 +757,8 @@ func TestExchangeServer_RequestContextFiltering(t *testing.T) {
 			t.Fatal("expected error for invalid JSON, got nil")
 		}
 
-		if !strings.Contains(err.Error(), "invalid request_context") {
-			t.Errorf("expected 'invalid request_context' in error, got: %v", err)
+		if !strings.Contains(err.Error(), "failed to parse request_context JSON") {
+			t.Errorf("expected 'failed to parse request_context JSON' in error, got: %v", err)
 		}
 	})
 }
@@ -831,7 +831,6 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 			"ActorValidationSucceeded",
 			"RequestContextParsed",
 			"SubjectTokenValidationSucceeded",
-			"RequestCompleted",
 			"End",
 		)
 	})
@@ -872,7 +871,6 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 		p.AssertProbeSequence(
 			"ActorCredentialExtracted",
 			"ActorValidationFailed",
-			"RequestCompleted",
 			"End",
 		)
 	})
@@ -908,26 +906,9 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 		p.AssertProbeSequence(
 			"ActorValidationSucceeded",
 			"RequestContextParseFailed",
-			"RequestCompleted",
 			"End",
 		)
 	})
-}
-
-func TestExchangeUnsupportedGrantTypeAuditReason(t *testing.T) {
-	observer := &capturingExchangeObserver{}
-	server := NewExchangeServer(nil, nil, nil, CredentialSources{}, observer)
-
-	_, err := server.Exchange(context.Background(), &parsecv1.ExchangeRequest{GrantType: "client-secret-value"})
-	if err == nil {
-		t.Fatal("expected unsupported grant type error")
-	}
-	if observer.completion.ReasonCode != "grant_type_unsupported" {
-		t.Fatalf("reason code = %q, want grant_type_unsupported", observer.completion.ReasonCode)
-	}
-	if observer.completion.Outcome != service.AuditOutcomeDenied {
-		t.Fatalf("outcome = %q, want denied", observer.completion.Outcome)
-	}
 }
 
 func TestExchange_InvalidRequest(t *testing.T) {

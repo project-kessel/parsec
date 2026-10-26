@@ -8,8 +8,6 @@ import (
 )
 
 type requestIDKey struct{}
-type extractedKey struct{}
-type canonicalHeaderKey struct{}
 type auditStateKey struct{}
 
 // CacheLayer records the cache status observed by a specific pipeline component.
@@ -59,30 +57,6 @@ func WithID(ctx context.Context, id string) context.Context {
 func ID(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDKey{}).(string)
 	return id
-}
-
-// WithIDExtraction stores whether the request ID was extracted from an
-// incoming header (true) or generated locally (false), along with the
-// canonical header name used for response propagation. This allows
-// downstream handlers to decide whether to propagate the ID upstream.
-func WithIDExtraction(ctx context.Context, extracted bool, canonicalHeader string) context.Context {
-	ctx = context.WithValue(ctx, extractedKey{}, extracted)
-	return context.WithValue(ctx, canonicalHeaderKey{}, canonicalHeader)
-}
-
-// IDExtracted reports whether the request correlation ID was extracted from
-// an incoming header. Returns false when no extraction metadata is present
-// or when the ID was generated locally.
-func IDExtracted(ctx context.Context) bool {
-	v, _ := ctx.Value(extractedKey{}).(bool)
-	return v
-}
-
-// CanonicalRequestIDHeader returns the canonical request-ID header name
-// stored by the interceptor, or an empty string when not set.
-func CanonicalRequestIDHeader(ctx context.Context) string {
-	v, _ := ctx.Value(canonicalHeaderKey{}).(string)
-	return v
 }
 
 func WithAuditState(ctx context.Context) (context.Context, *AuditState) {

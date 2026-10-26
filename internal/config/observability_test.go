@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/project-kessel/parsec/internal/request"
-	"github.com/project-kessel/parsec/internal/service"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -139,14 +138,14 @@ func TestNewAuditObserverAlwaysProducesJSONAtInfo(t *testing.T) {
 	}
 	p := NewProvider(&Config{TrustDomain: "td.example"})
 
-	obs, err := p.newAuditObserver(&ObservabilityConfig{Type: "audit"}, logCtx)
+	obs, err := p.newAuditObserver(&ObservabilityConfig{
+		Type:                "audit",
+		AllowedMetadataKeys: []string{"cache_status"},
+	}, logCtx)
 	require.NoError(t, err)
 	ctx := request.WithID(context.Background(), "request-1")
 	_, probe := obs.AuthzCheckStarted(ctx)
-	probe.RequestCompleted(service.RequestCompletion{
-		Outcome:    service.AuditOutcomeSuccess,
-		HTTPStatus: 200,
-	})
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
 	var record map[string]any
@@ -156,9 +155,6 @@ func TestNewAuditObserverAlwaysProducesJSONAtInfo(t *testing.T) {
 	assert.Equal(t, "parsec_request", record["event"])
 	assert.Equal(t, "info", record["level"])
 	assert.Equal(t, "success", record["outcome"])
-	response, ok := record["response"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, float64(200), response["http_status"])
 }
 
 func TestNewAuditObserverEmitsOneTimestamp(t *testing.T) {
@@ -166,15 +162,28 @@ func TestNewAuditObserverEmitsOneTimestamp(t *testing.T) {
 	logCtx := LoggerContext{Logger: zerolog.New(&buf), Writer: &buf}
 	p := NewProvider(&Config{TrustDomain: "td.example"})
 
-	obs, err := p.newAuditObserver(&ObservabilityConfig{Type: "audit"}, logCtx)
+	obs, err := p.newAuditObserver(&ObservabilityConfig{
+		Type:                "audit",
+		AllowedMetadataKeys: []string{"cache_status"},
+	}, logCtx)
 	require.NoError(t, err)
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-time"))
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess})
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
 	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
 		require.Equal(t, 1, strings.Count(line, `"time":`))
 	}
+}
+
+func TestNewAuditObserverWarnsWhenNoAllowlistConfigured(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := LoggerContext{Logger: zerolog.New(&buf), Writer: &buf}
+	p := NewProvider(&Config{TrustDomain: "td.example"})
+
+	_, err := p.newAuditObserver(&ObservabilityConfig{Type: "audit"}, logCtx)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "audit_metadata_keys not configured")
 }
 
 func TestAuditObserverRejectsInvalidFailureClassification(t *testing.T) {
@@ -258,7 +267,7 @@ func TestProvider_Observer_CompositeAudit_HonorsTopLevelEventPrefix(t *testing.T
 	obs, err := p.Observer()
 	require.NoError(t, err)
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-prefix"))
-	probe.RequestCompleted(service.RequestCompletion{Outcome: service.AuditOutcomeSuccess})
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
 	assert.Contains(t, buf.String(), `"event":"custom_request"`)
@@ -279,10 +288,11 @@ func TestAllowedMetadataKeys(t *testing.T) {
 		assert.Equal(t, map[string]bool{"parent_key": true}, keys)
 	})
 
-	t.Run("nil when neither set", func(t *testing.T) {
+	t.Run("empty non-nil when neither set", func(t *testing.T) {
 		p.config.Observability = &ObservabilityConfig{}
 		keys := p.allowedMetadataKeys(&ObservabilityConfig{})
-		assert.Nil(t, keys)
+		assert.NotNil(t, keys, "must return non-nil empty map (reject-all) when no allowlist configured")
+		assert.Empty(t, keys)
 	})
 }
 

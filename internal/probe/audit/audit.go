@@ -4,6 +4,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,15 @@ import (
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
+)
+
+// AuditOutcome is the externally-visible result of a security-relevant request.
+type AuditOutcome string
+
+const (
+	AuditOutcomeSuccess AuditOutcome = "success"
+	AuditOutcomeDenied  AuditOutcome = "denied"
+	AuditOutcomeFailure AuditOutcome = "failure"
 )
 
 const (
@@ -88,8 +98,9 @@ func WithFailureClassifications(classifications map[string]string) Option {
 	}
 }
 
-// WithAllowedMetadataKeys sets the optional allowlist of metadata keys that
-// audit.record() may emit. An empty or nil map means allow-all (text/length
+// WithAllowedMetadataKeys sets the allowlist of metadata keys that
+// audit.record() may emit. A non-nil empty map rejects all metadata
+// keys (fail-closed default). A nil map means allow-all (text/length
 // validation only). When non-empty, only listed keys are permitted.
 func WithAllowedMetadataKeys(keys map[string]bool) Option {
 	return func(observer *Observer) {
@@ -139,11 +150,6 @@ type requestInfo struct {
 	SourceIP string `json:"source_ip,omitempty"`
 }
 
-type responseInfo struct {
-	GRPCCode   int32 `json:"grpc_code"`
-	HTTPStatus int   `json:"http_status,omitempty"`
-}
-
 type resourceInfo struct {
 	Type        string               `json:"type"`
 	TokenTypes  []string             `json:"token_types,omitempty"`
@@ -161,26 +167,44 @@ type emitEnvelope struct {
 	subject  json.RawMessage
 	actor    json.RawMessage
 	resource json.RawMessage
-	response json.RawMessage
 	signals  json.RawMessage // nil when no signals
 }
 
 type requestProbe struct {
 	service.NoOpAuthzCheckProbe
 	service.NoOpTokenExchangeProbe
-	observer    *Observer
-	requestID   string
-	started     time.Time
-	action      string
-	request     requestInfo
-	subject     principal
-	actor       principal
-	completion  service.RequestCompletion
-	completed   bool
-	authorize   bool
-	state       *request.AuditState
-	collector   *auditctx.Collector
-	cacheStatus string
+	observer  *Observer
+	requestID string
+	started   time.Time
+	action    string
+	request   requestInfo
+	subject   principal
+	actor     principal
+	authorize bool
+	state     *request.AuditState
+	collector *auditctx.Collector
+
+	// Callback state for reason derivation (set by probe methods)
+	subjectAnonymous          bool
+	subjectExtractionFailed   bool
+	subjectValidationErr      error
+	actorExtractionFailed     bool
+	actorValidationErr        error
+	policyDenied              bool
+	policyDenyReason          string
+	policyEvalErr             error
+	policyAllowed             bool
+	policyIssue               bool
+	requestContextParseFailed bool
+	tokenIssuanceFailed       bool
+	requestFailed             bool
+	requestFailedErr          error
+	tokenTypes                []service.TokenType
+
+	// Derived at emit time
+	cacheStatus       string
+	derivedOutcome    AuditOutcome
+	derivedReasonCode string
 }
 
 func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, service.AuthzCheckProbe) {
@@ -213,7 +237,7 @@ func (o *Observer) TokenExchangeStarted(ctx context.Context, _, requestedTokenTy
 		collector: collector,
 	}
 	if tokenType := safeValue(requestedTokenType, 256); tokenType != "" {
-		p.completion.TokenTypes = []service.TokenType{service.TokenType(tokenType)}
+		p.tokenTypes = []service.TokenType{service.TokenType(tokenType)}
 	}
 	return ctx, p
 }
@@ -243,35 +267,165 @@ func (p *requestProbe) ActorValidationSucceeded(result *trust.Result) {
 	fillPrincipal(&p.actor, result)
 }
 
-func (p *requestProbe) ActorCredentialExtractionFailed(error) {}
-func (p *requestProbe) ActorValidationFailed(error)           {}
+func (p *requestProbe) ActorCredentialExtractionFailed(error) { p.actorExtractionFailed = true }
+func (p *requestProbe) ActorValidationFailed(err error)       { p.actorValidationErr = err }
 
 func (p *requestProbe) SubjectValidationSucceeded(result *trust.Result) {
 	fillPrincipal(&p.subject, result)
+}
+
+func (p *requestProbe) SubjectCredentialExtractionFailed(error) {
+	p.subjectExtractionFailed = true
+}
+
+func (p *requestProbe) SubjectValidationFailed(err error) {
+	p.subjectValidationErr = err
+}
+
+func (p *requestProbe) SubjectAnonymous() {
+	p.subjectAnonymous = true
+}
+
+func (p *requestProbe) SubjectTokenValidationFailed(err error) {
+	p.subjectValidationErr = err
 }
 
 func (p *requestProbe) SubjectTokenValidationSucceeded(result *trust.Result) {
 	fillPrincipal(&p.subject, result)
 }
 
-func (p *requestProbe) RequestCompleted(completion service.RequestCompletion) {
-	p.completion = completion
-	p.completed = true
+func (p *requestProbe) RequestContextParseFailed(error) {
+	p.requestContextParseFailed = true
+}
+
+func (p *requestProbe) PolicyDecisionDeny(reason string) {
+	p.policyDenied = true
+	p.policyDenyReason = reason
+}
+
+func (p *requestProbe) PolicyDecisionAllowWithoutIssue(string) {
+	p.policyAllowed = true
+}
+
+func (p *requestProbe) PolicyDecisionIssue(_ int, _ string, _ string) {
+	p.policyIssue = true
+}
+
+func (p *requestProbe) PolicyEvaluationFailed(err error) {
+	p.policyEvalErr = err
+}
+
+func (p *requestProbe) TokenIssuanceFailed(error) {
+	p.tokenIssuanceFailed = true
+}
+
+func (p *requestProbe) RequestFailed(err error) {
+	p.requestFailed = true
+	p.requestFailedErr = err
+}
+
+// deriveCompletion determines audit outcome and reason from the sequence of
+// probe callbacks received during the request. This keeps audit vocabulary
+// out of the handlers and centralizes reason derivation in the observer.
+func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode string) {
+	// Token issuance failure overrides earlier policy-issue/allow signals.
+	// This fires when the policy decided to issue but the actual issuance
+	// (signing, exchange) failed afterward.
+	if p.tokenIssuanceFailed {
+		return AuditOutcomeFailure, ReasonTokenIssuanceFailed
+	}
+
+	// Success paths
+	if p.policyAllowed || p.policyIssue {
+		return AuditOutcomeSuccess, ""
+	}
+
+	// Explicit deny
+	if p.policyDenied {
+		if p.subjectAnonymous {
+			return AuditOutcomeDenied, ReasonCredentialMissing
+		}
+		return AuditOutcomeDenied, ReasonPolicyDenied
+	}
+
+	// Credential extraction failures
+	if p.subjectExtractionFailed {
+		return AuditOutcomeDenied, ReasonCredentialMalformed
+	}
+	if p.actorExtractionFailed {
+		return AuditOutcomeDenied, ReasonCredentialMalformed
+	}
+
+	// Validation failures
+	if p.subjectValidationErr != nil {
+		if errors.Is(p.subjectValidationErr, trust.ErrExpiredToken) {
+			return AuditOutcomeDenied, ReasonCredentialExpired
+		}
+		return AuditOutcomeDenied, ReasonCredentialInvalid
+	}
+	if p.actorValidationErr != nil {
+		if errors.Is(p.actorValidationErr, trust.ErrExpiredToken) {
+			return AuditOutcomeDenied, ReasonCredentialExpired
+		}
+		return AuditOutcomeDenied, ReasonCredentialInvalid
+	}
+
+	// Request context parse failure (token exchange path)
+	if p.requestContextParseFailed {
+		return AuditOutcomeFailure, ReasonInternalError
+	}
+
+	// Policy evaluation error
+	if p.policyEvalErr != nil {
+		return AuditOutcomeFailure, reasonFromError(p.policyEvalErr, ReasonInternalError)
+	}
+
+	// Catch-all request failure (e.g. unsupported grant type, audience mismatch)
+	if p.requestFailed {
+		return AuditOutcomeFailure, reasonFromError(p.requestFailedErr, ReasonInternalError)
+	}
+
+	// No failure was signaled — the request completed successfully.
+	// For authz this is unreachable (policy callbacks always fire);
+	// for token exchange it means the token was issued without error.
+	return AuditOutcomeSuccess, ""
+}
+
+// reasonFromError classifies only known failure families. Error text is
+// never returned or recorded.
+func reasonFromError(err error, fallback string) string {
+	if err == nil {
+		return fallback
+	}
+	return reasonFromText(err.Error(), fallback)
+}
+
+func reasonFromText(value, fallback string) string {
+	value = strings.ToLower(value)
+	switch {
+	case strings.Contains(value, "jwks"), strings.Contains(value, "dependency"):
+		return ReasonDependencyFailure
+	case strings.Contains(value, "grant_type"):
+		return ReasonGrantTypeUnsupported
+	default:
+		return fallback
+	}
 }
 
 func (p *requestProbe) End() {
-	if !p.completed {
-		p.completion = service.RequestCompletion{Outcome: service.AuditOutcomeFailure, ReasonCode: ReasonInternalError}
-	}
+	outcome, reasonCode := p.deriveCompletion()
+
 	cacheStatus, cacheLayers, failureReason := p.state.Snapshot()
-	if p.completion.Outcome == service.AuditOutcomeFailure && (p.completion.ReasonCode == "" || p.completion.ReasonCode == ReasonInternalError) && failureReason != "" {
-		p.completion.ReasonCode = failureReason
+	if outcome == AuditOutcomeFailure && (reasonCode == "" || reasonCode == ReasonInternalError) && failureReason != "" {
+		reasonCode = failureReason
 	}
 	p.cacheStatus = cacheStatus
+	p.derivedOutcome = outcome
+	p.derivedReasonCode = reasonCode
 	signals := p.collector.Signals()
 
-	tokenTypes := make([]string, 0, len(p.completion.TokenTypes))
-	for _, tt := range p.completion.TokenTypes {
+	tokenTypes := make([]string, 0, len(p.tokenTypes))
+	for _, tt := range p.tokenTypes {
 		if v := safeTokenType(tt); v != "" {
 			tokenTypes = append(tokenTypes, v)
 		}
@@ -285,9 +439,6 @@ func (p *requestProbe) End() {
 	env.actor, _ = json.Marshal(p.actor)
 	env.resource, _ = json.Marshal(resourceInfo{
 		Type: resourceTypeForAction(p.action), TokenTypes: tokenTypes, CacheStatus: p.cacheStatus, CacheLayers: cacheLayers,
-	})
-	env.response, _ = json.Marshal(responseInfo{
-		GRPCCode: p.completion.GRPCCode, HTTPStatus: p.completion.HTTPStatus,
 	})
 	if len(signals) > 0 {
 		env.signals, _ = json.Marshal(signals)
@@ -311,7 +462,7 @@ func (p *requestProbe) End() {
 	if p.actor.CredentialType == string(trust.CredentialTypeHeader) {
 		p.emitRaw("verify_psk", nil, nil, &env)
 	}
-	switch p.completion.ReasonCode {
+	switch reasonCode {
 	case ReasonComplianceDenied:
 		p.emitRaw("auth_compliance_failure", nil, nil, &env)
 		emitted["auth_compliance_failure"] = true
@@ -338,14 +489,14 @@ func (p *requestProbe) End() {
 // event; the six shared Interface() fields are serialized once in End().
 func (p *requestProbe) emitRaw(suffix string, signalMetadata map[string]string, signal *auditctx.Signal, env *emitEnvelope) {
 	name := p.observer.eventName(suffix)
-	var outcome service.AuditOutcome
+	var outcome AuditOutcome
 	var reasonCode string
 	if signal != nil {
 		outcome = signalOutcomeToAuditOutcome(signal.Outcome)
 		reasonCode = signal.ReasonCode
 	} else {
-		outcome = p.completion.Outcome
-		reasonCode = p.completion.ReasonCode
+		outcome = p.derivedOutcome
+		reasonCode = p.derivedReasonCode
 	}
 
 	reason := safeReasonCode(reasonCode)
@@ -361,8 +512,7 @@ func (p *requestProbe) emitRaw(suffix string, signalMetadata map[string]string, 
 		RawJSON("request", env.request).
 		RawJSON("subject", env.subject).
 		RawJSON("actor", env.actor).
-		RawJSON("resource", env.resource).
-		RawJSON("response", env.response)
+		RawJSON("resource", env.resource)
 	if len(env.signals) > 0 {
 		event = event.RawJSON("signals", env.signals)
 	}
@@ -375,17 +525,16 @@ func (p *requestProbe) emitRaw(suffix string, signalMetadata map[string]string, 
 	event.Msg(name)
 }
 
-// signalOutcomeToAuditOutcome converts audit.Signal outcome to service.AuditOutcome
-func signalOutcomeToAuditOutcome(outcome string) service.AuditOutcome {
+func signalOutcomeToAuditOutcome(outcome string) AuditOutcome {
 	switch outcome {
 	case auditctx.OutcomeSuccess:
-		return service.AuditOutcomeSuccess
+		return AuditOutcomeSuccess
 	case auditctx.OutcomeDenied:
-		return service.AuditOutcomeDenied
+		return AuditOutcomeDenied
 	case auditctx.OutcomeFailure:
-		return service.AuditOutcomeFailure
+		return AuditOutcomeFailure
 	default:
-		return service.AuditOutcomeFailure
+		return AuditOutcomeFailure
 	}
 }
 
@@ -553,11 +702,11 @@ func (o *Observer) classificationFor(name string) string {
 	return ReasonDependencyFailure
 }
 
-func (o *Observer) event(outcome service.AuditOutcome) *zerolog.Event {
+func (o *Observer) event(outcome AuditOutcome) *zerolog.Event {
 	switch outcome {
-	case service.AuditOutcomeDenied:
+	case AuditOutcomeDenied:
 		return o.logger.Warn().Timestamp()
-	case service.AuditOutcomeFailure:
+	case AuditOutcomeFailure:
 		return o.logger.Error().Timestamp()
 	default:
 		return o.logger.Info().Timestamp()
@@ -577,7 +726,7 @@ type processConfig struct {
 	Commit      string `json:"commit,omitempty"`
 }
 
-func (o *Observer) emitLifecycle(suffix, action string, outcome service.AuditOutcome, reason string, started time.Time, resource lifecycleResource, config any) {
+func (o *Observer) emitLifecycle(suffix, action string, outcome AuditOutcome, reason string, started time.Time, resource lifecycleResource, config any) {
 	name := o.eventName(suffix)
 	event := o.event(outcome).
 		Str("event", name).
@@ -602,11 +751,11 @@ func (o *Observer) ProcessReady(info server.ProcessInfo) {
 		meta.ServiceVersion = safeValue(info.Version, 128)
 	}
 	name := o.eventName("process_status")
-	event := o.event(service.AuditOutcomeSuccess).
+	event := o.event(AuditOutcomeSuccess).
 		Str("event", name).
 		Str("schema_version", SchemaVersion).
 		Str("action", "process_ready").
-		Str("outcome", string(service.AuditOutcomeSuccess)).
+		Str("outcome", string(AuditOutcomeSuccess)).
 		Int64("duration_ms", 0).
 		Interface("service", meta).
 		Interface("resource", lifecycleResource{Type: "process"}).
@@ -632,12 +781,12 @@ func (o *Observer) StopStarted(ctx context.Context) (context.Context, server.Sto
 }
 
 func (p *auditStopProbe) ShutdownCompleted(interrupted int64) {
-	p.observer.emitLifecycle("process_status", "process_stop", service.AuditOutcomeSuccess, "", p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
+	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeSuccess, "", p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
 	p.emitted = true
 }
 
 func (p *auditStopProbe) ShutdownFailed(interrupted int64) {
-	p.observer.emitLifecycle("process_status", "process_stop", service.AuditOutcomeFailure, ReasonInternalError, p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
+	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeFailure, ReasonInternalError, p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
 	p.emitted = true
 }
 
@@ -661,12 +810,12 @@ func (o *Observer) RotationCheckStarted(ctx context.Context) (context.Context, k
 }
 
 func (p *auditRotationProbe) RotationCheckFailed(error) {
-	p.observer.emitLifecycle("key_rotation", "key_rotate", service.AuditOutcomeFailure, ReasonDependencyFailure, p.started, lifecycleResource{Type: "signing_key"}, nil)
+	p.observer.emitLifecycle("key_rotation", "key_rotate", AuditOutcomeFailure, ReasonDependencyFailure, p.started, lifecycleResource{Type: "signing_key"}, nil)
 	p.emitted = true
 }
 
 func (p *auditRotationProbe) RotationCompleted(slot string) {
-	p.observer.emitLifecycle("key_rotation", "key_rotate", service.AuditOutcomeSuccess, "", p.started, lifecycleResource{Type: "signing_key", KeyPosition: safeValue(slot, 64)}, nil)
+	p.observer.emitLifecycle("key_rotation", "key_rotate", AuditOutcomeSuccess, "", p.started, lifecycleResource{Type: "signing_key", KeyPosition: safeValue(slot, 64)}, nil)
 	p.emitted = true
 }
 
@@ -682,34 +831,34 @@ func (o *Observer) KMSRotateStarted(ctx context.Context, _, _, _ string) (contex
 	return ctx, &auditKMSProbe{observer: o, started: time.Now()}
 }
 
-func (p *auditKMSProbe) emit(action string, outcome service.AuditOutcome) {
+func (p *auditKMSProbe) emit(action string, outcome AuditOutcome) {
 	reason := ""
-	if outcome == service.AuditOutcomeFailure {
+	if outcome == AuditOutcomeFailure {
 		reason = ReasonDependencyFailure
 	}
 	p.observer.emitLifecycle("key_rotation", action, outcome, reason, p.started, lifecycleResource{Type: "signing_key"}, nil)
 }
 
-func (p *auditKMSProbe) KeyCreated()           { p.emit("key_create", service.AuditOutcomeSuccess) }
-func (p *auditKMSProbe) CreateKeyFailed(error) { p.emit("key_create", service.AuditOutcomeFailure) }
+func (p *auditKMSProbe) KeyCreated()           { p.emit("key_create", AuditOutcomeSuccess) }
+func (p *auditKMSProbe) CreateKeyFailed(error) { p.emit("key_create", AuditOutcomeFailure) }
 func (p *auditKMSProbe) AliasChanged(created bool) {
 	action := "key_alias_update"
 	if created {
 		action = "key_alias_create"
 	}
-	p.emit(action, service.AuditOutcomeSuccess)
+	p.emit(action, AuditOutcomeSuccess)
 }
 func (p *auditKMSProbe) AliasCheckFailed(error) {
-	p.emit("key_alias_change", service.AuditOutcomeFailure)
+	p.emit("key_alias_change", AuditOutcomeFailure)
 }
 func (p *auditKMSProbe) AliasUpdateFailed(error) {
-	p.emit("key_alias_change", service.AuditOutcomeFailure)
+	p.emit("key_alias_change", AuditOutcomeFailure)
 }
 func (p *auditKMSProbe) DeletionScheduled() {
-	p.emit("key_deletion_schedule", service.AuditOutcomeSuccess)
+	p.emit("key_deletion_schedule", AuditOutcomeSuccess)
 }
 func (p *auditKMSProbe) OldKeyDeletionFailed(string, error) {
-	p.emit("key_deletion_schedule", service.AuditOutcomeFailure)
+	p.emit("key_deletion_schedule", AuditOutcomeFailure)
 }
 func (p *auditKMSProbe) End() {}
 

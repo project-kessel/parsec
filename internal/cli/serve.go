@@ -120,11 +120,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create issuer registry: %w", err)
 	}
 
-	requestIDConfig, err := provider.RequestIDConfig()
-	if err != nil {
-		return fmt.Errorf("failed to validate request ID config: %w", err)
-	}
-
 	// 4. Create service handlers
 	var dropHeaders, dropCookies []string
 	if cfg.AuthzServer != nil {
@@ -159,14 +154,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 6. Create and start server
 	srv := server.New(server.Config{
-		GRPCListener:    grpcListener,
-		HTTPListener:    httpListener,
-		AuthzServer:     authzServer,
-		ExchangeServer:  exchangeServer,
-		JWKSServer:      jwksServer,
-		Observer:        obs,
-		MuxConfigurer:   obs.ConfigureHTTPMux,
-		RequestIDConfig: requestIDConfig,
+		GRPCListener:   grpcListener,
+		HTTPListener:   httpListener,
+		AuthzServer:    authzServer,
+		ExchangeServer: exchangeServer,
+		JWKSServer:     jwksServer,
+		Observer:       obs,
+		MuxConfigurer:  obs.ConfigureHTTPMux,
 	})
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -210,21 +204,27 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetNotReady()
 
 	// 9. Graceful shutdown
-	// Flush observer resources (e.g. metrics) while the HTTP server is
-	// still running so Prometheus can perform a final scrape.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	if err := obs.Shutdown(shutdownCtx); err != nil {
-		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
-	}
-
-	// Bound the drain. The pod's terminationGracePeriodSeconds must cover
-	// this plus the preStop delay, or kubelet SIGKILLs the process and
-	// drops in-flight ext_authz calls.
+	// Drain in-flight requests first. This ensures that any audit events
+	// emitted by requests completing during the drain window reach the
+	// observer tree while it is still active. The pod's
+	// terminationGracePeriodSeconds must cover this plus the preStop
+	// delay, or kubelet SIGKILLs the process and drops in-flight
+	// ext_authz calls.
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer stopCancel()
 	if err := srv.Stop(stopCtx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
+	}
+
+	// Flush observer resources (e.g. metrics exporter buffers, future
+	// audit sinks) after the server has drained. Prometheus pull-model
+	// scraping relies on the preStop hook window before SIGTERM rather
+	// than this explicit flush; push-model exporters (OTLP) are flushed
+	// here.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := obs.Shutdown(shutdownCtx); err != nil {
+		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
 	}
 
 	bootstrapLog.Info().Msg("Shutdown complete")

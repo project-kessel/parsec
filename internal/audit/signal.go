@@ -45,16 +45,20 @@ type NoOpReporter struct{}
 func (NoOpReporter) Record(Signal) bool { return true }
 
 // Collector stores a bounded list of valid signals for one request.
-// When allowedKeys is empty, metadata keys are accepted after text/length
-// checks only. When non-empty, only listed keys are permitted.
+// When allowedKeys is non-nil, only listed keys are permitted; a non-nil
+// empty map rejects all metadata keys. A nil map means allow-all
+// (text/length validation only). Production deployments should always
+// configure an explicit allowlist via audit_metadata_keys.
 type Collector struct {
 	mu          sync.Mutex
 	signals     []Signal
 	allowedKeys map[string]bool
 }
 
-// NewCollector returns a Collector that enforces allowedKeys when non-empty.
-// A nil or empty allowlist means allow-all (text/length validation only).
+// NewCollector returns a Collector that enforces allowedKeys.
+// A nil allowlist means allow-all (text/length validation only).
+// A non-nil empty map rejects all metadata keys.
+// Production deployments should configure an explicit allowlist.
 func NewCollector(allowedKeys map[string]bool) *Collector {
 	return &Collector{allowedKeys: allowedKeys}
 }
@@ -162,9 +166,10 @@ func (c *Collector) validMetadata(md map[string]string) bool {
 		return false
 	}
 	for k, v := range md {
-		// When an allowlist is configured, reject non-allowlisted keys.
-		// Empty allowlist means allow-all (still enforce text/length rules).
-		if len(c.allowedKeys) > 0 && !c.allowedKeys[k] {
+		// When an allowlist is configured (non-nil), reject non-allowlisted
+		// keys. A non-nil empty map rejects all metadata keys. A nil map
+		// means allow-all (text/length rules still apply).
+		if c.allowedKeys != nil && !c.allowedKeys[k] {
 			return false
 		}
 		if !validText(k, MaxOperationLength) {
