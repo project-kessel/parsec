@@ -250,7 +250,7 @@ func (s *AuthzServer) issueResponse(
 	// Iterate in request order for deterministic error selection.
 	for _, spec := range decision.TokenTypes {
 		if r, ok := results[spec.Type]; ok && r.ExchangeErr != nil {
-			p.TokenIssuanceFailed(r.ExchangeErr)
+			p.TokenIssuanceDenied(r.ExchangeErr)
 			grpcCode, httpStatus, msg := exchangeErrToAuthzDenial(r.ExchangeErr)
 			return s.denyResponseWithHTTPStatus(grpcCode, httpStatus, msg), nil
 		}

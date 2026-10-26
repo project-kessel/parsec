@@ -222,6 +222,7 @@ type authzProbeCalls struct {
 	policyDecisionDeny         atomic.Int32
 	policyEvaluationFailed     atomic.Int32
 	tokenIssuanceFailed        atomic.Int32
+	tokenIssuanceDenied        atomic.Int32
 	end                        atomic.Int32
 }
 
@@ -262,6 +263,7 @@ func (p *trackingAuthzProbe) PolicyDecisionAllowWithoutIssue(string)  { p.c.poli
 func (p *trackingAuthzProbe) PolicyDecisionDeny(string)               { p.c.policyDecisionDeny.Add(1) }
 func (p *trackingAuthzProbe) PolicyEvaluationFailed(error)            { p.c.policyEvaluationFailed.Add(1) }
 func (p *trackingAuthzProbe) TokenIssuanceFailed(error)               { p.c.tokenIssuanceFailed.Add(1) }
+func (p *trackingAuthzProbe) TokenIssuanceDenied(error)               { p.c.tokenIssuanceDenied.Add(1) }
 func (p *trackingAuthzProbe) End()                                    { p.c.end.Add(1) }
 
 type trackingStopProbe struct {
@@ -284,6 +286,7 @@ type tokenExchangeProbeCalls struct {
 	subjectTokenValSuccess atomic.Int32
 	subjectTokenValFail    atomic.Int32
 	tokenIssuanceFailed    atomic.Int32
+	tokenIssuanceDenied    atomic.Int32
 	requestFailed          atomic.Int32
 	end                    atomic.Int32
 }
@@ -318,6 +321,9 @@ func (p *trackingTokenExchangeProbe) SubjectTokenValidationFailed(error) {
 }
 func (p *trackingTokenExchangeProbe) TokenIssuanceFailed(error) {
 	p.c.tokenIssuanceFailed.Add(1)
+}
+func (p *trackingTokenExchangeProbe) TokenIssuanceDenied(error) {
+	p.c.tokenIssuanceDenied.Add(1)
 }
 func (p *trackingTokenExchangeProbe) RequestFailed(error) {
 	p.c.requestFailed.Add(1)

@@ -782,6 +782,11 @@ func (m *compositeTokenExchangeProbe) TokenIssuanceFailed(err error) {
 		p.TokenIssuanceFailed(err)
 	}
 }
+func (m *compositeTokenExchangeProbe) TokenIssuanceDenied(err error) {
+	for _, p := range m.probes {
+		p.TokenIssuanceDenied(err)
+	}
+}
 func (m *compositeTokenExchangeProbe) RequestFailed(err error) {
 	for _, p := range m.probes {
 		p.RequestFailed(err)
@@ -884,6 +889,11 @@ func (m *compositeAuthzCheckProbe) PolicyEvaluationFailed(err error) {
 func (m *compositeAuthzCheckProbe) TokenIssuanceFailed(err error) {
 	for _, p := range m.probes {
 		p.TokenIssuanceFailed(err)
+	}
+}
+func (m *compositeAuthzCheckProbe) TokenIssuanceDenied(err error) {
+	for _, p := range m.probes {
+		p.TokenIssuanceDenied(err)
 	}
 }
 func (m *compositeAuthzCheckProbe) End() {

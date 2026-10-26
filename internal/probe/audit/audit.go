@@ -197,6 +197,7 @@ type requestProbe struct {
 	policyIssue               bool
 	requestContextParseFailed bool
 	tokenIssuanceFailed       bool
+	tokenIssuanceDenied       bool
 	requestFailed             bool
 	requestFailedErr          error
 	tokenTypes                []service.TokenType
@@ -319,6 +320,10 @@ func (p *requestProbe) TokenIssuanceFailed(error) {
 	p.tokenIssuanceFailed = true
 }
 
+func (p *requestProbe) TokenIssuanceDenied(error) {
+	p.tokenIssuanceDenied = true
+}
+
 func (p *requestProbe) RequestFailed(err error) {
 	p.requestFailed = true
 	p.requestFailedErr = err
@@ -328,9 +333,15 @@ func (p *requestProbe) RequestFailed(err error) {
 // probe callbacks received during the request. This keeps audit vocabulary
 // out of the handlers and centralizes reason derivation in the observer.
 func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode string) {
+	// Token issuance denial overrides success signals. This fires when the
+	// issuer refused for a known policy/protocol reason (e.g. OAuth error).
+	if p.tokenIssuanceDenied {
+		return AuditOutcomeDenied, ReasonTokenIssuanceDenied
+	}
+
 	// Token issuance failure overrides earlier policy-issue/allow signals.
 	// This fires when the policy decided to issue but the actual issuance
-	// (signing, exchange) failed afterward.
+	// (signing, system error) failed afterward.
 	if p.tokenIssuanceFailed {
 		return AuditOutcomeFailure, ReasonTokenIssuanceFailed
 	}

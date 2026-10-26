@@ -155,7 +155,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		return nil, status.Errorf(codes.Internal, "token service did not return requested token type %s", requestedTokenType)
 	}
 	if r.ExchangeErr != nil {
-		p.TokenIssuanceFailed(r.ExchangeErr)
+		p.TokenIssuanceDenied(r.ExchangeErr)
 		return nil, exchangeErrToGRPC(r.ExchangeErr)
 	}
 	if r.Token == nil {
