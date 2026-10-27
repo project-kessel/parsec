@@ -144,10 +144,22 @@ trust_domain: "parsec.example.com"  # Audience for issued tokens
 
 Configure the Envoy ext_authz server behavior (optional). The `policy` section
 controls how the authz check policy decides whether to issue tokens, pass
-through, or deny each request:
+through, or deny each request. The `drop_headers` and `drop_cookies` sections
+list headers and cookies that are unconditionally removed from upstream
+requests:
 
 ```yaml
 authz_server:
+  drop_headers:
+    - x-rh-certauth-cn
+    - x-rh-certauth-issuer
+    - x-rh-insights-certauth-secret
+    - x-rh-insights-gateway-secret
+    - x-rh-insights-env
+    - x-rh-identity
+    - cs_jwt
+  drop_cookies:
+    - cs_jwt
   policy:
     type: static_authenticated    # denies anonymous, issues configured token types
     token_types:
@@ -159,6 +171,46 @@ authz_server:
 
 If not specified, defaults to `static_authenticated` issuing a transaction
 token in the `Transaction-Token` header.
+
+#### Header deny-list (`drop_headers`)
+
+`drop_headers` lists header names that are unconditionally removed from
+requests forwarded to upstream services. This prevents clients from injecting
+security-sensitive headers (credential or gateway-trust headers) that upstream
+services might trust.
+
+These headers are removed on every allowed request, regardless of which
+credential source matched. They complement the credential-source-driven
+removal (`HeadersUsed`) which only strips headers consumed by the matched
+source. When a header appears in both `drop_headers` and a credential source's
+`HeadersUsed`, it is deduplicated in the Envoy response.
+
+**Include any header that `policy.token_types` issues** (e.g. `x-rh-identity`)
+if your policy also allows anonymous access on some paths
+(`allow_anonymous_without_issue_paths`). On those paths no replacement token
+is issued, so an unstripped client-supplied value would pass through to
+upstream services unchanged — effectively letting an anonymous client spoof
+an identity header. On the `Issue` path, parsec automatically excludes any
+`drop_headers` entry that matches an issued token's `header_name` from the
+removal list, so the token it just issued is never deleted; the removal only
+applies when that header's value did not come from parsec's own issuance.
+
+#### Cookie deny-list (`drop_cookies`)
+
+`drop_cookies` lists cookie *names* (not header names) that are
+unconditionally stripped from the `Cookie` header on upstream requests.
+
+This is necessary because `drop_headers` can only remove whole HTTP headers
+by name — it cannot reach into the `Cookie` header to remove an individual
+cookie value. A credential like `cs_jwt` normally travels as a cookie, not a
+standalone header. If a request presents credentials on multiple channels
+(e.g. a `cs_jwt` cookie *and* an `Authorization: Bearer` header), and the
+bearer source matches first, the matched source's `HeadersUsed` only covers
+`authorization` — the `cs_jwt` cookie is left untouched unless it is also
+listed in `drop_cookies`.
+
+Cookie names are case-sensitive per [RFC 6265](https://www.rfc-editor.org/rfc/rfc6265) and are not normalized, unlike
+`drop_headers` entries (which are lowercased).
 
 **Policy types:**
 

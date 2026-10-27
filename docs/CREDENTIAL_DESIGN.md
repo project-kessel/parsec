@@ -131,6 +131,46 @@ Policy decisions (claim mappers, validator filtering, etc.) operate on the verif
 
 The extraction layer tracks which headers and cookies were used to present credentials. ext_authz strips them from requests forwarded to backends so that downstream services are decoupled from the actual credential presentation — they see only the issued tokens that parsec provides.
 
+### 6. Header Deny-List (`drop_headers`)
+
+In addition to credential-source-driven stripping, the `authz_server.drop_headers` config provides an unconditional deny-list of headers that are always removed from upstream requests. This prevents clients from injecting security-sensitive headers that upstream services might trust.
+
+**Why both mechanisms exist:**
+
+- **Credential-source-driven** removal (`HeadersUsed`/`CookiesUsed`) strips the headers used by the *matched* credential source. If a request carries credentials on multiple channels (e.g. `Authorization: Bearer` + `x-rh-certauth-cn`), only the matched source's headers are removed — the others leak through.
+- **`drop_headers`** removes listed headers regardless of which credential source matched, or even when no credential is present (anonymous requests allowed on optional paths).
+
+**Multi-credential channel scenario:**
+
+A client sends both a JWT bearer token and forwarded client cert headers. The bearer source matches first (higher priority in the credential_sources list). Without `drop_headers`, the cert headers (`x-rh-certauth-cn`, `x-rh-certauth-issuer`) would pass through to backends unstripped. With `drop_headers`, they are unconditionally removed.
+
+**Configuration:**
+
+```yaml
+authz_server:
+  drop_headers:
+    - x-rh-certauth-cn
+    - x-rh-certauth-issuer
+    - x-rh-insights-certauth-secret
+    - x-rh-insights-gateway-secret
+    - x-rh-insights-env
+    - x-rh-identity
+    - cs_jwt
+  drop_cookies:
+    - cs_jwt
+```
+
+Headers in `drop_headers` that also appear in a credential source's `HeadersUsed` are deduplicated — they appear only once in the Envoy `HeadersToRemove` response. The deny-list is applied on both `Issue` and `AllowWithoutIssue` response paths; deny responses do not need it since Envoy rejects the request entirely.
+
+**Issued-token headers (e.g. `x-rh-identity`) require care on both sides:**
+
+- On `AllowWithoutIssue` paths (anonymous access on optional-auth paths), no token is issued, so a client-supplied `x-rh-identity` is indistinguishable from a real one unless it is in `drop_headers`. Omitting it here would let an anonymous client spoof an identity header that backends trust as parsec-issued.
+- On the `Issue` path, `drop_headers` and the issued `Headers` would otherwise target the *same* header name (e.g. `x-rh-identity`). Envoy's `ext_authz` applies `Headers` (set) before `HeadersToRemove` — a header present in both lists would be set with the issued token value and then immediately deleted, silently dropping the token. `AuthzServer.Check` guards against this: on the `Issue` path only, it excludes any `drop_headers` entry that matches an issued token's `header_name` from the removal list before building the response.
+
+**Cookie deny-list (`drop_cookies`):**
+
+`drop_headers` removes whole HTTP headers by name; it cannot reach into the `Cookie` header to strip an individual cookie value. `cs_jwt` is a cookie, not a standalone header — a request can present `Authorization: Bearer <token>` *and* a `cs_jwt` cookie simultaneously. If the bearer source matches, its `HeadersUsed` is `["authorization"]` only; the `cs_jwt` cookie is left in the `Cookie` header unless `drop_cookies` also lists it. `drop_cookies` combines with any credential source's `CookiesUsed` to rebuild a single sanitized `Cookie` header value (or remove the header entirely if no cookies remain). Cookie names are case-sensitive (RFC 6265) and are not lowercased, unlike `drop_headers` entries.
+
 ## Examples
 
 ### Example 1: Bearer Token

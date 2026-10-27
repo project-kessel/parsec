@@ -104,6 +104,19 @@ issuers:
         script_file: ./configs/scripts/redhat_identity.cel
 
 authz_server:
+  # x-rh-identity is included because it is an issued-token header (see
+  # policy.token_types below); drop_cookies strips cs_jwt from the Cookie
+  # header, which drop_headers cannot reach (see configs/README.md).
+  drop_headers:
+    - x-rh-certauth-cn
+    - x-rh-certauth-issuer
+    - x-rh-insights-certauth-secret
+    - x-rh-insights-gateway-secret
+    - x-rh-insights-env
+    - x-rh-identity
+    - cs_jwt
+  drop_cookies:
+    - cs_jwt
   policy:
     token_types:
       - type: "urn:ietf:params:oauth:token-type:txn_token"

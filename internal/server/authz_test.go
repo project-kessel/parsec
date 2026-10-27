@@ -55,7 +55,7 @@ func TestAuthzServer_Check(t *testing.T) {
 	trustDomain := "parsec.test"
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-	authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 	t.Run("successful authorization", func(t *testing.T) {
 		req := &authv3.CheckRequest{
@@ -436,7 +436,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 	trustDomain := "parsec.test"
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 	t.Run("anonymous actor gets filtered store - no validators match", func(t *testing.T) {
 		// No actor credentials in context, so ForActor will be called with AnonymousResult
@@ -504,7 +504,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 		storeWithGateway.AddValidator("external-validator", externalValidator)
 		storeWithGateway.AddValidator("internal-validator", internalValidator)
 
-		authzServerWithGateway := NewAuthzServer(storeWithGateway, tokenService, nil, DefaultCredentialSources(), nil)
+		authzServerWithGateway := NewAuthzServer(storeWithGateway, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 		req := &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -560,7 +560,7 @@ func TestAuthzServer_WithActorFiltering(t *testing.T) {
 		})
 		emptyStore.AddValidator(jwtValidator)
 
-		authzServerFailing := NewAuthzServer(emptyStore, tokenService, nil, DefaultCredentialSources(), nil)
+		authzServerFailing := NewAuthzServer(emptyStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 		// Add actor credentials (Bearer) that will fail validation since no Bearer validator exists
 		md := metadata.New(map[string]string{
@@ -656,7 +656,7 @@ func TestAuthzServer_WithActorFilteringByRequestPath(t *testing.T) {
 	trustDomain := "parsec.test"
 	tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(filteredStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 	t.Run("admin path allows admin validator", func(t *testing.T) {
 		req := &authv3.CheckRequest{
@@ -791,7 +791,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		trustDomain := "parsec.test"
 		tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs)
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, fakeObs)
 
 		// Configure stub validator to return success
 		stubValidator.WithResult(&trust.Result{
@@ -843,7 +843,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		trustDomain := "parsec.test"
 		tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs)
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, fakeObs)
 
 		// Create request with invalid token (not added to stubValidator)
 		req := &authv3.CheckRequest{
@@ -891,7 +891,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 		trustDomain := "parsec.test"
 		tokenService := service.NewTokenService(trustDomain, dataSourceRegistry, issuerRegistry, nil)
 
-		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), fakeObs)
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, fakeObs)
 
 		// Create request with no authorization header
 		req := &authv3.CheckRequest{
@@ -1108,7 +1108,7 @@ func TestAuthzServer_Check_AllowWithoutIssue(t *testing.T) {
 		Reason: "allow without issue",
 	}}
 
-	authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), nil, nil, nil)
 
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -1162,7 +1162,7 @@ func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
 	}}
 
 	cookieSource := mustCookieSource(t, "cookie-jwt", "cs_jwt")
-	authzServer := NewAuthzServer(trustStore, nil, policy, NewCredentialSources(cookieSource), nil)
+	authzServer := NewAuthzServer(trustStore, nil, policy, NewCredentialSources(cookieSource), nil, nil, nil)
 	ctx := context.Background()
 
 	t.Run("mixed-case Cookie header key is normalized and sanitized", func(t *testing.T) {
@@ -1252,7 +1252,7 @@ func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
 		// Source is configured for "cs_jwt" but header has "CS_JWT" (different case).
 		// Cookie names are case-sensitive per RFC 6265, so no credential should
 		// be extracted and no sanitization should occur.
-		noMatchServer := NewAuthzServer(trustStore, nil, nil, NewCredentialSources(cookieSource), nil)
+		noMatchServer := NewAuthzServer(trustStore, nil, nil, NewCredentialSources(cookieSource), nil, nil, nil)
 
 		resp, err := noMatchServer.Check(ctx, &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -1292,7 +1292,7 @@ func TestAuthzServer_Check_CookieSanitization(t *testing.T) {
 func TestAuthzServer_Check_NilHttpRequest(t *testing.T) {
 	ctx := context.Background()
 
-	authzServer := NewAuthzServer(trust.NewStubStore(), nil, nil, DefaultCredentialSources(), nil)
+	authzServer := NewAuthzServer(trust.NewStubStore(), nil, nil, DefaultCredentialSources(), nil, nil, nil)
 
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -1314,7 +1314,7 @@ func TestAuthzServer_Check_NilHttpRequest(t *testing.T) {
 }
 
 func TestBuildRequestAttributes_NilHttp(t *testing.T) {
-	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil)
+	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil, nil, nil)
 
 	req := &authv3.CheckRequest{
 		Attributes: &authv3.AttributeContext{
@@ -1358,7 +1358,7 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 			TransactionContextMappers: []service.ClaimMapper{celMapper},
 		}))
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-		return NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+		return NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 	}
 
 	checkReq := &authv3.CheckRequest{
@@ -1420,7 +1420,7 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		registry := service.NewSimpleRegistry()
 		registry.Register(service.TokenTypeTransactionToken, &nilTokenIssuer{})
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 		resp, err := srv.Check(ctx, checkReq)
 		if err != nil {
@@ -1472,7 +1472,7 @@ func TestAuthz_DenialHTTPStatus(t *testing.T) {
 			TTL:       time.Minute,
 		}))
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
-		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil)
+		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 		resp, err := srv.Check(ctx, &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -1514,7 +1514,7 @@ func TestAuthz_DenialHTTPStatus(t *testing.T) {
 		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, nil)
 		srv := NewAuthzServer(trustStore, tokenService, &stubPolicy{
 			decision: AuthzCheckDecision{Action: AuthzCheckDeny, Reason: "not allowed"},
-		}, DefaultCredentialSources(), nil)
+		}, DefaultCredentialSources(), nil, nil, nil)
 
 		resp, err := srv.Check(ctx, &authv3.CheckRequest{
 			Attributes: &authv3.AttributeContext{
@@ -1541,4 +1541,654 @@ func TestAuthz_DenialHTTPStatus(t *testing.T) {
 			t.Errorf("HTTP status: got %d, want Forbidden (403)", denied.GetStatus().GetCode())
 		}
 	})
+}
+
+func TestAuthzServer_DropHeaders(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	trustStore := trust.NewStubStore()
+	stubValidator := trust.NewStubValidator(trust.CredentialTypeBearer)
+	stubValidator.WithResult(&trust.Result{
+		Subject:     "user-123",
+		TrustDomain: "parsec.test",
+	})
+	trustStore.AddValidator(stubValidator)
+
+	t.Run("drop headers removed on authenticated issue", func(t *testing.T) {
+		t.Parallel()
+
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		issuerRegistry.Register(service.TokenTypeTransactionToken, issuer.NewStubIssuer(issuer.StubIssuerConfig{
+			IssuerURL: "https://parsec.test",
+			TTL:       time.Minute,
+		}))
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		dropHeaders := []string{"x-rh-certauth-cn", "x-rh-certauth-issuer", "x-rh-insights-gateway-secret"}
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization":                "Bearer test-token",
+							"x-rh-certauth-cn":             "/CN=spoofed",
+							"x-rh-certauth-issuer":         "/O=Evil Corp",
+							"x-rh-insights-gateway-secret": "fake-psk",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		// authorization comes from HeadersUsed; the three drop_headers come from dropHeaders
+		assertHeadersRemoved(t, okResp.HeadersToRemove,
+			"authorization", "x-rh-certauth-cn", "x-rh-certauth-issuer", "x-rh-insights-gateway-secret")
+	})
+
+	t.Run("drop headers removed on anonymous allow without issue", func(t *testing.T) {
+		t.Parallel()
+
+		compiled, err := CompilePathPatterns([]string{"/api/.*/openapi\\.json"})
+		if err != nil {
+			t.Fatalf("CompilePathPatterns: %v", err)
+		}
+		policy := NewStaticAuthenticatedPolicy(nil, WithAllowAnonymousWithoutIssuePaths(compiled))
+
+		dropHeaders := []string{"x-rh-certauth-cn", "x-rh-insights-env"}
+		authzServer := NewAuthzServer(trust.NewStubStore(), nil, policy, DefaultCredentialSources(), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/foo/openapi.json",
+						Headers: map[string]string{
+							"x-rh-certauth-cn":  "/CN=spoofed",
+							"x-rh-insights-env": "prod",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse for anonymous allowed path")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "x-rh-certauth-cn", "x-rh-insights-env")
+	})
+
+	t.Run("no drop headers preserves existing behavior", func(t *testing.T) {
+		t.Parallel()
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+		authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), nil, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization": "Bearer test-token",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "authorization")
+		if len(okResp.HeadersToRemove) != 1 {
+			t.Errorf("expected exactly 1 header removed, got %d: %v", len(okResp.HeadersToRemove), okResp.HeadersToRemove)
+		}
+	})
+
+	t.Run("drop headers deduplicated with credential source headers", func(t *testing.T) {
+		t.Parallel()
+
+		certSource, err := NewForwardedClientCertCredentialSource("cert-auth", "x-rh-certauth-cn", "x-rh-certauth-issuer")
+		if err != nil {
+			t.Fatalf("NewForwardedClientCertCredentialSource: %v", err)
+		}
+
+		certValidator := trust.NewStubValidator(trust.CredentialTypeForwardedClientCert)
+		certValidator.WithResult(&trust.Result{
+			Subject:     "system-123",
+			TrustDomain: "cert.redhat.com",
+		})
+		certStore := trust.NewStubStore()
+		certStore.AddValidator(certValidator)
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		// drop_headers includes x-rh-certauth-cn which the cert source already marks in HeadersUsed
+		dropHeaders := []string{"x-rh-certauth-cn", "x-rh-certauth-issuer", "x-rh-insights-gateway-secret"}
+		authzServer := NewAuthzServer(certStore, nil, policy, NewCredentialSources(certSource), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"x-rh-certauth-cn":             "/CN=test-system-123",
+							"x-rh-certauth-issuer":         "/C=US/O=Red Hat",
+							"x-rh-insights-gateway-secret": "fake-psk",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove,
+			"x-rh-certauth-cn", "x-rh-certauth-issuer", "x-rh-insights-gateway-secret")
+
+		// Verify no duplicates
+		seen := make(map[string]int, len(okResp.HeadersToRemove))
+		for _, h := range okResp.HeadersToRemove {
+			seen[h]++
+		}
+		for h, count := range seen {
+			if count > 1 {
+				t.Errorf("header %q appears %d times in HeadersToRemove (expected 1)", h, count)
+			}
+		}
+	})
+
+	t.Run("drop headers normalized to lowercase", func(t *testing.T) {
+		t.Parallel()
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		dropHeaders := []string{"X-RH-CertAuth-CN", "X-RH-Insights-Gateway-Secret"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization": "Bearer test-token",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove,
+			"authorization", "x-rh-certauth-cn", "x-rh-insights-gateway-secret")
+	})
+
+	t.Run("deny response does not include drop headers", func(t *testing.T) {
+		t.Parallel()
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckDeny,
+			Reason: "not allowed",
+		}}
+
+		dropHeaders := []string{"x-rh-certauth-cn", "cs_jwt"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"x-rh-certauth-cn": "/CN=spoofed",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if resp.GetOkResponse() != nil {
+			t.Fatal("expected denied response, got OkResponse")
+		}
+		deniedResp := resp.GetDeniedResponse()
+		if deniedResp == nil {
+			t.Fatal("expected DeniedResponse")
+		}
+		// Envoy rejects denied requests entirely, so drop_headers has nothing
+		// to do here; the deny path must not call mergeDropHeaders.
+	})
+
+	t.Run("issued token header in drop_headers is not removed on Issue path", func(t *testing.T) {
+		t.Parallel()
+
+		dataSourceRegistry := service.NewDataSourceRegistry()
+		issuerRegistry := service.NewSimpleRegistry()
+		issuerRegistry.Register(service.TokenTypeTransactionToken, issuer.NewStubIssuer(issuer.StubIssuerConfig{
+			IssuerURL: "https://parsec.test",
+			TTL:       time.Minute,
+		}))
+		tokenService := service.NewTokenService("parsec.test", dataSourceRegistry, issuerRegistry, nil)
+
+		// "transaction-token" (lowercase, normalized form) collides with the
+		// default policy's issued header "Transaction-Token".
+		dropHeaders := []string{"transaction-token", "x-rh-certauth-cn"}
+		authzServer := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization":    "Bearer test-token",
+							"x-rh-certauth-cn": "/CN=spoofed",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		// The non-colliding entry is still removed...
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "authorization", "x-rh-certauth-cn")
+
+		// ...but the issued token's header must NOT be in the removal list,
+		// or Envoy would set it and then immediately delete it.
+		for _, h := range okResp.HeadersToRemove {
+			if h == "transaction-token" {
+				t.Fatalf("transaction-token must not be in HeadersToRemove when it is also an issued header: %v", okResp.HeadersToRemove)
+			}
+		}
+
+		// The issued token itself must be present in the response headers.
+		found := false
+		for _, h := range okResp.Headers {
+			if h.GetHeader().GetKey() == "Transaction-Token" {
+				found = true
+				if h.GetHeader().GetValue() == "" {
+					t.Error("issued Transaction-Token header has empty value")
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("expected issued Transaction-Token header in response, got %v", okResp.Headers)
+		}
+	})
+
+	t.Run("client-supplied x-rh-identity stripped on anonymous allow-without-issue path", func(t *testing.T) {
+		t.Parallel()
+
+		compiled, err := CompilePathPatterns([]string{"/api/.*/openapi\\.json"})
+		if err != nil {
+			t.Fatalf("CompilePathPatterns: %v", err)
+		}
+		policy := NewStaticAuthenticatedPolicy(nil, WithAllowAnonymousWithoutIssuePaths(compiled))
+
+		dropHeaders := []string{"x-rh-identity"}
+		authzServer := NewAuthzServer(trust.NewStubStore(), nil, policy, DefaultCredentialSources(), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/foo/openapi.json",
+						Headers: map[string]string{
+							"x-rh-identity": "spoofed-identity-envelope",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse for anonymous allowed path")
+		}
+
+		// A client-supplied x-rh-identity must be stripped: no token is
+		// issued on this path, so an unstripped value would be
+		// indistinguishable from a parsec-issued identity to upstream.
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "x-rh-identity")
+	})
+
+	t.Run("cs_jwt cookie sanitized when bearer source matches instead", func(t *testing.T) {
+		t.Parallel()
+
+		bearerSource, err := NewBearerCredentialSource("bearer")
+		if err != nil {
+			t.Fatalf("NewBearerCredentialSource: %v", err)
+		}
+		cookieSource := mustCookieSource(t, "cookie-jwt", "cs_jwt")
+		// Bearer is listed first, so it matches before the cookie source
+		// when both credentials are present.
+		credSources := NewCredentialSources(bearerSource, cookieSource)
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		dropCookies := []string{"cs_jwt"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, credSources, nil, dropCookies, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization": "Bearer test-token",
+							"cookie":        "cs_jwt=secret; session=abc",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		// authorization is stripped via the matched bearer source's HeadersUsed.
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "authorization")
+
+		// cs_jwt must not leak through the Cookie header, even though the
+		// bearer source (not the cookie source) matched.
+		var cookieValue string
+		found := false
+		for _, h := range okResp.Headers {
+			if strings.EqualFold(h.GetHeader().GetKey(), "cookie") {
+				found = true
+				cookieValue = h.GetHeader().GetValue()
+			}
+		}
+		if !found {
+			t.Fatal("expected rewritten Cookie header in response")
+		}
+		if strings.Contains(cookieValue, "cs_jwt") {
+			t.Errorf("cs_jwt cookie leaked through: Cookie=%q", cookieValue)
+		}
+		if !strings.Contains(cookieValue, "session=abc") {
+			t.Errorf("expected session cookie to be preserved, got Cookie=%q", cookieValue)
+		}
+	})
+
+	t.Run("entire cookie header removed when only drop_cookies cookie is present", func(t *testing.T) {
+		t.Parallel()
+
+		bearerSource, err := NewBearerCredentialSource("bearer")
+		if err != nil {
+			t.Fatalf("NewBearerCredentialSource: %v", err)
+		}
+		credSources := NewCredentialSources(bearerSource)
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		dropCookies := []string{"cs_jwt"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, credSources, nil, dropCookies, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"cookie": "cs_jwt=secret",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "cookie")
+		for _, h := range okResp.Headers {
+			if strings.EqualFold(h.GetHeader().GetKey(), "cookie") {
+				t.Errorf("did not expect a Cookie rewrite when all cookies are dropped, got %q", h.GetHeader().GetValue())
+			}
+		}
+	})
+
+	t.Run("cookie in drop_headers removes entire cookie header even with drop_cookies", func(t *testing.T) {
+		t.Parallel()
+
+		bearerSource, err := NewBearerCredentialSource("bearer")
+		if err != nil {
+			t.Fatalf("NewBearerCredentialSource: %v", err)
+		}
+		credSources := NewCredentialSources(bearerSource)
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		// Operator wants the entire Cookie header dropped AND has specific drop_cookies.
+		// drop_headers "cookie" must win: no partial rewrite, just remove the header.
+		dropHeaders := []string{"cookie", "x-rh-certauth-cn"}
+		dropCookies := []string{"cs_jwt"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, credSources, dropHeaders, dropCookies, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization": "Bearer test-token",
+							"cookie":        "cs_jwt=secret; session=abc",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		// "cookie" must appear in the removal list (from drop_headers).
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "authorization", "cookie", "x-rh-certauth-cn")
+
+		// No Cookie rewrite header should be present — the header is removed entirely.
+		for _, h := range okResp.Headers {
+			if strings.EqualFold(h.GetHeader().GetKey(), "cookie") {
+				t.Errorf("did not expect a Cookie rewrite when cookie is in drop_headers, got %q", h.GetHeader().GetValue())
+			}
+		}
+	})
+
+	t.Run("cookie in drop_headers removes cookie rewrite from credential sanitization", func(t *testing.T) {
+		t.Parallel()
+
+		// Cookie source matches, producing a Cookie rewrite via removeCredentialPresentation.
+		// drop_headers: ["cookie"] must override that rewrite.
+		cookieSource := mustCookieSource(t, "cookie-jwt", "cs_jwt")
+		credSources := NewCredentialSources(cookieSource)
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		dropHeaders := []string{"cookie"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, credSources, dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"cookie": "cs_jwt=test-token; other=keep",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "cookie")
+
+		// No Cookie rewrite — the whole header is removed.
+		for _, h := range okResp.Headers {
+			if strings.EqualFold(h.GetHeader().GetKey(), "cookie") {
+				t.Errorf("did not expect a Cookie rewrite when cookie is in drop_headers, got %q", h.GetHeader().GetValue())
+			}
+		}
+	})
+
+	t.Run("drop headers filters empty and whitespace entries", func(t *testing.T) {
+		t.Parallel()
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		dropHeaders := []string{"x-foo", "", "   ", "x-bar"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method:  "GET",
+						Path:    "/api/resource",
+						Headers: map[string]string{},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "x-foo", "x-bar")
+		for _, h := range okResp.HeadersToRemove {
+			if strings.TrimSpace(h) == "" {
+				t.Errorf("blank entry leaked into HeadersToRemove: %v", okResp.HeadersToRemove)
+			}
+		}
+		if len(okResp.HeadersToRemove) != 2 {
+			t.Errorf("expected exactly 2 headers removed (blanks filtered), got %d: %v", len(okResp.HeadersToRemove), okResp.HeadersToRemove)
+		}
+	})
+}
+
+// assertHeadersRemoved verifies that all expected headers are present in the removal list.
+func assertHeadersRemoved(t *testing.T, headersToRemove []string, expected ...string) {
+	t.Helper()
+	removed := make(map[string]bool, len(headersToRemove))
+	for _, h := range headersToRemove {
+		removed[h] = true
+	}
+	for _, h := range expected {
+		if !removed[h] {
+			t.Errorf("expected %q in HeadersToRemove, got %v", h, headersToRemove)
+		}
+	}
 }
