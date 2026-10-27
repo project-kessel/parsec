@@ -1747,7 +1747,7 @@ func TestAuthzServer_DropHeaders(t *testing.T) {
 			Reason: "allow",
 		}}
 
-		dropHeaders := []string{"X-RH-CertAuth-CN", "Application-ID"}
+		dropHeaders := []string{"X-RH-CertAuth-CN", "X-RH-Insights-Gateway-Secret"}
 		authzServer := NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), dropHeaders, nil, nil)
 
 		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
@@ -1773,7 +1773,7 @@ func TestAuthzServer_DropHeaders(t *testing.T) {
 		}
 
 		assertHeadersRemoved(t, okResp.HeadersToRemove,
-			"authorization", "x-rh-certauth-cn", "application-id")
+			"authorization", "x-rh-certauth-cn", "x-rh-insights-gateway-secret")
 	})
 
 	t.Run("deny response does not include drop headers", func(t *testing.T) {
@@ -2030,6 +2030,108 @@ func TestAuthzServer_DropHeaders(t *testing.T) {
 		for _, h := range okResp.Headers {
 			if strings.EqualFold(h.GetHeader().GetKey(), "cookie") {
 				t.Errorf("did not expect a Cookie rewrite when all cookies are dropped, got %q", h.GetHeader().GetValue())
+			}
+		}
+	})
+
+	t.Run("cookie in drop_headers removes entire cookie header even with drop_cookies", func(t *testing.T) {
+		t.Parallel()
+
+		bearerSource, err := NewBearerCredentialSource("bearer")
+		if err != nil {
+			t.Fatalf("NewBearerCredentialSource: %v", err)
+		}
+		credSources := NewCredentialSources(bearerSource)
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		// Operator wants the entire Cookie header dropped AND has specific drop_cookies.
+		// drop_headers "cookie" must win: no partial rewrite, just remove the header.
+		dropHeaders := []string{"cookie", "x-rh-certauth-cn"}
+		dropCookies := []string{"cs_jwt"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, credSources, dropHeaders, dropCookies, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"authorization": "Bearer test-token",
+							"cookie":        "cs_jwt=secret; session=abc",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		// "cookie" must appear in the removal list (from drop_headers).
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "authorization", "cookie", "x-rh-certauth-cn")
+
+		// No Cookie rewrite header should be present — the header is removed entirely.
+		for _, h := range okResp.Headers {
+			if strings.EqualFold(h.GetHeader().GetKey(), "cookie") {
+				t.Errorf("did not expect a Cookie rewrite when cookie is in drop_headers, got %q", h.GetHeader().GetValue())
+			}
+		}
+	})
+
+	t.Run("cookie in drop_headers removes cookie rewrite from credential sanitization", func(t *testing.T) {
+		t.Parallel()
+
+		// Cookie source matches, producing a Cookie rewrite via removeCredentialPresentation.
+		// drop_headers: ["cookie"] must override that rewrite.
+		cookieSource := mustCookieSource(t, "cookie-jwt", "cs_jwt")
+		credSources := NewCredentialSources(cookieSource)
+
+		policy := &stubPolicy{decision: AuthzCheckDecision{
+			Action: AuthzCheckAllowWithoutIssue,
+			Reason: "allow",
+		}}
+
+		dropHeaders := []string{"cookie"}
+		authzServer := NewAuthzServer(trustStore, nil, policy, credSources, dropHeaders, nil, nil)
+
+		resp, err := authzServer.Check(ctx, &authv3.CheckRequest{
+			Attributes: &authv3.AttributeContext{
+				Request: &authv3.AttributeContext_Request{
+					Http: &authv3.AttributeContext_HttpRequest{
+						Method: "GET",
+						Path:   "/api/resource",
+						Headers: map[string]string{
+							"cookie": "cs_jwt=test-token; other=keep",
+						},
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		okResp := resp.GetOkResponse()
+		if okResp == nil {
+			t.Fatal("expected OkResponse")
+		}
+
+		assertHeadersRemoved(t, okResp.HeadersToRemove, "cookie")
+
+		// No Cookie rewrite — the whole header is removed.
+		for _, h := range okResp.Headers {
+			if strings.EqualFold(h.GetHeader().GetKey(), "cookie") {
+				t.Errorf("did not expect a Cookie rewrite when cookie is in drop_headers, got %q", h.GetHeader().GetValue())
 			}
 		}
 	})

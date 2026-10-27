@@ -157,8 +157,6 @@ authz_server:
     - x-rh-insights-gateway-secret
     - x-rh-insights-env
     - x-rh-identity
-    - application-id
-    - application-key
     - cs_jwt
   drop_cookies:
     - cs_jwt

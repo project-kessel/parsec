@@ -334,19 +334,35 @@ func excludeIssuedHeaders(remove []string, tokenTypes []TokenTypeSpec) []string 
 // mergeDropHeaders combines credential-source-driven header/cookie removal
 // with the unconditional drop_headers and drop_cookies deny-lists. Entries
 // that already appear in the credential-driven removal are deduplicated.
+//
+// When the operator includes "cookie" in drop_headers the entire Cookie
+// header is removed: any Cookie rewrite from credential sanitization is
+// discarded and the partial drop_cookies path is skipped.
 func (s *AuthzServer) mergeDropHeaders(ext *CredentialExtraction, cookies []*http.Cookie) ([]*corev3.HeaderValueOption, []string) {
 	rewrite, remove := removeCredentialPresentation(ext, cookies)
 
+	cookieDenied := false
 	if len(s.dropHeaders) > 0 {
 		seen := make(map[string]struct{}, len(remove))
 		for _, h := range remove {
 			seen[h] = struct{}{}
 		}
 		for _, h := range s.dropHeaders {
+			if h == "cookie" {
+				cookieDenied = true
+			}
 			if _, exists := seen[h]; !exists {
 				remove = append(remove, h)
 			}
 		}
+	}
+
+	// When the whole Cookie header is denied via dropHeaders, strip any
+	// Cookie rewrite produced by credential sanitization and skip
+	// partial-cookie filtering — the header is removed entirely.
+	if cookieDenied {
+		rewrite = removeHeaderOption(rewrite, "cookie")
+		return rewrite, remove
 	}
 
 	if len(s.dropCookies) > 0 && len(cookies) > 0 {

@@ -192,8 +192,6 @@ authz_server:
     - x-rh-insights-gateway-secret
     - x-rh-insights-env
     - x-rh-identity
-    - application-id
-    - application-key
     - cs_jwt
   # Cookie names unconditionally stripped from the Cookie header. Unlike
   # drop_headers (which removes whole HTTP headers by name), this reaches
