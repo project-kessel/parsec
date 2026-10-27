@@ -51,7 +51,9 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 
 	// 1. Validate the grant type
 	if req.GrantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
-		return nil, fmt.Errorf("unsupported grant_type: %s", req.GrantType)
+		err := fmt.Errorf("unsupported grant_type: %s", req.GrantType)
+		p.RequestFailed(err)
+		return nil, err
 	}
 
 	// 2. Authenticate actor (caller) from gRPC context
@@ -102,6 +104,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// 4. Filter trust store based on actor permissions
 	filteredStore, err := s.trustStore.ForActor(ctx, actor, reqAttrs)
 	if err != nil {
+		p.RequestFailed(err)
 		return nil, fmt.Errorf("failed to filter trust store: %w", err)
 	}
 
@@ -127,8 +130,10 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// 7. Validate audience matches trust domain (per transaction token spec)
 	// The audience for transaction tokens is always the trust domain
 	if req.Audience != "" && req.Audience != s.tokenService.TrustDomain() {
-		return nil, fmt.Errorf("requested audience %q does not match trust domain %q",
+		err := fmt.Errorf("requested audience %q does not match trust domain %q",
 			req.Audience, s.tokenService.TrustDomain())
+		p.RequestFailed(err)
+		return nil, err
 	}
 
 	// 8. Issue the token via TokenService
@@ -140,17 +145,21 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		Scope:             req.Scope,
 	})
 	if err != nil {
+		p.TokenIssuanceFailed(err)
 		return nil, internalGRPCError(err)
 	}
 
 	r, ok := results[requestedTokenType]
 	if !ok {
+		p.TokenIssuanceFailed(fmt.Errorf("token service did not return requested token type %s", requestedTokenType))
 		return nil, status.Errorf(codes.Internal, "token service did not return requested token type %s", requestedTokenType)
 	}
 	if r.ExchangeErr != nil {
+		p.TokenIssuanceDenied(r.ExchangeErr)
 		return nil, exchangeErrToGRPC(r.ExchangeErr)
 	}
 	if r.Token == nil {
+		p.TokenIssuanceFailed(fmt.Errorf("token service returned no token for type %s", requestedTokenType))
 		return nil, status.Errorf(codes.Internal, "token service returned no token for type %s", requestedTokenType)
 	}
 

@@ -113,6 +113,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 	}
 
 	newKeyID := aws.ToString(createResp.KeyMetadata.KeyId)
+	p.KeyCreated()
 
 	// 2. Get current alias to find old key (if exists)
 	oldKeyID, err := m.getKeyIDFromAlias(ctx, aliasName)
@@ -133,6 +134,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			p.AliasUpdateFailed(err)
 			return fmt.Errorf("failed to update alias: %w", err)
 		}
+		p.AliasChanged(false)
 	} else {
 		_, err = m.client.CreateAlias(ctx, &kms.CreateAliasInput{
 			AliasName:   aws.String(aliasName),
@@ -142,6 +144,7 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 			p.AliasUpdateFailed(err)
 			return fmt.Errorf("failed to create alias: %w", err)
 		}
+		p.AliasChanged(true)
 	}
 
 	// 4. Schedule old key for deletion (7 days minimum)
@@ -152,6 +155,8 @@ func (m *AWSKMSKeyProvider) rotateKey(ctx context.Context, trustDomain, namespac
 		})
 		if err != nil {
 			p.OldKeyDeletionFailed(oldKeyID, err)
+		} else {
+			p.DeletionScheduled()
 		}
 	}
 

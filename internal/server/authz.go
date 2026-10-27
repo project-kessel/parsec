@@ -158,6 +158,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 
 		filteredStore, filterErr := s.trustStore.ForActor(ctx, actorResult, reqAttrs)
 		if filterErr != nil {
+			p.PolicyEvaluationFailed(filterErr)
 			return s.denyResponse(codes.PermissionDenied,
 				fmt.Sprintf("failed to filter trust store: %v", filterErr)), nil
 		}
@@ -206,9 +207,10 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		// token's header name here would delete the token immediately
 		// after it is set.
 		remove = excludeIssuedHeaders(remove, decision.TokenTypes)
-		return s.issueResponse(ctx, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
+		return s.issueResponse(ctx, p, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
 
 	default:
+		p.PolicyEvaluationFailed(fmt.Errorf("unknown policy action: %s", decision.Action))
 		return s.denyResponse(codes.Internal,
 			fmt.Sprintf("unknown policy action: %s", decision.Action)), nil
 	}
@@ -218,6 +220,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 // with the issued tokens appended to any credential sanitization headers.
 func (s *AuthzServer) issueResponse(
 	ctx context.Context,
+	p service.AuthzCheckProbe,
 	decision AuthzCheckDecision,
 	subject, actor Principal,
 	reqAttrs *request.RequestAttributes,
@@ -237,6 +240,7 @@ func (s *AuthzServer) issueResponse(
 		Scope:             decision.Scope,
 	})
 	if err != nil {
+		p.TokenIssuanceFailed(err)
 		return s.denyResponseWithHTTPStatus(codes.Internal,
 			typev3.StatusCode_InternalServerError,
 			fmt.Sprintf("failed to issue tokens: %v", err)), nil
@@ -246,6 +250,7 @@ func (s *AuthzServer) issueResponse(
 	// Iterate in request order for deterministic error selection.
 	for _, spec := range decision.TokenTypes {
 		if r, ok := results[spec.Type]; ok && r.ExchangeErr != nil {
+			p.TokenIssuanceDenied(r.ExchangeErr)
 			grpcCode, httpStatus, msg := exchangeErrToAuthzDenial(r.ExchangeErr)
 			return s.denyResponseWithHTTPStatus(grpcCode, httpStatus, msg), nil
 		}
@@ -256,8 +261,7 @@ func (s *AuthzServer) issueResponse(
 	for _, spec := range decision.TokenTypes {
 		r, ok := results[spec.Type]
 		if !ok || r.Token == nil {
-			// Fail closed: never return OK without every requested token.
-			// A missing/nil token with no ExchangeErr is a programmer error.
+			p.TokenIssuanceFailed(fmt.Errorf("token service returned no token for type %s", spec.Type))
 			return s.denyResponseWithHTTPStatus(codes.Internal,
 				typev3.StatusCode_InternalServerError,
 				fmt.Sprintf("token service returned no token for type %s", spec.Type)), nil

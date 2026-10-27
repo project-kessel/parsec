@@ -12,7 +12,30 @@ observability:
   type: composite
   log_level: info
   log_format: json
+  # Ordered request-ID header names. First match wins on extraction.
+  # The first entry is the canonical header used for response propagation
+  # (only when the ID was extracted from the incoming request, not when
+  # generated locally).
+  request_id_headers:
+    - "x-request-id"
+  # Allowlist for audit.record() metadata keys. When omitted, all metadata
+  # keys are rejected (fail-closed). When set, only listed keys are
+  # permitted. An explicit list is required for production use.
+  audit_metadata_keys:
+    - "cache_status"
+    - "classification"
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_name"
+    - "dependency_status"
   observers:
+    - type: audit
+      # event_prefix defaults to "parsec_" (e.g. parsec_request,
+      # parsec_authorize). Override with event_prefix: "insights_" or
+      # via --observability-event-prefix for deployment-specific names.
     - type: logging
     - type: metrics
 
@@ -90,6 +113,7 @@ data_sources:
     type: lua
     script_file: ./configs/scripts/export_compliance.lua
     http_client: entitlements
+    failure_classification: compliance_failure
     config:
       compliance_api: "/v1/compliance"
     caching:
@@ -100,6 +124,7 @@ data_sources:
   - name: bop-user
     type: lua
     script_file: ./configs/scripts/bop_user.lua
+    failure_classification: supplemental_user_data_failure
     http_client: backoffice-proxy
     config:
       bop_url: "https://backoffice-proxy.apps.ext.spoke.preprod.us-west-2.aws.paas.redhat.com"

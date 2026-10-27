@@ -34,8 +34,22 @@
 -- (Lua pattern ^%d+$); any other value is denied with rbac_denied before it
 -- can reach target_account_number, the CEL account_number field, or audit.
 --
--- Optional top-level audit table on the Lua return (not in JSON data) carries AC8
--- audit fields for generic FetchAudit probe handling in Go.
+-- Audit: uses audit.record() (deployment-neutral generic signal API, source
+-- "data_source", operation "cross_account_access") for every terminal outcome
+-- so the request-scoped audit probe can emit rbac_cross_access_audit (AC8).
+-- The metadata.classification field distinguishes denial sub-reasons:
+--   "not_internal"       — non-internal user attempting cross-account (AC2)
+--   "email_not_allowed"  — internal user without required email suffix
+--   "rbac_denied"        — no approved RBAC request (AC3)
+--   "invalid_cookie"     — malformed account cookie value
+--   "org_mismatch"       — cookie org does not match RBAC record
+--   "missing_org_cookie" — org cookie absent with account cookie present
+--
+-- IMPORTANT: This datasource must NOT have caching enabled. The audit event
+-- is emitted inside fetch(), so a cache hit would skip fetch() entirely and
+-- silently drop the rbac_cross_access_audit event. If caching is ever needed,
+-- the audit event must be moved to the Go side (e.g. via the CacheFetchStarted
+-- / CacheHit probe path) to ensure AC8 coverage on cache hits.
 --
 -- fetch() returns nil only when JSON encoding fails (unexpected).
 
@@ -218,14 +232,10 @@ local function email_allowed(email)
   return string.sub(email, -#suffix) == suffix
 end
 
-local function encode_result(payload, audit)
+local function encode_result(payload)
   local encoded, err = json.encode(payload)
   if encoded == nil then return nil end
-  local out = { data = encoded, content_type = "application/json" }
-  if audit ~= nil then
-    out.audit = audit
-  end
-  return out
+  return { data = encoded, content_type = "application/json" }
 end
 
 local function inactive()
@@ -239,14 +249,36 @@ local function record_field(record, key)
   return tostring(v)
 end
 
-local function cross_account_audit(outcome, claims, target_account, target_org)
-  return {
-    event = "cross_account_" .. outcome,
+-- audit_cross_account emits the generic audit signal for a terminal
+-- cross-account outcome. reason_code is omitted for "success".
+-- classification is a sub-reason that distinguishes denial causes
+-- (e.g. "not_internal", "rbac_denied") without changing the top-level
+-- reason_code used for alerting.
+local function audit_cross_account(outcome, reason_code, classification, claims, target_account, target_org)
+  local employee_account, employee_org = resolve_employee_account_org(claims)
+  local record = {
+    source = "data_source",
+    operation = "cross_account_access",
     outcome = outcome,
-    employee_user_id = resolve_user_id(claims),
-    target_account_number = target_account,
-    target_org_id = target_org,
+    metadata = {
+      employee_user_id = resolve_user_id(claims),
+      employee_account_number = employee_account,
+      employee_org_id = employee_org,
+      target_account_number = target_account,
+      target_org_id = target_org,
+    }
   }
+  if reason_code ~= nil and reason_code ~= "" then
+    record.reason_code = reason_code
+  end
+  if classification ~= nil and classification ~= "" then
+    record.classification = classification
+  end
+  local ok = audit.record(record)
+  if not ok then
+    record.metadata = nil
+    audit.record(record)
+  end
 end
 
 local function resolve_rbac_url(user_id, target_org_id)
@@ -355,53 +387,60 @@ function fetch(input)
   end
 
   if not account_cookie_valid(target_account) then
-    return encode_result({ error = "rbac_denied" },
-      cross_account_audit("rbac_denied", claims, "", target_org))
+    audit_cross_account("denied", "cross_account_denied", "invalid_cookie", claims, "", target_org)
+    return encode_result({ error = "rbac_denied" })
   end
 
   if not resolve_is_internal(claims) then
-    return encode_result({ error = "forbidden" },
-      cross_account_audit("forbidden", claims, target_account, target_org))
+    audit_cross_account("denied", "cross_account_denied", "not_internal", claims, target_account, target_org)
+    return encode_result({ error = "forbidden" })
   end
 
   local email = resolve_email(claims)
   if not email_allowed(email) then
-    return encode_result({ error = "forbidden" },
-      cross_account_audit("forbidden", claims, target_account, target_org))
+    audit_cross_account("denied", "cross_account_denied", "email_not_allowed", claims, target_account, target_org)
+    return encode_result({ error = "forbidden" })
   end
 
   local user_id = resolve_user_id(claims)
   if user_id == "" then
-    return encode_result({ error = "infra" },
-      cross_account_audit("infra", claims, target_account, target_org))
+    audit_cross_account("failure", "credential_malformed", "missing_user_id", claims, target_account, target_org)
+    return encode_result({ error = "infra" })
   end
 
   if target_org == "" then
-    return encode_result({ error = "rbac_denied" },
-      cross_account_audit("rbac_denied", claims, target_account, target_org))
+    audit_cross_account("denied", "cross_account_denied", "missing_org_cookie", claims, target_account, target_org)
+    return encode_result({ error = "rbac_denied" })
   end
 
   local record, err_kind = rbac_find_approved_record(claims, target_org)
   if err_kind == "infra" then
-    return encode_result({ error = "infra" },
-      cross_account_audit("infra", claims, target_account, target_org))
+    audit_cross_account("failure", "dependency_failure", "rbac_infra", claims, target_account, target_org)
+    return encode_result({ error = "infra" })
   end
   if record == nil then
-    return encode_result({ error = "rbac_denied" },
-      cross_account_audit("rbac_denied", claims, target_account, target_org))
+    audit_cross_account("denied", "cross_account_denied", "rbac_denied", claims, target_account, target_org)
+    return encode_result({ error = "rbac_denied" })
   end
   if not org_matches_record(target_org, record) then
-    return encode_result({ error = "rbac_denied" },
-      cross_account_audit("rbac_denied", claims, target_account, target_org))
+    audit_cross_account("denied", "cross_account_denied", "org_mismatch", claims, target_account, target_org)
+    return encode_result({ error = "rbac_denied" })
   end
 
   local employee_account, employee_org = resolve_employee_account_org(claims)
 
-  return encode_result({
+  local result = encode_result({
     active = true,
     target_account_number = target_account,
     target_org_id = record.target_org_id,
     employee_account_number = employee_account,
     employee_org_id = employee_org
-  }, cross_account_audit("approved", claims, target_account, record.target_org_id))
+  })
+  if result == nil then
+    audit_cross_account("failure", "dependency_failure", "encode_failed", claims, target_account, record.target_org_id)
+    return nil
+  end
+
+  audit_cross_account("success", nil, nil, claims, target_account, record.target_org_id)
+  return result
 end

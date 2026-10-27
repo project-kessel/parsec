@@ -229,11 +229,13 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	select {
 	case err := <-errCh:
+		p.ShutdownCompleted(0)
 		return err
 	case <-ctx.Done():
 		// Close HTTP and kick async gRPC Stop without waiting. errCh is
 		// buffered, so a stuck GracefulStop does not block this return.
 		s.forceStop()
+		p.ShutdownFailed(0)
 		return ctx.Err()
 	}
 }

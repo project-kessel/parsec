@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/config"
 	"github.com/project-kessel/parsec/internal/server"
 )
@@ -170,6 +171,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 7. Log startup information
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
+	obs.ProcessReady(server.ProcessInfo{
+		Version:     buildinfo.Version,
+		Commit:      buildinfo.Commit,
+		TrustDomain: provider.TrustDomain(),
+		GRPCAddress: grpcAddr,
+		HTTPAddress: httpAddr,
+	})
 	logEvent := bootstrapLog.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).
@@ -196,21 +204,27 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetNotReady()
 
 	// 9. Graceful shutdown
-	// Flush observer resources (e.g. metrics) while the HTTP server is
-	// still running so Prometheus can perform a final scrape.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	if err := obs.Shutdown(shutdownCtx); err != nil {
-		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
-	}
-
-	// Bound the drain. The pod's terminationGracePeriodSeconds must cover
-	// this plus the preStop delay, or kubelet SIGKILLs the process and
-	// drops in-flight ext_authz calls.
+	// Drain in-flight requests first. This ensures that any audit events
+	// emitted by requests completing during the drain window reach the
+	// observer tree while it is still active. The pod's
+	// terminationGracePeriodSeconds must cover this plus the preStop
+	// delay, or kubelet SIGKILLs the process and drops in-flight
+	// ext_authz calls.
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer stopCancel()
 	if err := srv.Stop(stopCtx); err != nil {
 		return fmt.Errorf("error during shutdown: %w", err)
+	}
+
+	// Flush observer resources (e.g. metrics exporter buffers, future
+	// audit sinks) after the server has drained. Prometheus pull-model
+	// scraping relies on the preStop hook window before SIGTERM rather
+	// than this explicit flush; push-model exporters (OTLP) are flushed
+	// here.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := obs.Shutdown(shutdownCtx); err != nil {
+		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
 	}
 
 	bootstrapLog.Info().Msg("Shutdown complete")

@@ -6,9 +6,11 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
+	"github.com/project-kessel/parsec/internal/probe/audit"
 	"github.com/project-kessel/parsec/internal/probe/otel"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -107,6 +109,13 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 	}
 
 	switch cfg.Type {
+	case "audit":
+		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
+		if err != nil {
+			return nil, err
+		}
+		return p.newAuditObserver(cfg, lc)
+
 	case "logging":
 		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
 		if err != nil {
@@ -133,8 +142,103 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 		return p.buildCompositeObserver(cfg, parentLogCtx)
 
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: audit, logging, noop, metrics, composite)", cfg.Type)
 	}
+}
+
+func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	// Audit records are always structured JSON at production-visible levels.
+	// Writer is the raw sink, so parent console formatting and restrictive
+	// diagnostic levels cannot suppress or reshape security events.
+	logger := zerolog.New(logCtx.Writer).Level(zerolog.InfoLevel)
+	prefix := audit.DefaultEventPrefix
+	if effective := effectiveEventPrefix(cfg, p.config.Observability); effective != nil {
+		prefix = *effective
+	}
+	if !audit.ValidEventPrefix(prefix) {
+		return nil, fmt.Errorf("invalid audit event prefix %q: use only letters, digits, underscore, hyphen, or dot", prefix)
+	}
+
+	opts := []audit.Option{audit.WithEventPrefix(prefix)}
+
+	classifications := p.failureClassifications()
+	for dataSourceName, classification := range classifications {
+		if !audit.ValidReasonCode(classification) {
+			return nil, fmt.Errorf("data source %q: invalid failure_classification %q: must be a known audit reason code", dataSourceName, classification)
+		}
+	}
+	if len(classifications) > 0 {
+		opts = append(opts, audit.WithFailureClassifications(classifications))
+	}
+
+	keys := p.allowedMetadataKeys(cfg)
+	if len(keys) == 0 {
+		startupLog := zerolog.New(logCtx.Writer).With().Timestamp().Logger()
+		startupLog.Warn().Msg("audit_metadata_keys not configured; all audit metadata keys will be rejected. " +
+			"Configure an explicit allowlist under observability.audit_metadata_keys for production use.")
+	}
+	opts = append(opts, audit.WithAllowedMetadataKeys(keys))
+
+	return audit.New(logger, audit.Metadata{
+		ServiceName:    "parsec",
+		ServiceVersion: buildinfo.Version,
+		TrustDomain:    p.config.TrustDomain,
+	}, opts...), nil
+}
+
+// effectiveEventPrefix prefers the prefix configured on the audit observer
+// entry itself (cfg), falling back to the top-level Observability config.
+// The two differ when the audit observer is a child of a `type: composite`
+// entry: cfg is the child, top is the composite parent that documents/
+// receives the --observability-event-prefix flag.
+func effectiveEventPrefix(cfg, top *ObservabilityConfig) *string {
+	if cfg != nil && cfg.EventPrefix != nil {
+		return cfg.EventPrefix
+	}
+	if top != nil && top.EventPrefix != nil {
+		return top.EventPrefix
+	}
+	return nil
+}
+
+// allowedMetadataKeys builds the audit metadata key allowlist, preferring
+// the allowlist configured on the audit observer entry itself (cfg),
+// falling back to the top-level Observability config. This mirrors
+// effectiveEventPrefix: for a `type: composite` observer, cfg is the child
+// `- type: audit` entry and p.config.Observability is the composite parent.
+//
+// When no allowlist is configured at either level, returns an empty non-nil
+// map (reject all metadata keys). This fail-closed default prevents
+// credentials or tokens from leaking into audit logs when a deployment
+// omits the audit_metadata_keys configuration. The caller is responsible
+// for logging a warning when the returned map is empty.
+func (p *Provider) allowedMetadataKeys(cfg *ObservabilityConfig) map[string]bool {
+	src := cfg.AllowedMetadataKeys
+	if len(src) == 0 && p.config.Observability != nil {
+		src = p.config.Observability.AllowedMetadataKeys
+	}
+	if len(src) == 0 {
+		return map[string]bool{}
+	}
+	keys := make(map[string]bool, len(src))
+	for _, key := range src {
+		if key != "" {
+			keys[key] = true
+		}
+	}
+	return keys
+}
+
+// failureClassifications builds a map from datasource name to audit failure
+// classification from the DataSources config.
+func (p *Provider) failureClassifications() map[string]string {
+	result := make(map[string]string)
+	for _, ds := range p.config.DataSources {
+		if ds.FailureClassification != "" {
+			result[ds.Name] = ds.FailureClassification
+		}
+	}
+	return result
 }
 
 func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {
