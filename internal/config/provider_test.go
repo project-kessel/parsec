@@ -354,7 +354,7 @@ func TestProvider_HostRulesReachAuthzServer(t *testing.T) {
 		return resp.Status.Code
 	}
 
-	if got := check("console.example.com", "/docs"); got != 0 {
+	if got := check("CONSOLE.EXAMPLE.COM", "/docs"); got != 0 {
 		t.Errorf("host-scoped rule: got status %d, want OK", got)
 	}
 	if got := check("packages.example.com", "/docs"); got != 16 {

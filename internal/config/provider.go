@@ -465,7 +465,7 @@ func buildStaticAuthenticatedOpts(cfg AuthzCheckPolicyConfig) ([]server.StaticAu
 		if err != nil {
 			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].paths: %w", i, err)
 		}
-		hosts, err := server.CompilePathPatterns(rule.Hosts)
+		hosts, err := server.CompileHostPatterns(rule.Hosts)
 		if err != nil {
 			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].hosts: %w", i, err)
 		}

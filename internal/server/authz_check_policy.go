@@ -142,6 +142,20 @@ func CompilePathPatterns(patterns []string) ([]*regexp.Regexp, error) {
 	return compiled, nil
 }
 
+// CompileHostPatterns compiles host regex strings into case-insensitive,
+// anchored regexps suitable for full-host matching.
+func CompileHostPatterns(patterns []string) ([]*regexp.Regexp, error) {
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
+	for i, pattern := range patterns {
+		re, err := regexp.Compile("^(?i:(?:" + pattern + "))$")
+		if err != nil {
+			return nil, fmt.Errorf("allow_anonymous_without_issue_rules[%d].hosts: invalid RE2 regex %q: %w", i, pattern, err)
+		}
+		compiled = append(compiled, re)
+	}
+	return compiled, nil
+}
+
 // StaticAuthenticatedPolicy is an AuthzCheckPolicy that denies anonymous
 // subjects and issues a statically configured set of token types for
 // authenticated subjects. Optionally, configured path patterns allow

@@ -349,6 +349,16 @@ func TestCompilePathPatterns_InvalidPatternAfterValid(t *testing.T) {
 	}
 }
 
+func TestCompileHostPatterns_CaseInsensitive(t *testing.T) {
+	hosts, err := CompileHostPatterns([]string{`console\.example\.com`})
+	if err != nil {
+		t.Fatalf("CompileHostPatterns: %v", err)
+	}
+	if !hosts[0].MatchString("console.example.com") || !hosts[0].MatchString("CONSOLE.EXAMPLE.COM") {
+		t.Fatalf("host pattern should match case-insensitively")
+	}
+}
+
 func TestStaticAuthenticatedPolicy_HostAndPathRules(t *testing.T) {
 	paths, err := CompilePathPatterns([]string{`/api/distributors/.*/openapi.json`})
 	if err != nil {
