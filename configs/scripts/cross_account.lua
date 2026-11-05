@@ -35,9 +35,10 @@
 -- can reach target_account_number, the CEL account_number field, or audit.
 --
 -- Audit: uses audit.record() (deployment-neutral generic signal API, source
--- "data_source", operation "cross_account_access") for every terminal outcome
--- so the request-scoped audit probe can emit rbac_cross_access_audit (AC8).
--- The metadata.classification field distinguishes denial sub-reasons:
+-- "data_source", operation "cross_account_access") for every terminal outcome.
+-- The operation is recorded as a signal inside the request record; no separate
+-- event is emitted. The metadata.classification field distinguishes denial
+-- sub-reasons:
 --   "not_internal"       — non-internal user attempting cross-account (AC2)
 --   "email_not_allowed"  — internal user without required email suffix
 --   "rbac_denied"        — no approved RBAC request (AC3)
@@ -45,11 +46,9 @@
 --   "org_mismatch"       — cookie org does not match RBAC record
 --   "missing_org_cookie" — org cookie absent with account cookie present
 --
--- IMPORTANT: This datasource must NOT have caching enabled. The audit event
--- is emitted inside fetch(), so a cache hit would skip fetch() entirely and
--- silently drop the rbac_cross_access_audit event. If caching is ever needed,
--- the audit event must be moved to the Go side (e.g. via the CacheFetchStarted
--- / CacheHit probe path) to ensure AC8 coverage on cache hits.
+-- IMPORTANT: This datasource must NOT have caching enabled. A cache hit
+-- skips fetch() entirely, so audit.record() would never run and the signal
+-- would be silently dropped from the request record.
 --
 -- fetch() returns nil only when JSON encoding fails (unexpected).
 

@@ -51,7 +51,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 
 	// 1. Validate the grant type
 	if req.GrantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
-		err := fmt.Errorf("unsupported grant_type: %s", req.GrantType)
+		err := fmt.Errorf("%w: %s", service.ErrUnsupportedGrantType, req.GrantType)
 		p.RequestFailed(err)
 		return nil, err
 	}
@@ -151,16 +151,18 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 
 	r, ok := results[requestedTokenType]
 	if !ok {
-		p.TokenIssuanceFailed(fmt.Errorf("token service did not return requested token type %s", requestedTokenType))
-		return nil, status.Errorf(codes.Internal, "token service did not return requested token type %s", requestedTokenType)
+		err = fmt.Errorf("token service did not return requested token type %s", requestedTokenType)
+		p.TokenIssuanceFailed(err)
+		return nil, status.Errorf(codes.Internal, "%s", err)
 	}
 	if r.ExchangeErr != nil {
 		p.TokenIssuanceDenied(r.ExchangeErr)
 		return nil, exchangeErrToGRPC(r.ExchangeErr)
 	}
 	if r.Token == nil {
-		p.TokenIssuanceFailed(fmt.Errorf("token service returned no token for type %s", requestedTokenType))
-		return nil, status.Errorf(codes.Internal, "token service returned no token for type %s", requestedTokenType)
+		err = fmt.Errorf("token service returned no token for type %s", requestedTokenType)
+		p.TokenIssuanceFailed(err)
+		return nil, status.Errorf(codes.Internal, "%s", err)
 	}
 
 	// 9. Return response

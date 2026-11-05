@@ -183,7 +183,7 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 		ServiceName:    "parsec",
 		ServiceVersion: buildinfo.Version,
 		TrustDomain:    p.config.TrustDomain,
-	}, opts...), nil
+	}, opts...)
 }
 
 // effectiveEventPrefix prefers the prefix configured on the audit observer

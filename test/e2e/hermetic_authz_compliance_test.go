@@ -115,7 +115,10 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	newAuthz := func(withComplianceDS bool, client *http.Client) (*server.AuthzServer, *bytes.Buffer) {
 		output := &bytes.Buffer{}
-		obs := auditprobe.New(zerolog.New(output), auditprobe.Metadata{ServiceName: "parsec"})
+		obs, err := auditprobe.New(zerolog.New(output), auditprobe.Metadata{ServiceName: "parsec"})
+		if err != nil {
+			t.Fatal(err)
+		}
 		dsRegistry := service.NewDataSourceRegistry()
 		dsRegistry.Register(identityPolicyDS)
 		if withComplianceDS {

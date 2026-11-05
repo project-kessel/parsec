@@ -80,8 +80,10 @@ func newAuditAPI(t *testing.T, scripts []string) *auditAPI {
 	t.Helper()
 	output := &auditOutput{}
 	// Exercise composite fan-out as used by deployed configurations.
+	auditObs, err := auditprobe.New(zerolog.New(output), auditprobe.Metadata{ServiceName: "parsec"})
+	require.NoError(t, err)
 	obs := observer.CompositeAll([]observer.Observer{
-		observer.NoOp(), auditprobe.New(zerolog.New(output), auditprobe.Metadata{ServiceName: "parsec"}),
+		observer.NoOp(), auditObs,
 	})
 	clk := clock.NewFixtureClock(time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC))
 	registry := service.NewSimpleRegistry()

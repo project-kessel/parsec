@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 
@@ -108,13 +110,17 @@ func WithAllowedMetadataKeys(keys map[string]bool) Option {
 	}
 }
 
-func New(logger zerolog.Logger, meta Metadata, options ...Option) *Observer {
+func New(logger zerolog.Logger, meta Metadata, options ...Option) (*Observer, error) {
 	observer := &Observer{logger: logger, meta: meta, eventPrefix: DefaultEventPrefix}
 	for _, option := range options {
 		option(observer)
 	}
-	observer.metaJSON, _ = json.Marshal(meta)
-	return observer
+	var err error
+	observer.metaJSON, err = json.Marshal(meta)
+	if err != nil {
+		return nil, fmt.Errorf("marshal audit metadata: %w", err)
+	}
+	return observer, nil
 }
 
 // ValidEventPrefix reports whether prefix is safe to include in the event field.
@@ -156,6 +162,8 @@ type resourceInfo struct {
 	RequestedTokenTypes []string             `json:"requested_token_types,omitempty"`
 	CacheStatus         string               `json:"cache_status,omitempty"`
 	CacheLayers         []request.CacheLayer `json:"cache_layers,omitempty"`
+	FailedComponent     string               `json:"failed_component,omitempty"`
+	SignalsDropped      int                  `json:"signals_dropped,omitempty"`
 }
 
 // emitEnvelope holds pre-serialized JSON for the shared fields that are
@@ -434,12 +442,17 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 
 	// Policy evaluation error
 	if p.policyEvalErr != nil {
-		return AuditOutcomeFailure, reasonFromError(p.policyEvalErr, ReasonInternalError)
+		return AuditOutcomeFailure, ReasonInternalError
 	}
 
 	// Catch-all request failure (e.g. unsupported grant type, audience mismatch)
 	if p.requestFailed {
-		return AuditOutcomeFailure, reasonFromError(p.requestFailedErr, ReasonInternalError)
+		if p.requestFailedErr != nil {
+			if errors.Is(p.requestFailedErr, service.ErrUnsupportedGrantType) {
+				return AuditOutcomeFailure, ReasonGrantTypeUnsupported
+			}
+		}
+		return AuditOutcomeFailure, ReasonInternalError
 	}
 
 	// No failure was signaled — the request completed successfully.
@@ -448,33 +461,19 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 	return AuditOutcomeSuccess, ""
 }
 
-// reasonFromError classifies only known failure families. Error text is
-// never returned or recorded.
-func reasonFromError(err error, fallback string) string {
-	if err == nil {
-		return fallback
-	}
-	return reasonFromText(err.Error(), fallback)
-}
-
-func reasonFromText(value, fallback string) string {
-	value = strings.ToLower(value)
-	switch {
-	case strings.Contains(value, "jwks"), strings.Contains(value, "dependency"):
-		return ReasonDependencyFailure
-	case strings.Contains(value, "grant_type"):
-		return ReasonGrantTypeUnsupported
-	default:
-		return fallback
-	}
-}
-
 func (p *requestProbe) End() {
 	outcome, reasonCode := p.deriveCompletion()
 
-	cacheStatus, cacheLayers, failureReason := p.state.Snapshot()
+	cacheStatus, cacheLayers, failureReason, failedComponent, dependencyOutage := p.state.Snapshot()
 	if outcome == AuditOutcomeFailure && (reasonCode == "" || reasonCode == ReasonInternalError) && failureReason != "" {
 		reasonCode = failureReason
+	}
+	// A real infrastructure outage (JWKS down, distributed cache failure)
+	// overrides credential_invalid to failure/dependency_failure so that
+	// bad signatures are not reported as outages.
+	if dependencyOutage && outcome == AuditOutcomeDenied && reasonCode == ReasonCredentialInvalid {
+		outcome = AuditOutcomeFailure
+		reasonCode = ReasonDependencyFailure
 	}
 	p.cacheStatus = cacheStatus
 	p.derivedOutcome = outcome
@@ -490,55 +489,48 @@ func (p *requestProbe) End() {
 	env.resource, _ = json.Marshal(resourceInfo{
 		Type: resourceTypeForAction(p.action), TokenTypes: safeTokenTypes(p.tokenTypes),
 		RequestedTokenTypes: safeTokenTypes(p.requestedTokenTypes), CacheStatus: p.cacheStatus, CacheLayers: cacheLayers,
+		FailedComponent: failedComponent, SignalsDropped: p.collector.Dropped(),
 	})
 	if len(signals) > 0 {
 		env.signals, _ = json.Marshal(signals)
 	}
 
-	p.emitRaw("request", nil, nil, &env)
-	emitted := map[string]bool{}
+	p.emitRaw("request", nil, &env)
 
-	for _, signal := range signals {
-		if signal.Operation == "cross_account_access" {
-			p.emitRaw("rbac_cross_access_audit", signal.Metadata, &signal, &env)
-			emitted["rbac_cross_access_audit"] = true
-		}
-	}
 	if p.authorize {
-		p.emitRaw("authorize", nil, nil, &env)
+		p.emitRaw("authorize", nil, &env)
 	}
 	if p.subject.CredentialType == string(trust.CredentialTypeMTLS) || p.subject.CredentialType == string(trust.CredentialTypeForwardedClientCert) {
-		p.emitRaw("validate_ssl_cert", nil, nil, &env)
+		p.emitRaw("validate_ssl_cert", nil, &env)
 	}
 	if p.actor.CredentialType == string(trust.CredentialTypeHeader) {
-		p.emitRaw("verify_psk", nil, nil, &env)
+		p.emitRaw("verify_psk", nil, &env)
 	}
-	switch reasonCode {
-	case ReasonComplianceDenied:
-		p.emitRaw("auth_compliance_failure", nil, nil, &env)
-		emitted["auth_compliance_failure"] = true
-	case ReasonComplianceFailure:
-		p.emitRaw("compliance_failure", nil, nil, &env)
-		emitted["compliance_failure"] = true
-	case ReasonSupplementalFailure:
-		p.emitRaw("supplemental_user_data_failure", nil, nil, &env)
-		emitted["supplemental_user_data_failure"] = true
-	case ReasonDependencyFailure:
-		p.emitRaw("dependency_failure", nil, nil, &env)
-		emitted["dependency_failure"] = true
-	}
+
+	// Each signal whose reason maps to an event emits its own event with
+	// its own outcome. Two signals with the same reason emit two events.
+	signalCoveredSuffix := false
+	finalSuffix := signalEventSuffix(reasonCode)
 	for _, signal := range signals {
-		if suffix := signalEventSuffix(signal.ReasonCode); suffix != "" && !emitted[suffix] {
-			p.emitRaw(suffix, nil, &signal, &env)
-			emitted[suffix] = true
+		if suffix := signalEventSuffix(signal.ReasonCode); suffix != "" {
+			p.emitRaw(suffix, &signal, &env)
+			if suffix == finalSuffix {
+				signalCoveredSuffix = true
+			}
 		}
+	}
+
+	// Emit the reason-specific event for the request's final reason only
+	// when no signal already carries the same reason.
+	if finalSuffix != "" && !signalCoveredSuffix {
+		p.emitRaw(finalSuffix, nil, &env)
 	}
 }
 
 // emitRaw writes a single audit event record using pre-serialized envelope
-// fields. Only outcome, reason_code, and cross_account metadata vary per
-// event; the six shared Interface() fields are serialized once in End().
-func (p *requestProbe) emitRaw(suffix string, signalMetadata map[string]string, signal *auditctx.Signal, env *emitEnvelope) {
+// fields. Only outcome and reason_code vary per event; the shared fields are
+// serialized once in End().
+func (p *requestProbe) emitRaw(suffix string, signal *auditctx.Signal, env *emitEnvelope) {
 	name := p.observer.eventName(suffix)
 	var outcome AuditOutcome
 	var reasonCode string
@@ -569,9 +561,6 @@ func (p *requestProbe) emitRaw(suffix string, signalMetadata map[string]string, 
 	}
 	if reason != "" {
 		event = event.Str("reason_code", reason)
-	}
-	if len(signalMetadata) > 0 {
-		event = event.Interface("cross_account", signalMetadata)
 	}
 	event.Msg(name)
 }
@@ -626,23 +615,9 @@ func safeReasonCode(reason string) string {
 	return reason
 }
 
-// ValidReasonCode reports whether reason is one of the known audit reason
-// codes. Used both to sanitize signal/completion reason codes at emit time
-// and to validate configured values (e.g. DataSource.FailureClassification)
-// at startup so misconfiguration fails fast instead of silently becoming
-// "internal_error" in every audit record.
+// ValidReasonCode delegates to the shared implementation in internal/audit.
 func ValidReasonCode(reason string) bool {
-	switch reason {
-	case ReasonInvalidRequest, ReasonGrantTypeUnsupported,
-		ReasonCredentialMissing, ReasonCredentialMalformed, ReasonCredentialInvalid,
-		ReasonCredentialExpired, ReasonSchemeNotAllowed, ReasonPolicyDenied,
-		ReasonComplianceDenied, ReasonComplianceFailure, ReasonSupplementalFailure,
-		ReasonDependencyFailure, ReasonInternalError, ReasonTokenIssuanceFailed,
-		ReasonTokenIssuanceDenied, ReasonCrossAccountDenied:
-		return true
-	default:
-		return false
-	}
+	return auditctx.ValidReasonCode(reason)
 }
 
 func safeTokenType(tokenType service.TokenType) string {
@@ -679,7 +654,10 @@ func (p *auditInMemoryCacheProbe) CacheExpired() {
 	p.state.RecordCacheLayer("validator_memory", "expired")
 }
 func (p *auditInMemoryCacheProbe) SourceFailed(error) {
-	p.state.SetFailureReason(ReasonDependencyFailure)
+	// SourceFailed fires for any inner validation error (bad signature,
+	// expired token, etc.), not only infrastructure outages. Real outages
+	// are flagged by JWKSLookupFailed / distributed GetFailed via
+	// SetDependencyOutage; this callback no longer sets dependency_failure.
 }
 
 type auditDistributedCacheProbe struct {
@@ -699,6 +677,8 @@ func (p *auditDistributedCacheProbe) CacheMiss() {
 func (p *auditDistributedCacheProbe) GetFailed(error) {
 	p.state.RecordCacheLayer("validator_distributed", "failure")
 	p.state.SetFailureReason(ReasonDependencyFailure)
+	p.state.SetFailedComponent("validator_distributed")
+	p.state.SetDependencyOutage()
 }
 func (p *auditDistributedCacheProbe) ResultExpired() {
 	p.state.RecordCacheLayer("validator_distributed", "expired")
@@ -724,21 +704,35 @@ func (p *auditDataSourceCacheProbe) CacheExpired() { p.state.RecordCacheLayer(p.
 func (p *auditDataSourceCacheProbe) FetchFailed(error) {
 	p.state.RecordCacheLayer(p.layer, "failure")
 	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailedComponent(p.layer)
 }
 
 type auditLuaFetchProbe struct {
 	datasource.NoOpLuaFetchProbe
 	state         *request.AuditState
+	name          string
 	failureReason string
 }
 
 func (o *Observer) LuaFetchStarted(ctx context.Context, name string) (context.Context, datasource.LuaFetchProbe) {
-	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), failureReason: o.classificationFor(name)}
+	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), name: name, failureReason: o.classificationFor(name)}
 }
-func (p *auditLuaFetchProbe) ScriptLoadFailed(error)       { p.state.SetFailureReason(p.failureReason) }
-func (p *auditLuaFetchProbe) ScriptExecutionFailed(error)  { p.state.SetFailureReason(p.failureReason) }
-func (p *auditLuaFetchProbe) InvalidReturnType(string)     { p.state.SetFailureReason(p.failureReason) }
-func (p *auditLuaFetchProbe) ResultConversionFailed(error) { p.state.SetFailureReason(p.failureReason) }
+func (p *auditLuaFetchProbe) ScriptLoadFailed(error) {
+	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailedComponent(p.name)
+}
+func (p *auditLuaFetchProbe) ScriptExecutionFailed(error) {
+	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailedComponent(p.name)
+}
+func (p *auditLuaFetchProbe) InvalidReturnType(string) {
+	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailedComponent(p.name)
+}
+func (p *auditLuaFetchProbe) ResultConversionFailed(error) {
+	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailedComponent(p.name)
+}
 
 type auditJWTProbe struct {
 	trust.NoOpJWTValidateProbe
@@ -750,6 +744,8 @@ func (o *Observer) JWTValidateStarted(ctx context.Context, _ string) (context.Co
 }
 func (p *auditJWTProbe) JWKSLookupFailed(error) {
 	p.state.SetFailureReason(ReasonDependencyFailure)
+	p.state.SetFailedComponent("jwks")
+	p.state.SetDependencyOutage()
 }
 
 // classificationFor returns the configured failure classification for a
@@ -967,13 +963,20 @@ func safePath(path string) string {
 
 func safeValue(value string, max int) string {
 	value = strings.TrimSpace(value)
-	if value == "" || len(value) > max {
+	if value == "" {
 		return ""
 	}
 	for _, r := range value {
 		if unicode.IsControl(r) {
 			return ""
 		}
+	}
+	if len(value) > max {
+		end := max
+		for end > 0 && !utf8.RuneStart(value[end]) {
+			end--
+		}
+		value = value[:end]
 	}
 	return value
 }

@@ -52,6 +52,7 @@ func (NoOpReporter) Record(Signal) bool { return true }
 type Collector struct {
 	mu          sync.Mutex
 	signals     []Signal
+	dropped     int
 	allowedKeys map[string]bool
 }
 
@@ -79,7 +80,19 @@ func (c *Collector) Record(signal Signal) bool {
 		c.signals = append(c.signals, signal)
 		return true
 	}
+	c.dropped++
 	return false
+}
+
+// Dropped returns the number of valid signals rejected because the
+// 32-signal limit was hit. Invalid signals are not counted.
+func (c *Collector) Dropped() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dropped
 }
 
 func (c *Collector) Signals() []Signal {
@@ -133,7 +146,7 @@ func (c *Collector) valid(signal Signal) bool {
 		(signal.Classification != "" && !validText(signal.Classification, MaxClassificationLength)) {
 		return false
 	}
-	if signal.ReasonCode != "" && !validReason(signal.ReasonCode) {
+	if signal.ReasonCode != "" && !ValidReasonCode(signal.ReasonCode) {
 		return false
 	}
 	return c.validMetadata(signal.Metadata)
@@ -215,7 +228,9 @@ func validText(value string, max int) bool {
 	return true
 }
 
-func validReason(reason string) bool {
+// ValidReasonCode reports whether reason is one of the known audit reason
+// codes, and passes the charset and length check.
+func ValidReasonCode(reason string) bool {
 	if !validText(reason, 128) {
 		return false
 	}
