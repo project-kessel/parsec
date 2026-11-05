@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -927,6 +928,35 @@ func TestCELMapper_LayerA(t *testing.T) {
 			}
 			if result.Decision.Reason != "" {
 				t.Errorf("Layer A Reason should be empty, got %q", result.Decision.Reason)
+			}
+		})
+	}
+}
+
+func TestCELMapperClassifiedAccessDenied(t *testing.T) {
+	for _, classification := range []string{"compliance_denied", "tenant.policy-1", "", "bad label", "bad\nlabel", "é", strings.Repeat("a", 129)} {
+		t.Run(classification, func(t *testing.T) {
+			encoded, err := json.Marshal(classification)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, err := NewCELMapper(`accessDenied("policy denied", ` + string(encoded) + `)`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := m.Map(context.Background(), &service.MapperInput{})
+			if classification != "compliance_denied" && classification != "tenant.policy-1" {
+				if err == nil {
+					t.Fatal("invalid classification accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision := result.Decision
+			if decision.Action != service.MappingDeny || decision.OAuthError != service.OAuthAccessDenied || decision.Message != "policy denied" || decision.Reason != "" || decision.Classification != classification {
+				t.Fatalf("unexpected classified decision: %+v", decision.ExchangeError)
 			}
 		})
 	}

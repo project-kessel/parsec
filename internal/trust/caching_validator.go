@@ -151,6 +151,13 @@ func (v *InMemoryCachingValidator) Cleanup() {
 	}
 }
 
+// distributedCacheLoadedKey is used to detect, within the current process,
+// whether a Get resulted in a local fetch (cache miss) or was served from
+// cache (hit). Values loaded by a remote peer in a distributed groupcache
+// deployment cannot be distinguished this way and are reported as hits;
+// this is a known limitation of groupcache's peer-to-peer design.
+type distributedCacheLoadedKey struct{}
+
 // DistributedCachingValidator wraps a cacheable validator with groupcache.
 type DistributedCachingValidator struct {
 	name      string
@@ -206,6 +213,9 @@ func NewDistributedCachingValidator(name string, source Validator, obs Distribut
 			return deserializeValidatorInput(key)
 		},
 		func(ctx context.Context, input ValidatorInput) (*Result, error) {
+			if loaded, ok := ctx.Value(distributedCacheLoadedKey{}).(*bool); ok {
+				*loaded = true
+			}
 			result, err := source.Validate(ctx, input.Credential)
 			if err != nil {
 				return nil, fmt.Errorf("validator failed: %w", err)
@@ -259,7 +269,9 @@ func (v *DistributedCachingValidator) Validate(ctx context.Context, credential C
 		return v.source.Validate(ctx, credential)
 	}
 
-	result, err := v.adapter.Get(ctx, cacheInput)
+	var loaded bool
+	getCtx := context.WithValue(ctx, distributedCacheLoadedKey{}, &loaded)
+	result, err := v.adapter.Get(getCtx, cacheInput)
 	if err != nil {
 		p.GetFailed(err)
 		return nil, fmt.Errorf("groupcache validator get failed: %w", err)
@@ -270,6 +282,14 @@ func (v *DistributedCachingValidator) Validate(ctx context.Context, credential C
 		return nil, ErrExpiredToken
 	}
 
+	// loaded is true only when the fetch ran in this process (a local cache
+	// miss). Values served from local cache, or loaded by a remote peer in a
+	// distributed deployment, are reported as hits.
+	if loaded {
+		p.CacheMiss()
+	} else {
+		p.CacheHit()
+	}
 	return result, nil
 }
 

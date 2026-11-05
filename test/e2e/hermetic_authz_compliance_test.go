@@ -1,13 +1,18 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
 	"github.com/project-kessel/parsec/internal/clock"
@@ -17,6 +22,7 @@ import (
 	"github.com/project-kessel/parsec/internal/issuer"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 	"github.com/project-kessel/parsec/internal/mapper"
+	auditprobe "github.com/project-kessel/parsec/internal/probe/audit"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
 	"github.com/project-kessel/parsec/internal/trust"
@@ -70,19 +76,20 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 		t.Fatalf("identity-policy DS: %v", err)
 	}
 
-	newComplianceDS := func(client *http.Client) service.DataSource {
-		ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
+	newComplianceDS := func(client *http.Client, obs datasource.DataSourceObserver) service.DataSource {
+		ds, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourceConfig{
 			Name:   "export_compliance",
 			Script: string(luaScript),
 			ConfigSource: luaservices.NewMapConfigSource(map[string]any{
 				"compliance_api": "/v1/compliance",
 			}),
-			HTTP: httpclient.LuaClient{Client: client, BaseURL: testComplianceBaseURL},
+			HTTP:     httpclient.LuaClient{Client: client, BaseURL: testComplianceBaseURL},
+			Observer: obs,
 		})
 		if err != nil {
 			t.Fatalf("compliance DS: %v", err)
 		}
-		return ds
+		return datasource.NewInMemoryCachingDataSource(ds, obs, datasource.WithClock(clk), datasource.WithCacheTTL(time.Minute))
 	}
 
 	makeHTTPClient := func(complianceBody string, complianceStatus int) *http.Client {
@@ -106,11 +113,16 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 		}
 	}
 
-	newAuthz := func(withComplianceDS bool, client *http.Client) *server.AuthzServer {
+	newAuthz := func(withComplianceDS bool, client *http.Client) (*server.AuthzServer, *bytes.Buffer) {
+		output := &bytes.Buffer{}
+		obs, err := auditprobe.New(zerolog.New(output), auditprobe.Metadata{ServiceName: "parsec"})
+		if err != nil {
+			t.Fatal(err)
+		}
 		dsRegistry := service.NewDataSourceRegistry()
 		dsRegistry.Register(identityPolicyDS)
 		if withComplianceDS {
-			dsRegistry.Register(newComplianceDS(client))
+			dsRegistry.Register(newComplianceDS(client, obs))
 		}
 
 		issuerRegistry := service.NewSimpleRegistry()
@@ -120,8 +132,8 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 			Clock:        clk,
 		}))
 
-		tokenService := service.NewTokenService("sso.redhat.com", dsRegistry, issuerRegistry, nil)
-		return server.NewAuthzServer(trustStore(t, jwksFixture, client), tokenService, nil, server.DefaultCredentialSources(), nil, nil, nil)
+		tokenService := service.NewTokenService("sso.redhat.com", dsRegistry, issuerRegistry, obs)
+		return server.NewAuthzServer(trustStore(t, jwksFixture, client), tokenService, nil, server.DefaultCredentialSources(), nil, nil, obs), output
 	}
 
 	consoleClaims := map[string]interface{}{
@@ -154,7 +166,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 				Clock:  clk,
 			}),
 		}
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithExportCompliance(token, "false"))
 		if err != nil {
@@ -168,7 +180,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("extension absent → check runs + pass result → token issued", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":""}`, 200)
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
@@ -179,7 +191,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("export_compliance=true + pass result → token issued", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":""}`, 200)
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithExportCompliance(token, "true"))
 		if err != nil {
@@ -190,7 +202,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("DS not registered + extension absent → token issued", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":"ERROR_T5"}`, 200)
-		authz := newAuthz(false, client)
+		authz, _ := newAuthz(false, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
@@ -201,7 +213,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("gate on + pass result code → token issued", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":""}`, 200)
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
@@ -210,20 +222,35 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 		assertOKResponse(t, resp)
 	})
 
-	t.Run("gate on + ERROR_T5 → 403 denied", func(t *testing.T) {
+	t.Run("gate on + ERROR_T5 → 403 denied on cache miss and hit", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":"ERROR_T5"}`, 200)
-		authz := newAuthz(true, client)
+		authz, output := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
-		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
-		if err != nil {
-			t.Fatalf("Check: %v", err)
+		for _, cacheStatus := range []string{"miss", "hit"} {
+			output.Reset()
+			resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
+			require.NoError(t, err)
+			assertComplianceDenied(t, resp)
+			records := auditRecords(t, output.String())
+			var complianceEvents int
+			for _, record := range records {
+				if record["event"] == "parsec_auth_compliance_failure" {
+					complianceEvents++
+					require.Equal(t, "denied", record["outcome"])
+					require.Equal(t, "compliance_denied", record["reason_code"])
+				}
+			}
+			require.Equal(t, 1, complianceEvents, "cache %s: %s", cacheStatus, output.String())
+			require.Equal(t, "compliance_denied", records[0]["reason_code"])
+			resource := records[0]["resource"].(map[string]any)
+			require.Equal(t, cacheStatus, resource["cache_status"])
+			require.NotContains(t, resource, "token_types")
 		}
-		assertComplianceDenied(t, resp)
 	})
 
 	t.Run("gate on + ERROR_EXPORT_CONTROL → 403 denied", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":"ERROR_EXPORT_CONTROL"}`, 200)
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
@@ -234,7 +261,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("gate on + ERROR_OFAC → 403 denied", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":"ERROR_OFAC"}`, 200)
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
@@ -245,7 +272,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("gate on + unknown result code → token issued (not in error list)", func(t *testing.T) {
 		client := makeHTTPClient(`{"result_code":"UNKNOWN_CODE"}`, 200)
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
@@ -256,7 +283,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("gate on + compliance service down → fail-open token issued (AC3)", func(t *testing.T) {
 		client := makeHTTPClient(`{"error":"unavailable"}`, 503)
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
@@ -282,7 +309,7 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 				Clock:  clk,
 			}),
 		}
-		authz := newAuthz(true, client)
+		authz, _ := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, map[string]interface{}{
 			"preferred_username": "service-account-myapp",
 			"client_id":          "myapp",
@@ -344,4 +371,16 @@ func assertComplianceDenied(t *testing.T, resp *authv3.CheckResponse) {
 	if deniedResp.Status.Code != 403 {
 		t.Errorf("expected HTTP 403, got %d", deniedResp.Status.Code)
 	}
+}
+
+// auditRecords reads the externally emitted JSON audit stream.
+func auditRecords(t *testing.T, output string) []map[string]any {
+	t.Helper()
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		var record map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &record))
+		records = append(records, record)
+	}
+	return records
 }

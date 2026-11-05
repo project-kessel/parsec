@@ -79,7 +79,35 @@ func (lib *mapperInputLib) CompileOptions() []cel.EnvOption {
 		cel.Variable("request", cel.DynType),
 	}
 	opts = append(opts, oauthAbortFunctions()...)
+	opts = append(opts, cel.Function("accessDenied",
+		cel.Overload("accessDenied_string_string",
+			[]*cel.Type{cel.StringType, cel.StringType}, cel.DynType,
+			cel.BinaryBinding(classifiedAccessDenied),
+		),
+	))
 	return opts
+}
+
+// classifiedAccessDenied carries a bounded policy label to issuance observers
+// without changing the OAuth error, description, or transport status.
+func classifiedAccessDenied(message, classification ref.Val) ref.Val {
+	msg, ok := message.Value().(string)
+	if !ok {
+		return types.NewErr("accessDenied message must be a string")
+	}
+	label, ok := classification.Value().(string)
+	if !ok || len(label) == 0 || len(label) > 128 {
+		return types.NewErr("accessDenied classification must be 1-128 ASCII letters, digits, dots, underscores, or hyphens")
+	}
+	for _, r := range label {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return types.NewErr("invalid accessDenied classification")
+	}
+	decision := service.DenyOAuth(service.OAuthAccessDenied, msg).Decision
+	decision.Classification = label
+	return types.WrapErr(&abortError{decision: decision})
 }
 
 func (lib *mapperInputLib) ProgramOptions() []cel.ProgramOption {

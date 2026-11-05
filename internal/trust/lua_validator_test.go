@@ -819,3 +819,67 @@ func TestDistributedCachingValidator(t *testing.T) {
 		t.Fatalf("count=%d, want 1", source.count)
 	}
 }
+
+// recordingDistributedValidateProbe captures which cache-outcome method was called.
+type recordingDistributedValidateProbe struct {
+	NoOpDistributedValidateProbe
+	hitCalled     bool
+	missCalled    bool
+	expiredCalled bool
+}
+
+func (p *recordingDistributedValidateProbe) CacheHit()      { p.hitCalled = true }
+func (p *recordingDistributedValidateProbe) CacheMiss()     { p.missCalled = true }
+func (p *recordingDistributedValidateProbe) ResultExpired() { p.expiredCalled = true }
+
+// recordingDistributedValidateObserver collects a probe per Validate call.
+type recordingDistributedValidateObserver struct {
+	NoOpTrustObserver
+	probes []*recordingDistributedValidateProbe
+}
+
+func (o *recordingDistributedValidateObserver) DistributedValidateStarted(ctx context.Context, _ string) (context.Context, DistributedValidateProbe) {
+	p := &recordingDistributedValidateProbe{}
+	o.probes = append(o.probes, p)
+	return ctx, p
+}
+
+func TestDistributedCachingValidator_CacheOutcomesDistinguishHitFromMiss(t *testing.T) {
+	source := &countingCacheableValidator{
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	obs := &recordingDistributedValidateObserver{}
+	cached := NewDistributedCachingValidator("test-distributed-outcomes", source, obs, DistributedValidatorCachingConfig{
+		GroupName:      "test-validator-distributed-outcomes-cache",
+		CacheSizeBytes: 1 << 20,
+		CacheTTL:       time.Hour,
+	})
+	cred := &BearerCredential{Token: "abc"}
+
+	// Call 0: cold miss — fetch runs locally via the getter.
+	if _, err := cached.Validate(context.Background(), cred); err != nil {
+		t.Fatalf("cold miss: %v", err)
+	}
+	p := obs.probes[0]
+	if !p.missCalled {
+		t.Fatal("cold miss: expected CacheMiss (fetch ran locally)")
+	}
+	if p.hitCalled {
+		t.Fatal("cold miss: CacheHit must not be called when the getter ran locally")
+	}
+
+	// Call 1: cache hit — value served from local cache, no fetch.
+	if _, err := cached.Validate(context.Background(), cred); err != nil {
+		t.Fatalf("cache hit: %v", err)
+	}
+	p = obs.probes[1]
+	if !p.hitCalled {
+		t.Fatal("cache hit: expected CacheHit")
+	}
+	if p.missCalled {
+		t.Fatal("cache hit: CacheMiss must not be called when value was served from cache")
+	}
+	if source.count != 1 {
+		t.Fatalf("count=%d, want 1 (second call must be served from cache)", source.count)
+	}
+}

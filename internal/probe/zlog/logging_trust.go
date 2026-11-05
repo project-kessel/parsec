@@ -271,6 +271,14 @@ func (p *loggingDistributedValidateProbe) CacheKeyFailed(err error) {
 	p.logger.Warn().Err(err).Msg("cache key derivation failed, bypassing cache")
 }
 
+func (p *loggingDistributedValidateProbe) CacheHit() {
+	p.logger.Debug().Msg("distributed cache hit")
+}
+
+func (p *loggingDistributedValidateProbe) CacheMiss() {
+	p.logger.Debug().Msg("distributed cache miss")
+}
+
 func (p *loggingDistributedValidateProbe) GetFailed(err error) {
 	p.logger.Warn().Err(err).Msg("distributed cache get failed")
 }

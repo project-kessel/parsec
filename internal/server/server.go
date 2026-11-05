@@ -111,7 +111,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	// Create gRPC server
-	s.grpcServer = grpc.NewServer()
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(requestIDInterceptor))
 
 	// Register services
 	authv3.RegisterAuthorizationServer(s.grpcServer, s.authzServer)
@@ -141,6 +141,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Use passthrough resolver so the address is used as-is (works for both
 	// TCP addresses and in-memory transports like bufconn).
 	gwMux := runtime.NewServeMux(
+		runtime.WithIncomingHeaderMatcher(incomingHeaderMatcher),
 		runtime.WithMarshalerOption("application/x-www-form-urlencoded", NewFormMarshaler()),
 		runtime.WithErrorHandler(oauthHTTPErrorHandler),
 	)
@@ -229,11 +230,17 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	select {
 	case err := <-errCh:
+		if err != nil {
+			p.ShutdownFailed(0)
+		} else {
+			p.ShutdownCompleted(0)
+		}
 		return err
 	case <-ctx.Done():
 		// Close HTTP and kick async gRPC Stop without waiting. errCh is
 		// buffered, so a stuck GracefulStop does not block this return.
 		s.forceStop()
+		p.ShutdownFailed(0)
 		return ctx.Err()
 	}
 }

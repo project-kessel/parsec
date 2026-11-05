@@ -265,6 +265,18 @@ func (p *FakeProbe) PolicyEvaluationFailed(err error) {
 	p.recordCall("PolicyEvaluationFailed", err)
 }
 
+func (p *FakeProbe) TokenIssuanceFailed(err error) {
+	p.recordCall("TokenIssuanceFailed", err)
+}
+
+func (p *FakeProbe) TokenIssuanceDenied(err error) {
+	p.recordCall("TokenIssuanceDenied", err)
+}
+
+func (p *FakeProbe) RequestFailed(err error) {
+	p.recordCall("RequestFailed", err)
+}
+
 // End is common to all probes
 func (p *FakeProbe) End() {
 	p.recordCall("End")
