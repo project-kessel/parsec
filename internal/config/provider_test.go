@@ -335,6 +335,8 @@ func TestProvider_HostRulesReachAuthzServer(t *testing.T) {
 		policy,
 		server.DefaultCredentialSources(),
 		nil,
+		nil,
+		nil,
 	)
 
 	check := func(host, path string) int32 {
