@@ -387,7 +387,7 @@ func TestNewAuthzServer_credentialSources(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil)
+	srv := NewAuthzServer(nil, nil, nil, DefaultCredentialSources(), nil, nil, nil)
 
 	ext, err := srv.credentialSources.Extract(ctx, CredentialContext{
 		Headers: map[string]string{"authorization": "Bearer test-token"},

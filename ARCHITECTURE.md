@@ -618,7 +618,7 @@ claimsFilterRegistry := server.NewStubClaimsFilterRegistry()
 
 // 8. Inject into servers
 policy := server.NewStaticAuthenticatedPolicy(nil) // default: deny anonymous, issue txn token
-authzServer := server.NewAuthzServer(trustStore, tokenService, policy, credentialSources, obs)
+authzServer := server.NewAuthzServer(trustStore, tokenService, policy, credentialSources, nil, nil, obs)
 exchangeServer := server.NewExchangeServer(trustStore, tokenService, claimsFilterRegistry, credentialSources, obs)
 
 // 9. Create and start server
@@ -680,7 +680,7 @@ tokenService := service.NewTokenService(
 )
 
 // Test full flow
-authzServer := server.NewAuthzServer(trustStore, tokenService, nil, credentialSources, obs) // nil policy = default
+authzServer := server.NewAuthzServer(trustStore, tokenService, nil, credentialSources, nil, nil, obs) // nil policy = default
 response, err := authzServer.Check(ctx, envoyRequest)
 assert.Equal(t, CheckResponse_OK, response.Status.Code)
 ```

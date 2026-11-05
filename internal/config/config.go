@@ -62,6 +62,25 @@ type AuthzServerConfig struct {
 	// Policy configures the authz check policy that decides, for each
 	// ext_authz request, whether to issue tokens, allow without issue, or deny.
 	Policy AuthzCheckPolicyConfig `koanf:"policy"`
+
+	// DropHeaders is a list of header names that are unconditionally removed
+	// from requests forwarded to upstream services. This prevents clients
+	// from injecting security-sensitive headers (e.g. credential or
+	// gateway-trust headers) that upstream services might trust.
+	// Headers are removed regardless of which credential source matched
+	// (or if none matched). On the Issue path, any entry matching an issued
+	// token's header_name is excluded from removal so the issued token is
+	// not deleted by Envoy's header mutation order (set before remove).
+	DropHeaders []string `koanf:"drop_headers"`
+
+	// DropCookies is a list of cookie names that are unconditionally removed
+	// from the Cookie header forwarded to upstream services, regardless of
+	// which credential source matched. This closes the gap left by
+	// DropHeaders, which can only remove whole HTTP headers by name and
+	// cannot strip an individual cookie value out of the Cookie header
+	// (e.g. a cs_jwt cookie presented alongside a matched bearer token).
+	// Cookie names are case-sensitive (RFC 6265) and are not normalized.
+	DropCookies []string `koanf:"drop_cookies"`
 }
 
 // AuthzCheckPolicyConfig configures the authz check policy.

@@ -177,6 +177,30 @@ credential_sources:
 
 # Authorization server configuration (ext_authz)
 authz_server:
+  # Headers unconditionally removed from upstream requests to prevent
+  # clients from injecting security-sensitive values that backends trust.
+  # These mirror 3scale's clear_auth_headers() for migration parity.
+  # x-rh-identity is included because it is an issued-token header here
+  # (see policy.token_types below): on anonymous allow-without-issue paths
+  # no replacement is issued, so a client-supplied value must be stripped.
+  # On the Issue path, parsec excludes issued token headers from removal so
+  # the token it just set is not deleted.
+  drop_headers:
+    - x-rh-certauth-cn
+    - x-rh-certauth-issuer
+    - x-rh-insights-certauth-secret
+    - x-rh-insights-gateway-secret
+    - x-rh-insights-env
+    - x-rh-identity
+    - cs_jwt
+  # Cookie names unconditionally stripped from the Cookie header. Unlike
+  # drop_headers (which removes whole HTTP headers by name), this reaches
+  # into the Cookie header to remove individual cookie values -- needed
+  # because cs_jwt travels as a cookie, not a standalone header, and would
+  # otherwise leak through when a different credential source matches
+  # (e.g. a bearer Authorization header presented alongside a cs_jwt cookie).
+  drop_cookies:
+    - cs_jwt
   policy:
     type: static_authenticated
     token_types:

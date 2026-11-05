@@ -5,6 +5,12 @@
 # All other paths require authentication.
 
 authz_server:
+  # x-rh-identity is issued below (policy.token_types) for authenticated
+  # requests. On the allow-anonymous-without-issue paths, no replacement is
+  # issued, so a client-supplied x-rh-identity must be stripped here or an
+  # upstream trusting that header could be spoofed by an anonymous client.
+  drop_headers:
+    - x-rh-identity
   policy:
     type: static_authenticated
     allow_anonymous_without_issue_paths:

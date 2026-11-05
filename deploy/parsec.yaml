@@ -6,7 +6,7 @@ objects:
   - apiVersion: cloud.redhat.com/v1alpha1
     kind: ClowdApp
     metadata:
-      name: parsec
+      name: parsec${DEPLOYMENT_SUFFIX}
     spec:
       envName: ${ENV_NAME}
       deployments:
@@ -115,13 +115,16 @@ objects:
   - kind: PodDisruptionBudget
     apiVersion: policy/v1
     metadata:
-      name: parsec-api-pdb
+      name: parsec${DEPLOYMENT_SUFFIX}-api-pdb
     spec:
       minAvailable: 1
       selector:
         matchLabels:
-          app: parsec
+          app: parsec${DEPLOYMENT_SUFFIX}
 parameters:
+  - description: Optional suffix for named deployments (e.g., "-canary")
+    name: DEPLOYMENT_SUFFIX
+    value: ""
   - description: ClowdEnvironment name (ephemeral, stage, prod)
     name: ENV_NAME
     required: true
