@@ -261,6 +261,8 @@ func (s *AuthzServer) issueResponse(
 	for _, spec := range decision.TokenTypes {
 		r, ok := results[spec.Type]
 		if !ok || r.Token == nil {
+			// Fail closed: never return OK without every requested token.
+			// A missing/nil token with no ExchangeErr is a programmer error.
 			p.TokenIssuanceFailed(fmt.Errorf("token service returned no token for type %s", spec.Type))
 			return s.denyResponseWithHTTPStatus(codes.Internal,
 				typev3.StatusCode_InternalServerError,

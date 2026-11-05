@@ -516,10 +516,10 @@ type ObservabilityConfig struct {
 	// events use "parsec_". Set it to an empty string to disable prefixing.
 	EventPrefix *string `koanf:"event_prefix" usage:"audit event-name prefix (default: parsec_)"`
 
-	// AllowedMetadataKeys is an optional allowlist of metadata keys that Lua
-	// scripts and other extensions may emit via audit.record(). When empty or
-	// unset, all keys that pass text/length validation are accepted. When
-	// configured, only listed keys are permitted (prevents secrets leakage).
+	// AllowedMetadataKeys is the allowlist of metadata keys that Lua scripts
+	// and other extensions may emit via audit.record(). When empty or unset,
+	// all metadata keys are rejected (fail-closed). When configured, only
+	// listed keys are permitted (prevents secrets leakage).
 	AllowedMetadataKeys []string `koanf:"audit_metadata_keys" usage:"optional allowlist of audit.record() metadata keys"`
 
 	// Event-specific logging configuration

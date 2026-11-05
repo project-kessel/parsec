@@ -44,6 +44,7 @@ func TestCompositeAuthzCheckProbe_FansOutAllMethods(t *testing.T) {
 	composite.PolicyDecisionDeny("denied")
 	composite.PolicyEvaluationFailed(errors.New("eval"))
 	composite.TokenIssuanceFailed(errors.New("issuance"))
+	composite.TokenIssuanceDenied(errors.New("denied"))
 	composite.End()
 
 	for _, tc := range []struct {
@@ -65,6 +66,7 @@ func TestCompositeAuthzCheckProbe_FansOutAllMethods(t *testing.T) {
 		{"PolicyDecisionDeny", &c1.policyDecisionDeny, &c2.policyDecisionDeny},
 		{"PolicyEvaluationFailed", &c1.policyEvaluationFailed, &c2.policyEvaluationFailed},
 		{"TokenIssuanceFailed", &c1.tokenIssuanceFailed, &c2.tokenIssuanceFailed},
+		{"TokenIssuanceDenied", &c1.tokenIssuanceDenied, &c2.tokenIssuanceDenied},
 		{"End", &c1.end, &c2.end},
 	} {
 		if tc.v1.Load() != 1 {
@@ -132,6 +134,7 @@ func TestCompositeTokenExchangeProbe_FansOutAllMethods(t *testing.T) {
 	composite.SubjectTokenValidationSucceeded(nil)
 	composite.SubjectTokenValidationFailed(errors.New("test"))
 	composite.TokenIssuanceFailed(errors.New("issuance"))
+	composite.TokenIssuanceDenied(errors.New("denied"))
 	composite.RequestFailed(errors.New("request"))
 	composite.End()
 
@@ -148,6 +151,7 @@ func TestCompositeTokenExchangeProbe_FansOutAllMethods(t *testing.T) {
 		{"SubjectTokenValidationSucceeded", &c1.subjectTokenValSuccess, &c2.subjectTokenValSuccess},
 		{"SubjectTokenValidationFailed", &c1.subjectTokenValFail, &c2.subjectTokenValFail},
 		{"TokenIssuanceFailed", &c1.tokenIssuanceFailed, &c2.tokenIssuanceFailed},
+		{"TokenIssuanceDenied", &c1.tokenIssuanceDenied, &c2.tokenIssuanceDenied},
 		{"RequestFailed", &c1.requestFailed, &c2.requestFailed},
 		{"End", &c1.end, &c2.end},
 	} {

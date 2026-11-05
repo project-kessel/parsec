@@ -88,7 +88,18 @@ func (c *Collector) Signals() []Signal {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]Signal(nil), c.signals...)
+	out := make([]Signal, len(c.signals))
+	for i, s := range c.signals {
+		out[i] = s
+		if s.Metadata != nil {
+			m := make(map[string]string, len(s.Metadata))
+			for k, v := range s.Metadata {
+				m[k] = v
+			}
+			out[i].Metadata = m
+		}
+	}
+	return out
 }
 
 func WithReporter(ctx context.Context, reporter Reporter) context.Context {

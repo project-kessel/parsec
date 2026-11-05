@@ -75,6 +75,18 @@ View all available flags:
 ./bin/parsec serve --help
 ```
 
+Audit correlation reads the standard `x-request-id` from the checked HTTP
+request or incoming gRPC metadata. The HTTP token endpoint carries that header
+through its internal gateway hop. Missing or invalid IDs receive a local UUID.
+Parsec stores the ID in context for observability; it does not add or rewrite
+request-ID headers on authorization responses, client responses, or dependency
+requests. There is no `request_id_headers` configuration setting.
+
+Audit `resource.requested_token_types` contains the effective issuance request,
+including defaults. `resource.token_types` contains successfully minted types.
+A type minted before another type fails can appear there even though the
+overall request is denied and no tokens are delivered.
+
 ### Configuration File
 
 By default, parsec looks for `./configs/parsec.yaml`. You can specify a different path:

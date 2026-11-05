@@ -212,9 +212,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// ext_authz calls.
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer stopCancel()
-	if err := srv.Stop(stopCtx); err != nil {
-		return fmt.Errorf("error during shutdown: %w", err)
-	}
+	stopErr := srv.Stop(stopCtx)
 
 	// Flush observer resources (e.g. metrics exporter buffers, future
 	// audit sinks) after the server has drained. Prometheus pull-model
@@ -225,6 +223,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer shutdownCancel()
 	if err := obs.Shutdown(shutdownCtx); err != nil {
 		bootstrapLog.Warn().Err(err).Msg("observer shutdown error")
+	}
+
+	if stopErr != nil {
+		return fmt.Errorf("error during shutdown: %w", stopErr)
 	}
 
 	bootstrapLog.Info().Msg("Shutdown complete")

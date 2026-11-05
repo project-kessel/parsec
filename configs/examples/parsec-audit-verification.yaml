@@ -26,9 +26,7 @@ observability:
   type: composite
   log_level: debug
   log_format: json
-  # Default is ["x-request-id"]. Listed explicitly here for clarity.
-  request_id_headers:
-    - "x-request-id"
+  # x-request-id is used for local audit correlation only.
   observers:
     - type: audit
     - type: logging
@@ -39,13 +37,17 @@ exchange_server:
   claims_filter:
     type: stub
 
-# Accepts any bearer token as subject "test-subject" (see trust.NewStubValidator).
+# Accepts any bearer or JWT as subject "test-subject" (see trust.NewStubValidator).
+# ext_authz uses the bearer credential source. Token exchange with
+# subject_token_type jwt needs the jwt credential type; stub_validator
+# defaults to bearer only when credential_types is omitted.
 # Sufficient to exercise the full authz/exchange/audit pipeline without JWKS.
 trust_store:
   type: stub_store
   validators:
     - name: any-bearer
       type: stub_validator
+      credential_types: ["bearer", "jwt"]
 
 # Stub issuers: no signing, deterministic token values, no external calls.
 issuers:

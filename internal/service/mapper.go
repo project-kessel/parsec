@@ -177,6 +177,9 @@ type ExchangeError struct {
 	Message    string         // error_description
 	OAuthError OAuthErrorCode // wire "error"
 	Reason     AbortReason    // optional Layer B reason for observability
+	// Classification describes the deployment policy decision for observers.
+	// It is not part of the OAuth/gRPC response.
+	Classification string `json:"-"`
 }
 
 func (e *ExchangeError) Error() string {

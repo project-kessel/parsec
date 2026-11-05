@@ -12,12 +12,8 @@ observability:
   type: composite
   log_level: info
   log_format: json
-  # Ordered request-ID header names. First match wins on extraction.
-  # The first entry is the canonical header used for response propagation
-  # (only when the ID was extracted from the incoming request, not when
-  # generated locally).
-  request_id_headers:
-    - "x-request-id"
+  # Audit correlation uses x-request-id, or a locally generated fallback.
+  # The ID is stored only in Parsec's context; headers are not rewritten.
   # Allowlist for audit.record() metadata keys. When omitted, all metadata
   # keys are rejected (fail-closed). When set, only listed keys are
   # permitted. An explicit list is required for production use.

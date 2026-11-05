@@ -34,10 +34,9 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
-		// Sanitize (trim + bound length) attacker-influenced metadata values
-		// (e.g. cookies/headers/claims surfaced by the calling script) before
-		// validating, so an oversized or padded value truncates instead of
-		// silently dropping the whole signal (see auditctx.SanitizeMetadata).
+		// Sanitize attacker-influenced metadata at the Lua boundary before
+		// validation. Collector.Record also sanitizes internally; the redundancy
+		// is intentional defense-in-depth for non-Collector reporters.
 		metadata = auditctx.SanitizeMetadata(metadata)
 		signal := auditctx.Signal{
 			Source:         luaString(state.GetField(table, "source")),
@@ -72,9 +71,12 @@ func luaString(value gopherlua.LValue) string {
 // result and a validity flag. Returns (nil, false) if any key or value is not a string,
 // preventing silent skipping of invalid metadata entries.
 func luaStringMap(value gopherlua.LValue) (map[string]string, bool) {
-	table, ok := value.(*gopherlua.LTable)
-	if !ok || table == nil {
+	if value == nil || value == gopherlua.LNil {
 		return nil, true // nil metadata is valid (absent)
+	}
+	table, ok := value.(*gopherlua.LTable)
+	if !ok {
+		return nil, false // non-table metadata is invalid
 	}
 	result := make(map[string]string)
 	allValid := true

@@ -214,7 +214,7 @@ func effectiveEventPrefix(cfg, top *ObservabilityConfig) *string {
 // for logging a warning when the returned map is empty.
 func (p *Provider) allowedMetadataKeys(cfg *ObservabilityConfig) map[string]bool {
 	src := cfg.AllowedMetadataKeys
-	if len(src) == 0 && p.config.Observability != nil {
+	if src == nil && p.config.Observability != nil {
 		src = p.config.Observability.AllowedMetadataKeys
 	}
 	if len(src) == 0 {

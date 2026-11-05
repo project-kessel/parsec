@@ -89,7 +89,13 @@ func newCrossAccountDS(t *testing.T, script string, client *http.Client, cfg map
 // newAuditContext returns a context wired to an audit signal collector so
 // tests can assert on the audit.record() signals emitted by cross_account.lua.
 func newAuditContext() (context.Context, *auditctx.Collector) {
-	collector := &auditctx.Collector{}
+	collector := auditctx.NewCollector(map[string]bool{
+		"target_account_number":   true,
+		"target_org_id":           true,
+		"employee_account_number": true,
+		"employee_org_id":         true,
+		"employee_user_id":        true,
+	})
 	return auditctx.WithReporter(context.Background(), collector), collector
 }
 

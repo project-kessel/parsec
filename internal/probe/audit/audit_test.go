@@ -488,13 +488,13 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 			wantReason:  ReasonTokenIssuanceDenied,
 		},
 		{
-			name: "token issuance denied takes priority over failure",
+			name: "later issuance failure overrides earlier denial",
 			setup: func(p *requestProbe) {
 				p.tokenIssuanceDenied = true
 				p.tokenIssuanceFailed = true
 			},
-			wantOutcome: AuditOutcomeDenied,
-			wantReason:  ReasonTokenIssuanceDenied,
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  ReasonTokenIssuanceFailed,
 		},
 		{
 			name: "token issuance failed overrides policy issue",

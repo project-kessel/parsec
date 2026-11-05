@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 )
 
 type requestIDKey struct{}
@@ -98,6 +99,9 @@ func safeLayerName(layer string) string {
 	}
 	if len(layer) > maxLayerNameLength {
 		layer = layer[:maxLayerNameLength]
+		for len(layer) > 0 && !utf8.Valid([]byte(layer)) {
+			layer = layer[:len(layer)-1]
+		}
 	}
 	return layer
 }

@@ -151,10 +151,11 @@ type requestInfo struct {
 }
 
 type resourceInfo struct {
-	Type        string               `json:"type"`
-	TokenTypes  []string             `json:"token_types,omitempty"`
-	CacheStatus string               `json:"cache_status,omitempty"`
-	CacheLayers []request.CacheLayer `json:"cache_layers,omitempty"`
+	Type                string               `json:"type"`
+	TokenTypes          []string             `json:"token_types,omitempty"`
+	RequestedTokenTypes []string             `json:"requested_token_types,omitempty"`
+	CacheStatus         string               `json:"cache_status,omitempty"`
+	CacheLayers         []request.CacheLayer `json:"cache_layers,omitempty"`
 }
 
 // emitEnvelope holds pre-serialized JSON for the shared fields that are
@@ -198,9 +199,11 @@ type requestProbe struct {
 	requestContextParseFailed bool
 	tokenIssuanceFailed       bool
 	tokenIssuanceDenied       bool
+	issuanceDenialReason      string
 	requestFailed             bool
 	requestFailedErr          error
 	tokenTypes                []service.TokenType
+	requestedTokenTypes       []service.TokenType
 
 	// Derived at emit time
 	cacheStatus       string
@@ -208,23 +211,20 @@ type requestProbe struct {
 	derivedReasonCode string
 }
 
+// Each audit observer keeps its own request probe, including when multiple
+// audit observers are composed. Nested issuance callbacks update only that
+// observer's request; no audit state is needed in application handlers.
+type requestProbeKey struct{ observer *Observer }
+
 func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, service.AuthzCheckProbe) {
-	ctx, state := request.WithAuditState(ctx)
-	collector := auditctx.NewCollector(o.allowedMetadataKeys)
-	ctx = auditctx.WithReporter(ctx, collector)
-	return ctx, &requestProbe{
-		observer:  o,
-		requestID: safeValue(request.ID(ctx), 128),
-		started:   time.Now(),
-		action:    "authorize",
-		request:   requestInfo{Protocol: "ext_authz"},
-		authorize: true,
-		state:     state,
-		collector: collector,
-	}
+	return o.startRequest(ctx, "authorize", requestInfo{Protocol: "ext_authz"})
 }
 
-func (o *Observer) TokenExchangeStarted(ctx context.Context, _, requestedTokenType, _, _ string) (context.Context, service.TokenExchangeProbe) {
+func (o *Observer) TokenExchangeStarted(ctx context.Context, _, _, _, _ string) (context.Context, service.TokenExchangeProbe) {
+	return o.startRequest(ctx, "token_exchange", requestInfo{Protocol: "grpc", Method: http.MethodPost, Path: "/v1/token"})
+}
+
+func (o *Observer) startRequest(ctx context.Context, action string, info requestInfo) (context.Context, *requestProbe) {
 	ctx, state := request.WithAuditState(ctx)
 	collector := auditctx.NewCollector(o.allowedMetadataKeys)
 	ctx = auditctx.WithReporter(ctx, collector)
@@ -232,15 +232,55 @@ func (o *Observer) TokenExchangeStarted(ctx context.Context, _, requestedTokenTy
 		observer:  o,
 		requestID: safeValue(request.ID(ctx), 128),
 		started:   time.Now(),
-		action:    "token_exchange",
-		request:   requestInfo{Protocol: "grpc", Method: http.MethodPost, Path: "/v1/token"},
+		action:    action,
+		request:   info,
+		authorize: action == "authorize",
 		state:     state,
 		collector: collector,
 	}
-	if tokenType := safeValue(requestedTokenType, 256); tokenType != "" {
-		p.tokenTypes = []service.TokenType{service.TokenType(tokenType)}
+	return context.WithValue(ctx, requestProbeKey{o}, p), p
+}
+
+type issuanceProbe struct {
+	service.NoOpTokenIssuanceProbe
+	request *requestProbe
+}
+
+func (o *Observer) TokenIssuanceStarted(ctx context.Context, _, _ *trust.Result, _ string, tokenTypes []service.TokenType) (context.Context, service.TokenIssuanceProbe) {
+	p, _ := ctx.Value(requestProbeKey{o}).(*requestProbe)
+	if p == nil {
+		return ctx, service.NoOpTokenIssuanceProbe{}
 	}
-	return ctx, p
+	p.requestedTokenTypes = append(p.requestedTokenTypes, tokenTypes...)
+	return ctx, &issuanceProbe{request: p}
+}
+
+func (p *issuanceProbe) TokenTypeIssuanceSucceeded(tokenType service.TokenType, token *service.Token) {
+	if token == nil {
+		p.request.tokenIssuanceFailed = true
+		return
+	}
+	p.request.tokenTypes = append(p.request.tokenTypes, tokenType)
+}
+
+func (p *issuanceProbe) TokenTypeIssuanceFailed(_ service.TokenType, err error) {
+	p.request.TokenIssuanceFailed(err)
+}
+
+func (p *issuanceProbe) IssuerNotFound(_ service.TokenType, err error) {
+	p.request.TokenIssuanceFailed(err)
+}
+
+func (p *issuanceProbe) TokenTypeIssuanceDenied(_ service.TokenType, denial *service.ExchangeError) {
+	p.request.TokenIssuanceDenied(denial)
+	if denial != nil && ValidReasonCode(denial.Classification) {
+		// Preserve the individual policy decision even if another token type
+		// later fails and changes the terminal request outcome.
+		p.request.collector.Record(auditctx.Signal{
+			Source: auditctx.SourcePolicy, Operation: "token_issuance",
+			Outcome: auditctx.OutcomeDenied, ReasonCode: denial.Classification,
+		})
+	}
 }
 
 func (p *requestProbe) RequestAttributesParsed(attrs *request.RequestAttributes) {
@@ -320,7 +360,12 @@ func (p *requestProbe) TokenIssuanceFailed(error) {
 	p.tokenIssuanceFailed = true
 }
 
-func (p *requestProbe) TokenIssuanceDenied(error) {
+// First-writer-wins: record the earliest denial's classification for root-cause attribution.
+func (p *requestProbe) TokenIssuanceDenied(err error) {
+	var denial *service.ExchangeError
+	if !p.tokenIssuanceDenied && errors.As(err, &denial) && denial != nil && ValidReasonCode(denial.Classification) {
+		p.issuanceDenialReason = denial.Classification
+	}
 	p.tokenIssuanceDenied = true
 }
 
@@ -333,17 +378,18 @@ func (p *requestProbe) RequestFailed(err error) {
 // probe callbacks received during the request. This keeps audit vocabulary
 // out of the handlers and centralizes reason derivation in the observer.
 func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode string) {
-	// Token issuance denial overrides success signals. This fires when the
-	// issuer refused for a known policy/protocol reason (e.g. OAuth error).
-	if p.tokenIssuanceDenied {
-		return AuditOutcomeDenied, ReasonTokenIssuanceDenied
-	}
-
-	// Token issuance failure overrides earlier policy-issue/allow signals.
+	// A system failure overrides earlier successes or denials: IssueTokens
+	// returns a top-level error even when an earlier type was denied.
 	// This fires when the policy decided to issue but the actual issuance
 	// (signing, system error) failed afterward.
 	if p.tokenIssuanceFailed {
 		return AuditOutcomeFailure, ReasonTokenIssuanceFailed
+	}
+	if p.tokenIssuanceDenied {
+		if p.issuanceDenialReason != "" {
+			return AuditOutcomeDenied, p.issuanceDenialReason
+		}
+		return AuditOutcomeDenied, ReasonTokenIssuanceDenied
 	}
 
 	// Success paths
@@ -435,13 +481,6 @@ func (p *requestProbe) End() {
 	p.derivedReasonCode = reasonCode
 	signals := p.collector.Signals()
 
-	tokenTypes := make([]string, 0, len(p.tokenTypes))
-	for _, tt := range p.tokenTypes {
-		if v := safeTokenType(tt); v != "" {
-			tokenTypes = append(tokenTypes, v)
-		}
-	}
-
 	env := emitEnvelope{
 		service: p.observer.metaJSON,
 	}
@@ -449,7 +488,8 @@ func (p *requestProbe) End() {
 	env.subject, _ = json.Marshal(p.subject)
 	env.actor, _ = json.Marshal(p.actor)
 	env.resource, _ = json.Marshal(resourceInfo{
-		Type: resourceTypeForAction(p.action), TokenTypes: tokenTypes, CacheStatus: p.cacheStatus, CacheLayers: cacheLayers,
+		Type: resourceTypeForAction(p.action), TokenTypes: safeTokenTypes(p.tokenTypes),
+		RequestedTokenTypes: safeTokenTypes(p.requestedTokenTypes), CacheStatus: p.cacheStatus, CacheLayers: cacheLayers,
 	})
 	if len(signals) > 0 {
 		env.signals, _ = json.Marshal(signals)
@@ -613,6 +653,16 @@ func safeTokenType(tokenType service.TokenType) string {
 	default:
 		return ""
 	}
+}
+
+func safeTokenTypes(tokenTypes []service.TokenType) []string {
+	var safe []string
+	for _, tokenType := range tokenTypes {
+		if value := safeTokenType(tokenType); value != "" {
+			safe = append(safe, value)
+		}
+	}
+	return safe
 }
 
 type auditInMemoryCacheProbe struct {
