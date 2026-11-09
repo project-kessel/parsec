@@ -412,3 +412,26 @@ func TestStaticAuthenticatedPolicy_HostRuleWithoutHostsFailsClosed(t *testing.T)
 		t.Fatalf("incomplete host rule: got %s, want %s", decision.Action, AuthzCheckDeny)
 	}
 }
+
+func TestStaticAuthenticatedPolicy_HostRuleWithMissingRequestHostFailsClosed(t *testing.T) {
+	paths, err := CompilePathPatterns([]string{`/docs`})
+	if err != nil {
+		t.Fatalf("compile paths: %v", err)
+	}
+	hosts, err := CompileHostPatterns([]string{`.*`})
+	if err != nil {
+		t.Fatalf("compile hosts: %v", err)
+	}
+	policy := NewStaticAuthenticatedPolicy(nil, WithAllowAnonymousWithoutIssueRules([]AnonymousRequestRule{{Hosts: hosts, Paths: paths}}))
+
+	decision, err := policy.Decide(context.Background(), AuthzCheckPolicyInput{
+		Subject: anonymousPrincipal(),
+		Request: &request.RequestAttributes{Path: "/docs"},
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if decision.Action != AuthzCheckDeny {
+		t.Fatalf("missing request host: got %s, want %s", decision.Action, AuthzCheckDeny)
+	}
+}

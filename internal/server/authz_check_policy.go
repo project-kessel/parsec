@@ -230,7 +230,7 @@ func matchesAnonymousRule(rule AnonymousRequestRule, host, path string) bool {
 	// Hostless rules are intentionally not global. Global paths are configured
 	// through WithAllowAnonymousWithoutIssuePaths instead; failing closed here
 	// protects against incomplete rules reaching the policy at runtime.
-	return (rule.Global || (len(rule.Hosts) > 0 && matchesAnyPattern(rule.Hosts, host))) && matchesAnyPattern(rule.Paths, path)
+	return (rule.Global || (host != "" && len(rule.Hosts) > 0 && matchesAnyPattern(rule.Hosts, host))) && matchesAnyPattern(rule.Paths, path)
 }
 
 // Decide denies anonymous subjects and issues the configured token types for
