@@ -364,7 +364,7 @@ func TestStaticAuthenticatedPolicy_HostAndPathRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile paths: %v", err)
 	}
-	hosts, err := CompilePathPatterns([]string{`api\.example\.com`})
+	hosts, err := CompileHostPatterns([]string{`api\.example\.com`})
 	if err != nil {
 		t.Fatalf("compile hosts: %v", err)
 	}
@@ -388,5 +388,27 @@ func TestStaticAuthenticatedPolicy_HostAndPathRules(t *testing.T) {
 				t.Fatalf("got decision=%+v err=%v, want %s", d, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestStaticAuthenticatedPolicy_HostRuleWithoutHostsFailsClosed(t *testing.T) {
+	paths, err := CompilePathPatterns([]string{`/docs`})
+	if err != nil {
+		t.Fatalf("compile paths: %v", err)
+	}
+	policy := NewStaticAuthenticatedPolicy(nil, WithAllowAnonymousWithoutIssueRules([]AnonymousRequestRule{{Paths: paths}}))
+
+	decision, err := policy.Decide(context.Background(), AuthzCheckPolicyInput{
+		Subject: anonymousPrincipal(),
+		Request: &request.RequestAttributes{
+			Path:       "/docs",
+			Additional: map[string]any{"host": "console.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if decision.Action != AuthzCheckDeny {
+		t.Fatalf("incomplete host rule: got %s, want %s", decision.Action, AuthzCheckDeny)
 	}
 }

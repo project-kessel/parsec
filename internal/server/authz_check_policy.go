@@ -169,7 +169,10 @@ type staticAuthenticatedConfig struct {
 	anonymousRequestRules []AnonymousRequestRule
 }
 
-type AnonymousRequestRule struct{ Hosts, Paths []*regexp.Regexp }
+type AnonymousRequestRule struct {
+	Hosts, Paths []*regexp.Regexp
+	Global       bool
+}
 
 // StaticAuthenticatedOption configures optional behavior for
 // [NewStaticAuthenticatedPolicy].
@@ -180,7 +183,7 @@ type StaticAuthenticatedOption func(*staticAuthenticatedConfig)
 // via [CompilePathPatterns].
 func WithAllowAnonymousWithoutIssuePaths(patterns []*regexp.Regexp) StaticAuthenticatedOption {
 	return func(c *staticAuthenticatedConfig) {
-		c.anonymousRequestRules = append(c.anonymousRequestRules, AnonymousRequestRule{Paths: patterns})
+		c.anonymousRequestRules = append(c.anonymousRequestRules, AnonymousRequestRule{Paths: patterns, Global: true})
 	}
 }
 
@@ -224,7 +227,10 @@ func requestHost(attrs *request.RequestAttributes) string {
 }
 
 func matchesAnonymousRule(rule AnonymousRequestRule, host, path string) bool {
-	return (len(rule.Hosts) == 0 || matchesAnyPattern(rule.Hosts, host)) && matchesAnyPattern(rule.Paths, path)
+	// Hostless rules are intentionally not global. Global paths are configured
+	// through WithAllowAnonymousWithoutIssuePaths instead; failing closed here
+	// protects against incomplete rules reaching the policy at runtime.
+	return (rule.Global || (len(rule.Hosts) > 0 && matchesAnyPattern(rule.Hosts, host))) && matchesAnyPattern(rule.Paths, path)
 }
 
 // Decide denies anonymous subjects and issues the configured token types for
