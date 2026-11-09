@@ -1021,6 +1021,7 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 			Error(error)
 			ConnectionReused(bool)
 			ProtocolVersion(string)
+			TLSCurve(string)
 			End()
 		})
 		wantStatus     string
@@ -1030,6 +1031,8 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 		wantNoConn     bool
 		wantProto      string
 		wantNoProto    bool
+		wantCurve      string
+		wantNoCurve    bool
 	}{
 		{
 			name:       "success 200 new connection",
@@ -1041,16 +1044,19 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 				Error(error)
 				ConnectionReused(bool)
 				ProtocolVersion(string)
+				TLSCurve(string)
 				End()
 			}) {
 				p.ConnectionReused(false)
 				p.StatusCode(200)
 				p.ProtocolVersion("HTTP/1.1")
+				p.TLSCurve("X25519MLKEM768")
 			},
 			wantStatus:     `status="success"`,
 			wantStatusCode: `status_code="200"`,
 			wantConn:       `connection="new"`,
 			wantProto:      `network_protocol_version="HTTP/1.1"`,
+			wantCurve:      `tls_curve="X25519MLKEM768"`,
 		},
 		{
 			name:       "success 201 reused connection",
@@ -1062,16 +1068,19 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 				Error(error)
 				ConnectionReused(bool)
 				ProtocolVersion(string)
+				TLSCurve(string)
 				End()
 			}) {
 				p.ConnectionReused(true)
 				p.StatusCode(201)
 				p.ProtocolVersion("HTTP/2.0")
+				p.TLSCurve("X25519")
 			},
 			wantStatus:     `status="success"`,
 			wantStatusCode: `status_code="201"`,
 			wantConn:       `connection="reused"`,
 			wantProto:      `network_protocol_version="HTTP/2.0"`,
+			wantCurve:      `tls_curve="X25519"`,
 		},
 		{
 			name:       "server error 500",
@@ -1083,6 +1092,7 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 				Error(error)
 				ConnectionReused(bool)
 				ProtocolVersion(string)
+				TLSCurve(string)
 				End()
 			}) {
 				p.ConnectionReused(true)
@@ -1104,6 +1114,7 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 				Error(error)
 				ConnectionReused(bool)
 				ProtocolVersion(string)
+				TLSCurve(string)
 				End()
 			}) {
 				p.Error(errors.New("connection refused"))
@@ -1112,9 +1123,10 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 			wantNoCode:  true,
 			wantNoConn:  true,
 			wantNoProto: true,
+			wantNoCurve: true,
 		},
 		{
-			name:       "no connection info omits label",
+			name:       "no connection info or plaintext omits labels",
 			clientName: "plain-client",
 			method:     "GET",
 			host:       "example.com",
@@ -1123,6 +1135,7 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 				Error(error)
 				ConnectionReused(bool)
 				ProtocolVersion(string)
+				TLSCurve(string)
 				End()
 			}) {
 				p.StatusCode(200)
@@ -1132,6 +1145,7 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 			wantStatusCode: `status_code="200"`,
 			wantNoConn:     true,
 			wantProto:      `network_protocol_version="HTTP/1.1"`,
+			wantNoCurve:    true,
 		},
 	}
 
@@ -1169,6 +1183,12 @@ func TestHTTPClientRequestMetrics(t *testing.T) {
 			}
 			if tt.wantNoProto {
 				assert.NotContains(t, body, "network_protocol_version")
+			}
+			if tt.wantCurve != "" {
+				assert.Contains(t, body, tt.wantCurve)
+			}
+			if tt.wantNoCurve {
+				assert.NotContains(t, body, "tls_curve")
 			}
 		})
 	}

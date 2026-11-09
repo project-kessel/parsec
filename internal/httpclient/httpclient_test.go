@@ -666,12 +666,15 @@ type spyProbe struct {
 	connReusedVal   bool
 	protocolVersion string
 	protoVersionSet bool
+	tlsCurve        string
+	tlsCurveSet     bool
 }
 
 func (p *spyProbe) StatusCode(code int)          { p.statusCode = code }
 func (p *spyProbe) Error(error)                  { p.errored = true }
 func (p *spyProbe) ConnectionReused(reused bool) { p.connReusedSet = true; p.connReusedVal = reused }
 func (p *spyProbe) ProtocolVersion(proto string) { p.protoVersionSet = true; p.protocolVersion = proto }
+func (p *spyProbe) TLSCurve(curve string)        { p.tlsCurveSet = true; p.tlsCurve = curve }
 func (p *spyProbe) End()                         { p.ended = true }
 
 func TestRegistry_ObserverCalledOnRequest(t *testing.T) {
@@ -928,6 +931,106 @@ func TestRegistry_ObserverOmitsProtocolVersionOnError(t *testing.T) {
 
 	if obs.probe.protoVersionSet {
 		t.Error("ProtocolVersion should not be called on transport error")
+	}
+}
+
+// writeServerCA PEM-encodes the TLS test server's certificate into a temp
+// file so it can be trusted via [ClientSpec.RootCAPath].
+func writeServerCA(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("failed to write CA cert: %v", err)
+	}
+	return path
+}
+
+func TestRegistry_ObserverReportsTLSCurve(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	obs := &spyObserver{}
+	r := NewRegistry(nil, WithObserver(obs))
+
+	client, err := r.Register("tls-curve", ClientSpec{
+		Timeout:    5 * time.Second,
+		RootCAPath: writeServerCA(t, server),
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.TLS == nil {
+		t.Fatal("expected TLS connection state on response")
+	}
+	if !obs.probe.tlsCurveSet {
+		t.Fatal("TLSCurve was not called")
+	}
+	// Compare against the negotiated value rather than hard-coding
+	// X25519MLKEM768 so the test is stable under GODEBUG settings such as
+	// fips140=on or tlsmlkem=0.
+	want := resp.TLS.CurveID.String()
+	if obs.probe.tlsCurve == "" || obs.probe.tlsCurve != want {
+		t.Errorf("tlsCurve = %q, want %q", obs.probe.tlsCurve, want)
+	}
+	t.Logf("negotiated TLS curve: %s", obs.probe.tlsCurve)
+}
+
+func TestRegistry_ObserverOmitsTLSCurveForPlainHTTP(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	obs := &spyObserver{}
+	r := NewRegistry(nil, WithObserver(obs))
+
+	client, err := r.Register("tls-curve-plain", ClientSpec{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if obs.probe.tlsCurveSet {
+		t.Errorf("TLSCurve should not be called for plaintext HTTP, got %q", obs.probe.tlsCurve)
+	}
+}
+
+func TestRegistry_ObserverOmitsTLSCurveOnError(t *testing.T) {
+	errTransport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("connection refused")
+	})
+
+	obs := &spyObserver{}
+	r := NewRegistry(errTransport, WithObserver(obs))
+
+	client, err := r.Register("tls-curve-err", ClientSpec{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	req, _ := http.NewRequest("GET", "https://example.com", nil)
+	_, err = client.Transport.RoundTrip(req)
+	if err == nil {
+		t.Fatal("expected error from transport")
+	}
+
+	if obs.probe.tlsCurveSet {
+		t.Error("TLSCurve should not be called on transport error")
 	}
 }
 

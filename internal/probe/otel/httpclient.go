@@ -51,6 +51,7 @@ func (o *httpClientObserver) RequestStarted(
 		statusCode:      attribute.String("status_code", ""),
 		connection:      attribute.String("connection", ""),
 		protocolVersion: attribute.String("network.protocol.version", ""),
+		tlsCurve:        attribute.String("tls.curve", ""),
 	}
 }
 
@@ -66,6 +67,7 @@ type requestProbe struct {
 	statusCode      attribute.KeyValue
 	connection      attribute.KeyValue
 	protocolVersion attribute.KeyValue
+	tlsCurve        attribute.KeyValue
 }
 
 func (p *requestProbe) StatusCode(code int) {
@@ -88,6 +90,10 @@ func (p *requestProbe) ProtocolVersion(proto string) {
 	p.protocolVersion = attribute.String("network.protocol.version", proto)
 }
 
+func (p *requestProbe) TLSCurve(curve string) {
+	p.tlsCurve = attribute.String("tls.curve", curve)
+}
+
 func (p *requestProbe) End() {
 	keys := []attribute.KeyValue{p.clientName, p.method, p.host, p.status}
 	if p.statusCode.Value.AsString() != "" {
@@ -98,6 +104,9 @@ func (p *requestProbe) End() {
 	}
 	if p.protocolVersion.Value.AsString() != "" {
 		keys = append(keys, p.protocolVersion)
+	}
+	if p.tlsCurve.Value.AsString() != "" {
+		keys = append(keys, p.tlsCurve)
 	}
 	attrs := metric.WithAttributeSet(attribute.NewSet(keys...))
 	p.obs.requestDuration.Record(p.ctx, p.obs.clock.Since(p.startTime).Seconds(), attrs)
