@@ -273,11 +273,7 @@ local function audit_cross_account(outcome, reason_code, classification, claims,
   if classification ~= nil and classification ~= "" then
     record.classification = classification
   end
-  local ok = audit.record(record)
-  if not ok then
-    record.metadata = nil
-    audit.record(record)
-  end
+  audit.record(record)
 end
 
 local function resolve_rbac_url(user_id, target_org_id)

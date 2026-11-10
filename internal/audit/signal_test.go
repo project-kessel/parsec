@@ -61,20 +61,26 @@ func TestCollectorEnforcesMetadataAllowlist(t *testing.T) {
 	}
 	collector := NewCollector(allowlist)
 
-	withSecret := base
-	withSecret.Metadata = map[string]string{"authorization": "Bearer secret-token"}
-	collector.Record(withSecret)
-	require.Empty(t, collector.Signals(), "should reject authorization header")
-
-	withClaim := base
-	withClaim.Metadata = map[string]string{"jwt_claims": `{"sub":"user-1"}`}
-	collector.Record(withClaim)
-	require.Empty(t, collector.Signals(), "should reject jwt_claims")
-
-	withPassword := base
-	withPassword.Metadata = map[string]string{"password": "secret123"}
-	collector.Record(withPassword)
-	require.Empty(t, collector.Signals(), "should reject password")
+	// Keys outside the allowlist are stripped; the signal itself is kept.
+	for _, md := range []map[string]string{
+		{"authorization": "Bearer secret-token"},
+		{"jwt_claims": `{"sub":"user-1"}`},
+		{"password": "secret123", "target_org_id": "org-123"},
+	} {
+		c := NewCollector(allowlist)
+		s := base
+		s.Metadata = md
+		require.True(t, c.Record(s))
+		signals := c.Signals()
+		require.Len(t, signals, 1, "a disallowed key must not drop the signal")
+		for k := range md {
+			if !allowlist[k] {
+				require.NotContains(t, signals[0].Metadata, k)
+			}
+		}
+		require.Equal(t, 1, c.StrippedKeys())
+		require.Zero(t, c.Rejected())
+	}
 
 	allowlisted := base
 	allowlisted.Metadata = map[string]string{
@@ -103,7 +109,7 @@ func TestCollectorAllowAllWhenAllowlistNil(t *testing.T) {
 	require.Len(t, collector.Signals(), 1, "nil allowlist must accept any valid key")
 }
 
-func TestCollectorRejectsAllWhenAllowlistEmptyNonNil(t *testing.T) {
+func TestCollectorStripsAllMetadataWhenAllowlistEmptyNonNil(t *testing.T) {
 	collector := NewCollector(map[string]bool{})
 	signal := Signal{
 		Source:    SourceValidator,
@@ -111,16 +117,19 @@ func TestCollectorRejectsAllWhenAllowlistEmptyNonNil(t *testing.T) {
 		Outcome:   OutcomeSuccess,
 		Metadata:  map[string]string{"custom_key": "custom-value"},
 	}
-	collector.Record(signal)
-	require.Empty(t, collector.Signals(), "empty non-nil allowlist must reject all metadata keys")
+	require.True(t, collector.Record(signal))
+	signals := collector.Signals()
+	require.Len(t, signals, 1, "empty non-nil allowlist must keep the signal")
+	require.Nil(t, signals[0].Metadata, "empty non-nil allowlist must strip all metadata keys")
+	require.Equal(t, 1, collector.StrippedKeys())
+}
 
-	noMeta := Signal{
-		Source:    SourceValidator,
-		Operation: "cross_account_access",
-		Outcome:   OutcomeSuccess,
-	}
-	collector.Record(noMeta)
-	require.Len(t, collector.Signals(), 1, "signals without metadata must still be accepted")
+func TestCollectorCountsRejectedSignals(t *testing.T) {
+	collector := NewCollector(nil)
+	require.False(t, collector.Record(Signal{Source: SourceValidator, Operation: "bad operation", Outcome: OutcomeFailure}))
+	require.Empty(t, collector.Signals())
+	require.Equal(t, 1, collector.Rejected())
+	require.Zero(t, collector.Dropped(), "an invalid signal is rejected, not dropped for capacity")
 }
 
 func TestSanitizeMetadataTrimsAndTruncatesLongValues(t *testing.T) {

@@ -74,9 +74,9 @@ func WithEventPrefix(prefix string) Option {
 }
 
 // WithAllowedMetadataKeys sets the allowlist of metadata keys that
-// audit.record() may emit. A non-nil empty map rejects all metadata
-// keys (fail-closed default). A nil map means allow-all (text/length
-// validation only). When non-empty, only listed keys are permitted.
+// audit.record() may emit. Keys that are not listed are stripped and the
+// signal is kept. A non-nil empty map strips all metadata keys (fail-closed
+// default). A nil map means allow-all (text/length validation only).
 func WithAllowedMetadataKeys(keys map[string]bool) Option {
 	return func(observer *Observer) {
 		observer.allowedMetadataKeys = keys
@@ -130,13 +130,15 @@ type requestInfo struct {
 }
 
 type resourceInfo struct {
-	Type                string               `json:"type"`
-	TokenTypes          []string             `json:"token_types,omitempty"`
-	RequestedTokenTypes []string             `json:"requested_token_types,omitempty"`
-	CacheStatus         string               `json:"cache_status,omitempty"`
-	CacheLayers         []request.CacheLayer `json:"cache_layers,omitempty"`
-	FailedComponent     string               `json:"failed_component,omitempty"`
-	SignalsDropped      int                  `json:"signals_dropped,omitempty"`
+	Type                 string               `json:"type"`
+	TokenTypes           []string             `json:"token_types,omitempty"`
+	RequestedTokenTypes  []string             `json:"requested_token_types,omitempty"`
+	CacheStatus          string               `json:"cache_status,omitempty"`
+	CacheLayers          []request.CacheLayer `json:"cache_layers,omitempty"`
+	FailedComponent      string               `json:"failed_component,omitempty"`
+	SignalsDropped       int                  `json:"signals_dropped,omitempty"`
+	SignalsRejected      int                  `json:"signals_rejected,omitempty"`
+	MetadataKeysStripped int                  `json:"metadata_keys_stripped,omitempty"`
 }
 
 // emitEnvelope holds pre-serialized JSON for the shared fields that are
@@ -474,6 +476,7 @@ func (p *requestProbe) End() {
 		Type: resourceTypeForAction(p.action), TokenTypes: safeTokenTypes(p.tokenTypes),
 		RequestedTokenTypes: safeTokenTypes(p.requestedTokenTypes), CacheStatus: p.cacheStatus, CacheLayers: cacheLayers,
 		FailedComponent: failedComponent, SignalsDropped: p.collector.Dropped(),
+		SignalsRejected: p.collector.Rejected(), MetadataKeysStripped: p.collector.StrippedKeys(),
 	})
 	if len(signals) > 0 {
 		env.signals, _ = json.Marshal(signals)

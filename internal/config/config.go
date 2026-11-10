@@ -513,8 +513,9 @@ type ObservabilityConfig struct {
 
 	// AllowedMetadataKeys is the allowlist of metadata keys that Lua scripts
 	// and other extensions may emit via audit.record(). When empty or unset,
-	// all metadata keys are rejected (fail-closed). When configured, only
-	// listed keys are permitted (prevents secrets leakage).
+	// all metadata keys are stripped (fail-closed). When configured, keys
+	// that are not listed are stripped and the signal is kept (prevents
+	// secrets leakage).
 	AllowedMetadataKeys []string `koanf:"audit_metadata_keys" usage:"optional allowlist of audit.record() metadata keys"`
 
 	// Event-specific logging configuration

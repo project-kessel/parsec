@@ -84,20 +84,22 @@ type NoOpReporter struct{}
 func (NoOpReporter) Record(Signal) bool { return true }
 
 // Collector stores a bounded list of valid signals for one request.
-// When allowedKeys is non-nil, only listed keys are permitted; a non-nil
-// empty map rejects all metadata keys. A nil map means allow-all
-// (text/length validation only). Production deployments should always
-// configure an explicit allowlist via audit_metadata_keys.
+// When allowedKeys is non-nil, metadata keys that are not listed are stripped
+// and the signal is kept; a non-nil empty map strips all metadata. A nil map
+// means allow-all (text/length validation only). Production deployments
+// should always configure an explicit allowlist via audit_metadata_keys.
 type Collector struct {
-	mu          sync.Mutex
-	signals     []Signal
-	dropped     int
-	allowedKeys map[string]bool
+	mu           sync.Mutex
+	signals      []Signal
+	dropped      int
+	rejected     int
+	strippedKeys int
+	allowedKeys  map[string]bool
 }
 
 // NewCollector returns a Collector that enforces allowedKeys.
 // A nil allowlist means allow-all (text/length validation only).
-// A non-nil empty map rejects all metadata keys.
+// A non-nil empty map strips all metadata keys.
 // Production deployments should configure an explicit allowlist.
 func NewCollector(allowedKeys map[string]bool) *Collector {
 	return &Collector{allowedKeys: allowedKeys}
@@ -110,17 +112,55 @@ func (c *Collector) Record(signal Signal) bool {
 	// Sanitize metadata values before validating/storing. This also clones
 	// the map, preventing caller mutations from bypassing validation.
 	signal.Metadata = SanitizeMetadata(signal.Metadata)
-	if !c.valid(signal) {
-		return false
+	// A key outside the allowlist costs only that key. Dropping the whole
+	// signal would lose a security-relevant event over a config omission.
+	stripped := 0
+	if c.allowedKeys != nil {
+		for k := range signal.Metadata {
+			if !c.allowedKeys[k] {
+				delete(signal.Metadata, k)
+				stripped++
+			}
+		}
+		if len(signal.Metadata) == 0 {
+			signal.Metadata = nil
+		}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.strippedKeys += stripped
+	if !Valid(signal) {
+		c.rejected++
+		return false
+	}
 	if len(c.signals) < 32 {
 		c.signals = append(c.signals, signal)
 		return true
 	}
 	c.dropped++
 	return false
+}
+
+// Rejected returns the number of signals refused because they failed
+// validation.
+func (c *Collector) Rejected() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rejected
+}
+
+// StrippedKeys returns the number of metadata keys removed from recorded
+// signals because they are not on the allowlist.
+func (c *Collector) StrippedKeys() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.strippedKeys
 }
 
 // Dropped returns the number of valid signals rejected because the
@@ -171,14 +211,10 @@ func ReporterFrom(ctx context.Context) Reporter {
 	return NoOpReporter{}
 }
 
-// Valid reports whether signal passes structural validation with no metadata
-// key allowlist (allow-all). Prefer Collector validation when an allowlist
-// is configured for the request.
+// Valid reports whether signal passes structural validation. The metadata key
+// allowlist is not part of validity: a Collector strips keys it does not
+// allow and keeps the signal.
 func Valid(signal Signal) bool {
-	return (&Collector{}).valid(signal)
-}
-
-func (c *Collector) valid(signal Signal) bool {
 	if !validEnum(signal.Source, SourceValidator, SourceDataSource, SourceMapper, SourcePolicy) ||
 		!validEnum(signal.Outcome, OutcomeSuccess, OutcomeDenied, OutcomeFailure) ||
 		!validText(signal.Operation, MaxOperationLength) ||
@@ -188,7 +224,7 @@ func (c *Collector) valid(signal Signal) bool {
 	if signal.ReasonCode != "" && !ValidReasonCode(signal.ReasonCode) {
 		return false
 	}
-	return c.validMetadata(signal.Metadata)
+	return validMetadata(signal.Metadata)
 }
 
 // SanitizeMetadata trims surrounding whitespace and truncates each metadata
@@ -224,17 +260,11 @@ func sanitizeMetadataValue(v string) string {
 	return strings.TrimSpace(v[:end])
 }
 
-func (c *Collector) validMetadata(md map[string]string) bool {
+func validMetadata(md map[string]string) bool {
 	if len(md) > MaxMetadataKeys {
 		return false
 	}
 	for k, v := range md {
-		// When an allowlist is configured (non-nil), reject non-allowlisted
-		// keys. A non-nil empty map rejects all metadata keys. A nil map
-		// means allow-all (text/length rules still apply).
-		if c.allowedKeys != nil && !c.allowedKeys[k] {
-			return false
-		}
 		if !validText(k, MaxOperationLength) {
 			return false
 		}

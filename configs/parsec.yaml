@@ -14,9 +14,9 @@ observability:
   log_format: json
   # Audit correlation uses x-request-id, or a locally generated fallback.
   # The ID is stored only in Parsec's context; headers are not rewritten.
-  # Allowlist for audit.record() metadata keys. When omitted, all metadata
-  # keys are rejected (fail-closed). When set, only listed keys are
-  # permitted. An explicit list is required for production use.
+  # Allowlist for audit.record() metadata keys. Keys that are not listed are
+  # stripped and the signal is kept. When omitted, all metadata keys are
+  # stripped (fail-closed). An explicit list is required for production use.
   audit_metadata_keys:
     - "cache_status"
     - "classification"

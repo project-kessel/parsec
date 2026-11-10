@@ -866,7 +866,7 @@ func TestSignalsDroppedCounting(t *testing.T) {
 		require.Equal(t, float64(1), dropped)
 	})
 
-	t.Run("disallowed_metadata_key_does_not_count_as_dropped", func(t *testing.T) {
+	t.Run("disallowed_metadata_key_is_stripped_and_counted", func(t *testing.T) {
 		var output bytes.Buffer
 		obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
 			WithAllowedMetadataKeys(map[string]bool{"allowed": true}))
@@ -878,15 +878,18 @@ func TestSignalsDroppedCounting(t *testing.T) {
 			Outcome:   auditctx.OutcomeSuccess,
 			Metadata:  map[string]string{"disallowed_key": "value"},
 		})
-		require.False(t, ok)
+		require.True(t, ok, "a disallowed key is stripped; the signal is kept")
 		probe.PolicyDecisionIssue(1, "", "")
 		probe.End()
 
 		records := decodeRecords(t, output.Bytes())
 		resource := records[0]["resource"].(map[string]any)
 		_, hasDropped := resource["signals_dropped"]
-		require.False(t, hasDropped,
-			"a rejected signal due to invalid metadata must not increment signals_dropped")
+		require.False(t, hasDropped, "a stripped key must not increment signals_dropped")
+		require.EqualValues(t, 1, resource["metadata_keys_stripped"])
+		signals := records[0]["signals"].([]any)
+		require.Len(t, signals, 1)
+		require.NotContains(t, signals[0].(map[string]any), "metadata")
 	})
 }
 

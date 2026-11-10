@@ -27,6 +27,17 @@ observability:
   log_level: debug
   log_format: json
   # x-request-id is used for local audit correlation only.
+  # Metadata keys audit.record() may emit. Keys not listed are stripped.
+  audit_metadata_keys:
+    - "cache_status"
+    - "classification"
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_name"
+    - "dependency_status"
   observers:
     - type: audit
     - type: logging

@@ -164,7 +164,7 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 	keys := p.allowedMetadataKeys(cfg)
 	if len(keys) == 0 {
 		startupLog := zerolog.New(logCtx.Writer).With().Timestamp().Logger()
-		startupLog.Warn().Msg("audit_metadata_keys not configured; all audit metadata keys will be rejected. " +
+		startupLog.Warn().Msg("audit_metadata_keys not configured; all metadata keys will be stripped from audit signals. " +
 			"Configure an explicit allowlist under observability.audit_metadata_keys for production use.")
 	}
 	opts = append(opts, audit.WithAllowedMetadataKeys(keys))
