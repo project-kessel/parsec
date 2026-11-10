@@ -2,6 +2,11 @@ package audit
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -235,4 +240,45 @@ func TestCollectorClonesMetadataToPreventMutation(t *testing.T) {
 	require.False(t, hasPassword, "stored signal must not contain password added after recording")
 
 	require.Len(t, stored[0].Metadata, 2, "stored signal should only have original 2 keys")
+}
+
+// metadata_keys_stripped describes recorded signals only: keys on a signal
+// that was rejected or dropped are already accounted for by those counters.
+func TestCollectorCountsStrippedKeysOnlyForRecordedSignals(t *testing.T) {
+	collector := NewCollector(map[string]bool{})
+	require.False(t, collector.Record(Signal{
+		Source: SourceValidator, Operation: "bad operation", Outcome: OutcomeFailure,
+		Metadata: map[string]string{"a": "1", "b": "2"},
+	}))
+	require.Equal(t, 1, collector.Rejected())
+	require.Zero(t, collector.StrippedKeys())
+}
+
+// Every Reason* constant must be accepted by ValidReasonCode. The constants
+// and the lookup set are separate declarations; this keeps them in step.
+func TestEveryReasonConstantIsAValidReasonCode(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "signal.go", nil, 0)
+	require.NoError(t, err)
+	found := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok {
+			return true
+		}
+		for i, name := range spec.Names {
+			if !strings.HasPrefix(name.Name, "Reason") || i >= len(spec.Values) {
+				continue
+			}
+			lit, ok := spec.Values[i].(*ast.BasicLit)
+			if !ok {
+				continue
+			}
+			value, err := strconv.Unquote(lit.Value)
+			require.NoError(t, err)
+			require.True(t, ValidReasonCode(value), "%s is not in reasonCodes", name.Name)
+			found++
+		}
+		return true
+	})
+	require.Equal(t, len(reasonCodes), found, "reasonCodes has entries with no Reason* constant")
 }

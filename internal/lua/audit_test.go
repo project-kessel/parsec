@@ -9,20 +9,13 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-type recordingReporter struct{ signals []auditctx.Signal }
-
-func (r *recordingReporter) Record(signal auditctx.Signal) bool {
-	r.signals = append(r.signals, signal)
-	return true
-}
-
 func TestRegisterAuditServiceRecordsValidatedSignal(t *testing.T) {
 	L := lua.NewState()
 	defer L.Close()
-	reporter := &recordingReporter{}
+	reporter := auditctx.NewCollector(nil)
 	RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
 	require.NoError(t, L.DoString(`audit.record({source="validator", operation="user_enrichment", outcome="failure", reason_code="dependency_failure"})`))
-	require.Equal(t, []auditctx.Signal{{Source: "validator", Operation: "user_enrichment", Outcome: "failure", ReasonCode: "dependency_failure"}}, reporter.signals)
+	require.Equal(t, []auditctx.Signal{{Source: "validator", Operation: "user_enrichment", Outcome: "failure", ReasonCode: "dependency_failure"}}, reporter.Signals())
 }
 
 // TestRegisterAuditServiceSanitizesOversizedMetadata guards against a
@@ -33,7 +26,7 @@ func TestRegisterAuditServiceRecordsValidatedSignal(t *testing.T) {
 func TestRegisterAuditServiceSanitizesOversizedMetadata(t *testing.T) {
 	L := lua.NewState()
 	defer L.Close()
-	reporter := &recordingReporter{}
+	reporter := auditctx.NewCollector(nil)
 	RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
 
 	longValue := ""
@@ -50,17 +43,33 @@ func TestRegisterAuditServiceSanitizesOversizedMetadata(t *testing.T) {
 		metadata = { target_account_number = long_value, target_org_id = "  padded  " }
 	}) == true)`))
 
-	require.Len(t, reporter.signals, 1, "oversized/padded metadata must be sanitized, not dropped")
-	require.Len(t, reporter.signals[0].Metadata["target_account_number"], auditctx.MaxMetadataValueLength)
-	require.Equal(t, "padded", reporter.signals[0].Metadata["target_org_id"])
+	require.Len(t, reporter.Signals(), 1, "oversized/padded metadata must be sanitized, not dropped")
+	require.Len(t, reporter.Signals()[0].Metadata["target_account_number"], auditctx.MaxMetadataValueLength)
+	require.Equal(t, "padded", reporter.Signals()[0].Metadata["target_org_id"])
 }
 
 func TestRegisterAuditServiceRejectsUnsafeOrUnknownFields(t *testing.T) {
 	L := lua.NewState()
 	defer L.Close()
-	reporter := &recordingReporter{}
+	reporter := auditctx.NewCollector(nil)
 	RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
 	require.NoError(t, L.DoString(`assert(audit.record({source="validator", operation="bad operation", outcome="failure"}) == false)`))
 	require.NoError(t, L.DoString(`assert(audit.record({source="validator", operation="ok", outcome="failure", secret="leak"}) == false)`))
-	require.Empty(t, reporter.signals)
+	require.Empty(t, reporter.Signals())
+	require.Equal(t, 1, reporter.Rejected(), "a structurally invalid signal must be counted by the collector")
+}
+
+// A signal whose metadata only becomes valid once disallowed keys are
+// stripped must be kept, not rejected at the Lua boundary.
+func TestRegisterAuditServiceStripsBeforeValidating(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+	reporter := auditctx.NewCollector(map[string]bool{"k1": true})
+	RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
+	require.NoError(t, L.DoString(`assert(audit.record({
+		source = "data_source", operation = "enrichment", outcome = "success",
+		metadata = { k1="a", k2="b", k3="c", k4="d", k5="e", k6="f", k7="g", k8="h", k9="i" }
+	}) == true)`))
+	require.Equal(t, map[string]string{"k1": "a"}, reporter.Signals()[0].Metadata)
+	require.Equal(t, 8, reporter.StrippedKeys())
 }

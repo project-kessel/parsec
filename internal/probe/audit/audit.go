@@ -184,7 +184,6 @@ type requestProbe struct {
 	issuanceDenialReason      string
 	tokenIssued               bool
 	invalidRequestErr         error
-	requestFailed             bool
 	tokenTypes                []service.TokenType
 	requestedTokenTypes       []service.TokenType
 
@@ -363,8 +362,6 @@ func (p *requestProbe) InvalidRequest(err error) {
 	p.invalidRequestErr = err
 }
 
-func (p *requestProbe) RequestFailed(error) { p.requestFailed = true }
-
 // deriveCompletion determines audit outcome and reason from the sequence of
 // probe callbacks received during the request. This keeps audit vocabulary
 // out of the handlers and centralizes reason derivation in the observer.
@@ -435,13 +432,10 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 		return AuditOutcomeFailure, auditctx.ReasonInternalError
 	}
 
-	// Server-side request failure not covered by a more specific callback.
-	if p.requestFailed {
-		return AuditOutcomeFailure, auditctx.ReasonInternalError
-	}
-
-	// No callback stated an outcome. Never report that as a success: a
-	// handler exit that forgot its callback must show up as a failure.
+	// Either a server-side failure with no more specific callback
+	// (RequestFailed), or no callback stated an outcome. Never report the
+	// latter as a success: a handler exit that forgot its callback must show
+	// up as a failure.
 	return AuditOutcomeFailure, auditctx.ReasonInternalError
 }
 
@@ -449,10 +443,10 @@ func (p *requestProbe) End() {
 	outcome, reasonCode := p.deriveCompletion()
 
 	cacheLayers, failureReason, failedComponent, dependencyOutage := p.state.Snapshot()
-	// A nested probe that recorded why a dependency failed is more specific
-	// than the generic reason derived from the handler callbacks.
-	generic := reasonCode == "" || reasonCode == auditctx.ReasonInternalError || reasonCode == auditctx.ReasonTokenIssuanceFailed
-	if outcome == AuditOutcomeFailure && generic && failureReason != "" {
+	// token_issuance_failed is not replaced: a dependency may have failed
+	// earlier and been tolerated, so it cannot be assumed to be the cause.
+	// failed_component still names it.
+	if outcome == AuditOutcomeFailure && (reasonCode == "" || reasonCode == auditctx.ReasonInternalError) && failureReason != "" {
 		reasonCode = failureReason
 	}
 	// A real infrastructure outage (JWKS down, distributed cache failure)
@@ -673,55 +667,51 @@ func (p *auditDistributedCacheProbe) ResultExpired() {
 
 type auditDataSourceCacheProbe struct {
 	datasource.NoOpCacheFetchProbe
-	state         *request.AuditState
-	layer         string
-	failureReason string
+	state *request.AuditState
+	layer string
 }
 
 func (o *Observer) CacheFetchStarted(ctx context.Context, name string) (context.Context, datasource.CacheFetchProbe) {
 	return ctx, &auditDataSourceCacheProbe{
-		state:         request.AuditStateFrom(ctx),
-		layer:         "datasource:" + name,
-		failureReason: auditctx.ReasonDependencyFailure,
+		state: request.AuditStateFrom(ctx),
+		layer: "datasource:" + name,
 	}
 }
 func (p *auditDataSourceCacheProbe) CacheHit()     { p.state.RecordCacheLayer(p.layer, "hit") }
 func (p *auditDataSourceCacheProbe) CacheMiss()    { p.state.RecordCacheLayer(p.layer, "miss") }
 func (p *auditDataSourceCacheProbe) CacheExpired() { p.state.RecordCacheLayer(p.layer, "expired") }
 
-// FetchFailed means the cache missed and the source fetch then failed. The
-// cache itself worked, so the layer is a miss; the failure is carried by the
-// reason and failed_component.
+// FetchFailed follows the CacheMiss or CacheExpired already recorded for this
+// lookup, so it adds no cache layer: the cache itself worked. The failure is
+// carried by the reason and failed_component.
 func (p *auditDataSourceCacheProbe) FetchFailed(error) {
-	p.state.RecordCacheLayer(p.layer, "miss")
-	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.layer)
 }
 
 type auditLuaFetchProbe struct {
 	datasource.NoOpLuaFetchProbe
-	state         *request.AuditState
-	name          string
-	failureReason string
+	state *request.AuditState
+	name  string
 }
 
 func (o *Observer) LuaFetchStarted(ctx context.Context, name string) (context.Context, datasource.LuaFetchProbe) {
-	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), name: name, failureReason: auditctx.ReasonDependencyFailure}
+	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), name: name}
 }
 func (p *auditLuaFetchProbe) ScriptLoadFailed(error) {
-	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 func (p *auditLuaFetchProbe) ScriptExecutionFailed(error) {
-	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 func (p *auditLuaFetchProbe) InvalidReturnType(string) {
-	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 func (p *auditLuaFetchProbe) ResultConversionFailed(error) {
-	p.state.SetFailureReason(p.failureReason)
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 

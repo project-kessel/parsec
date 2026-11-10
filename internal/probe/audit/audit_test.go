@@ -341,9 +341,9 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	for _, record := range records {
 		names[record["event"].(string)] = true
 	}
-	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"],
-		"a data source failure during issuance must not be reported as token_issuance_failed")
-	require.True(t, names["parsec_dependency_failure"])
+	require.Equal(t, auditctx.ReasonTokenIssuanceFailed, records[0]["reason_code"],
+		"an earlier dependency failure may have been tolerated, so it must not replace the issuance failure")
+	require.False(t, names["parsec_dependency_failure"])
 	require.NotContains(t, output.String(), "secret dependency response")
 }
 
@@ -892,7 +892,9 @@ func TestDataSourceFetchFailureIsACacheMiss(t *testing.T) {
 	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "fetch-failed"))
 
+	// The caching data source reports the miss, then the failed fetch.
 	_, dsProbe := obs.CacheFetchStarted(ctx, "enrichment")
+	dsProbe.CacheMiss()
 	dsProbe.FetchFailed(errors.New("enrichment timeout"))
 	probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
 	probe.End()
@@ -902,6 +904,6 @@ func TestDataSourceFetchFailureIsACacheMiss(t *testing.T) {
 	resource := records[0]["resource"].(map[string]any)
 	require.Equal(t, "datasource:enrichment", resource["failed_component"])
 	layers := resource["cache_layers"].([]any)
-	require.Len(t, layers, 1)
+	require.Len(t, layers, 1, "a failed fetch must not add a second layer for the same lookup")
 	require.Equal(t, "miss", layers[0].(map[string]any)["status"])
 }

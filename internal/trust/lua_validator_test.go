@@ -659,6 +659,7 @@ type countingCacheableValidator struct {
 	count     int
 	expiresAt time.Time
 	err       error
+	nilResult bool
 }
 
 func (v *countingCacheableValidator) CredentialTypes() []CredentialType {
@@ -669,6 +670,9 @@ func (v *countingCacheableValidator) Validate(_ context.Context, credential Cred
 	v.count++
 	if v.err != nil {
 		return nil, v.err
+	}
+	if v.nilResult {
+		return nil, nil
 	}
 	bearer, ok := credential.(*BearerCredential)
 	if !ok {
@@ -933,5 +937,25 @@ func TestDistributedCachingValidator_SourceRejectionIsNotACacheFailure(t *testin
 				t.Fatal("expected CacheMiss: the load ran and the source rejected the credential")
 			}
 		})
+	}
+}
+
+// A validator that returns neither a result nor an error is a server-side
+// fault. It must not be reported as an expired or rejected credential.
+func TestDistributedCachingValidator_NilResultIsAFailure(t *testing.T) {
+	obs := &recordingDistributedValidateObserver{}
+	source := &countingCacheableValidator{nilResult: true}
+	cached := NewDistributedCachingValidator("test-distributed-nil", source, obs, DistributedValidatorCachingConfig{
+		GroupName:      "test-validator-distributed-nil-cache",
+		CacheSizeBytes: 1 << 20,
+		CacheTTL:       time.Hour,
+	})
+
+	_, err := cached.Validate(context.Background(), &BearerCredential{Token: "abc"})
+	if err == nil || errors.Is(err, ErrExpiredToken) || errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err=%v, want a failure that is not a credential verdict", err)
+	}
+	if !obs.probes[0].getFailedCalled {
+		t.Fatal("expected GetFailed for a validator that returned no result")
 	}
 }

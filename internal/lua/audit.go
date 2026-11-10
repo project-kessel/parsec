@@ -34,10 +34,6 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
-		// Sanitize attacker-influenced metadata at the Lua boundary before
-		// validation. Collector.Record also sanitizes internally; the redundancy
-		// is intentional defense-in-depth for non-Collector reporters.
-		metadata = auditctx.SanitizeMetadata(metadata)
 		signal := auditctx.Signal{
 			Source:         luaString(state.GetField(table, "source")),
 			Operation:      luaString(state.GetField(table, "operation")),
@@ -46,10 +42,9 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			Classification: luaString(state.GetField(table, "classification")),
 			Metadata:       metadata,
 		}
-		if !auditctx.Valid(signal) {
-			state.Push(gopherlua.LFalse)
-			return 1
-		}
+		// The reporter sanitizes, strips disallowed metadata keys and
+		// validates. Checking here first would reject signals that stripping
+		// makes valid, and would hide rejections from the request record.
 		if auditctx.ReporterFrom(ctx).Record(signal) {
 			state.Push(gopherlua.LTrue)
 		} else {

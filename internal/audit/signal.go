@@ -126,13 +126,13 @@ func (c *Collector) Record(signal Signal) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.strippedKeys += stripped
 	if !Valid(signal) {
 		c.rejected++
 		return false
 	}
 	if len(c.signals) < 32 {
 		c.signals = append(c.signals, signal)
+		c.strippedKeys += stripped
 		return true
 	}
 	c.dropped++

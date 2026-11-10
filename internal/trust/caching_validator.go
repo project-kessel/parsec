@@ -230,6 +230,10 @@ func NewDistributedCachingValidator(name string, source Validator, obs Distribut
 			if err != nil {
 				return nil, &sourceValidationError{err: err}
 			}
+			if result == nil {
+				// A validator bug, not a verdict on the credential.
+				return nil, errors.New("validator returned no result")
+			}
 			if _, ok := validatorCacheExpiry(clk.Now(), cacheTTL, result); !ok {
 				return nil, &sourceValidationError{err: fmt.Errorf("validator result is already expired: %w", ErrExpiredToken)}
 			}
