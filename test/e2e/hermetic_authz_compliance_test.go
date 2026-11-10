@@ -243,7 +243,8 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 			require.Equal(t, 1, complianceEvents, "cache %s: %s", cacheStatus, output.String())
 			require.Equal(t, "compliance_denied", records[0]["reason_code"])
 			resource := records[0]["resource"].(map[string]any)
-			require.Equal(t, cacheStatus, resource["cache_status"])
+			layers := resource["cache_layers"].([]any)
+			require.Equal(t, cacheStatus, layers[len(layers)-1].(map[string]any)["status"])
 			require.NotContains(t, resource, "token_types")
 		}
 	})

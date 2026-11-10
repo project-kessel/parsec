@@ -44,8 +44,8 @@ type LifecycleObserver interface {
 // StopProbe tracks server graceful shutdown.
 // Implementations should embed NoOpStopProbe for forward compatibility.
 type StopProbe interface {
-	ShutdownCompleted(interruptedRequests int64)
-	ShutdownFailed(interruptedRequests int64)
+	ShutdownCompleted()
+	ShutdownFailed()
 	End()
 }
 
@@ -85,9 +85,9 @@ func (NoOpCacheRefreshProbe) End()                              {}
 // Embed this in concrete probe types for forward compatibility.
 type NoOpStopProbe struct{}
 
-func (NoOpStopProbe) ShutdownCompleted(int64) {}
-func (NoOpStopProbe) ShutdownFailed(int64)    {}
-func (NoOpStopProbe) End()                    {}
+func (NoOpStopProbe) ShutdownCompleted() {}
+func (NoOpStopProbe) ShutdownFailed()    {}
+func (NoOpStopProbe) End()               {}
 
 // NoOpJWKSObserver is a no-op implementation of JWKSObserver.
 // Embed this in concrete observer types for forward compatibility.

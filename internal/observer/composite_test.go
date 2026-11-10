@@ -92,8 +92,8 @@ func TestCompositeStopProbe_FansOutAllMethods(t *testing.T) {
 		},
 	}
 
-	composite.ShutdownCompleted(5)
-	composite.ShutdownFailed(3)
+	composite.ShutdownCompleted()
+	composite.ShutdownFailed()
 	composite.End()
 
 	for _, tc := range []struct {
@@ -280,9 +280,9 @@ type trackingStopProbe struct {
 	ended     *atomic.Int32
 }
 
-func (p *trackingStopProbe) ShutdownCompleted(int64) { p.completed.Add(1) }
-func (p *trackingStopProbe) ShutdownFailed(int64)    { p.failed.Add(1) }
-func (p *trackingStopProbe) End()                    { p.ended.Add(1) }
+func (p *trackingStopProbe) ShutdownCompleted() { p.completed.Add(1) }
+func (p *trackingStopProbe) ShutdownFailed()    { p.failed.Add(1) }
+func (p *trackingStopProbe) End()               { p.ended.Add(1) }
 
 type tokenExchangeProbeCalls struct {
 	actorCredExtracted     atomic.Int32

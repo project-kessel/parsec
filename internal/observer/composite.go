@@ -669,14 +669,14 @@ func (m *compositeCacheRefreshProbe) End() {
 
 type compositeStopProbe struct{ probes []server.StopProbe }
 
-func (m *compositeStopProbe) ShutdownCompleted(interruptedRequests int64) {
+func (m *compositeStopProbe) ShutdownCompleted() {
 	for _, p := range m.probes {
-		p.ShutdownCompleted(interruptedRequests)
+		p.ShutdownCompleted()
 	}
 }
-func (m *compositeStopProbe) ShutdownFailed(interruptedRequests int64) {
+func (m *compositeStopProbe) ShutdownFailed() {
 	for _, p := range m.probes {
-		p.ShutdownFailed(interruptedRequests)
+		p.ShutdownFailed()
 	}
 }
 

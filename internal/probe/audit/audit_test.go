@@ -221,7 +221,7 @@ func TestAuditEmitsKeyLifecycleEvents(t *testing.T) {
 	rotation.RotationCompleted("slot-a")
 	rotation.End()
 
-	_, kms := obs.KMSRotateStarted(context.Background(), "secret-trust-domain", "secret-namespace", "secret-key-name")
+	_, kms := obs.KMSRotateStarted(context.Background(), "secret-trust-domain", "secret-namespace", "rotated-key-name")
 	kms.KeyCreated()
 	kms.AliasChanged(true)
 	kms.DeletionScheduled()
@@ -233,7 +233,11 @@ func TestAuditEmitsKeyLifecycleEvents(t *testing.T) {
 		require.Equal(t, "parsec_key_rotation", record["event"])
 	}
 	require.Equal(t, "key_alias_create", records[2]["action"])
-	require.NotContains(t, output.String(), "secret-key-name")
+	for _, record := range records[1:] {
+		require.Equal(t, "rotated-key-name", record["resource"].(map[string]any)["key_name"],
+			"KMS events must say which key they are about")
+	}
+	require.NotContains(t, output.String(), "secret-trust-domain")
 	require.NotContains(t, output.String(), "secret-namespace")
 }
 
@@ -242,7 +246,7 @@ func TestAuditEmitsProcessReadyAndShutdown(t *testing.T) {
 	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec", ServiceVersion: "v1"})
 	obs.ProcessReady(server.ProcessInfo{Version: "v1", Commit: "abc123", TrustDomain: "prod.example"})
 	_, stop := obs.StopStarted(context.Background())
-	stop.ShutdownCompleted(0)
+	stop.ShutdownCompleted()
 	stop.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -323,8 +327,6 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	records := decodeRecords(t, output.Bytes())
 	require.Equal(t, "error", records[0]["level"])
 	resource := records[0]["resource"].(map[string]any)
-	require.Equal(t, "hit", resource["cache_status"])
-
 	layers, hasLayers := resource["cache_layers"].([]any)
 	require.True(t, hasLayers, "cache_layers must be present when cache probes fire")
 	require.Len(t, layers, 1)
@@ -365,9 +367,6 @@ func TestCacheLayersEmittedPerComponent(t *testing.T) {
 	records := decodeRecords(t, output.Bytes())
 	resource := records[0]["resource"].(map[string]any)
 
-	require.Equal(t, "hit", resource["cache_status"],
-		"terminal cache_status should be the last writer (datasource hit)")
-
 	layers := resource["cache_layers"].([]any)
 	require.Len(t, layers, 3, "all three cache layers must be recorded")
 
@@ -397,8 +396,6 @@ func TestDistributedGetFailedEmitsCacheLayer(t *testing.T) {
 
 	records := decodeRecords(t, output.Bytes())
 	resource := records[0]["resource"].(map[string]any)
-
-	require.Equal(t, "failure", resource["cache_status"])
 
 	layers := resource["cache_layers"].([]any)
 	require.Len(t, layers, 1)
@@ -450,15 +447,12 @@ func TestInvalidCacheStatusDropped(t *testing.T) {
 
 	records := decodeRecords(t, output.Bytes())
 	resource := records[0]["resource"].(map[string]any)
-	require.Equal(t, "hit", resource["cache_status"],
-		"only the valid status should survive")
-
 	layers := resource["cache_layers"].([]any)
 	require.Len(t, layers, 1, "invalid status must not produce a cache layer entry")
 	require.Equal(t, "hit", layers[0].(map[string]any)["status"])
 }
 
-func TestNoCacheProbeEmitsNoCacheStatus(t *testing.T) {
+func TestNoCacheProbeEmitsNoCacheLayers(t *testing.T) {
 	var output bytes.Buffer
 	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "no-cache"))
@@ -467,9 +461,7 @@ func TestNoCacheProbeEmitsNoCacheStatus(t *testing.T) {
 
 	records := decodeRecords(t, output.Bytes())
 	resource := records[0]["resource"].(map[string]any)
-	_, hasCacheStatus := resource["cache_status"]
-	require.False(t, hasCacheStatus,
-		"cache_status must be omitted (omitempty) when no cache probe fires")
+	require.NotContains(t, resource, "cache_status", "the scalar cache_status field was removed")
 	_, hasCacheLayers := resource["cache_layers"]
 	require.False(t, hasCacheLayers,
 		"cache_layers must be omitted (omitempty) when no cache probe fires")

@@ -37,7 +37,7 @@
 -- Audit: uses audit.record() (deployment-neutral generic signal API, source
 -- "data_source", operation "cross_account_access") for every terminal outcome.
 -- The operation is recorded as a signal inside the request record; no separate
--- event is emitted. The metadata.classification field distinguishes denial
+-- event is emitted. The signal's classification field distinguishes denial
 -- sub-reasons:
 --   "not_internal"       — non-internal user attempting cross-account (AC2)
 --   "email_not_allowed"  — internal user without required email suffix

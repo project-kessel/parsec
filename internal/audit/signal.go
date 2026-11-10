@@ -36,7 +36,6 @@ const (
 	ReasonCredentialExpired    = "credential_expired"
 	ReasonInvalidRequest       = "invalid_request"
 	ReasonGrantTypeUnsupported = "grant_type_unsupported"
-	ReasonSchemeNotAllowed     = "scheme_not_allowed"
 	ReasonPolicyDenied         = "policy_denied"
 	ReasonComplianceDenied     = "compliance_denied"
 	ReasonComplianceFailure    = "compliance_failure"
@@ -54,7 +53,6 @@ var reasonCodes = map[string]bool{
 	ReasonCredentialExpired:    true,
 	ReasonInvalidRequest:       true,
 	ReasonGrantTypeUnsupported: true,
-	ReasonSchemeNotAllowed:     true,
 	ReasonPolicyDenied:         true,
 	ReasonComplianceDenied:     true,
 	ReasonComplianceFailure:    true,

@@ -133,7 +133,6 @@ type resourceInfo struct {
 	Type                 string               `json:"type"`
 	TokenTypes           []string             `json:"token_types,omitempty"`
 	RequestedTokenTypes  []string             `json:"requested_token_types,omitempty"`
-	CacheStatus          string               `json:"cache_status,omitempty"`
 	CacheLayers          []request.CacheLayer `json:"cache_layers,omitempty"`
 	FailedComponent      string               `json:"failed_component,omitempty"`
 	SignalsDropped       int                  `json:"signals_dropped,omitempty"`
@@ -190,14 +189,16 @@ type requestProbe struct {
 	requestedTokenTypes       []service.TokenType
 
 	// Derived at emit time
-	cacheStatus       string
 	derivedOutcome    AuditOutcome
 	derivedReasonCode string
 }
 
-// Each audit observer keeps its own request probe, including when multiple
-// audit observers are composed. Nested issuance callbacks update only that
-// observer's request; no audit state is needed in application handlers.
+// Each audit observer keeps its own request probe, so nested issuance
+// callbacks update only that observer's request and no audit state is needed
+// in application handlers. The AuditState and signal Reporter are stored
+// under shared context keys: composing more than one audit observer is not
+// supported, because nested cache, dependency and script signals would all
+// reach the last one started.
 type requestProbeKey struct{ observer *Observer }
 
 func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, service.AuthzCheckProbe) {
@@ -447,7 +448,7 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 func (p *requestProbe) End() {
 	outcome, reasonCode := p.deriveCompletion()
 
-	cacheStatus, cacheLayers, failureReason, failedComponent, dependencyOutage := p.state.Snapshot()
+	cacheLayers, failureReason, failedComponent, dependencyOutage := p.state.Snapshot()
 	// A nested probe that recorded why a dependency failed is more specific
 	// than the generic reason derived from the handler callbacks.
 	generic := reasonCode == "" || reasonCode == auditctx.ReasonInternalError || reasonCode == auditctx.ReasonTokenIssuanceFailed
@@ -461,7 +462,6 @@ func (p *requestProbe) End() {
 		outcome = AuditOutcomeFailure
 		reasonCode = auditctx.ReasonDependencyFailure
 	}
-	p.cacheStatus = cacheStatus
 	p.derivedOutcome = outcome
 	p.derivedReasonCode = reasonCode
 	signals := p.collector.Signals()
@@ -474,7 +474,7 @@ func (p *requestProbe) End() {
 	env.actor, _ = json.Marshal(p.actor)
 	env.resource, _ = json.Marshal(resourceInfo{
 		Type: resourceTypeForAction(p.action), TokenTypes: safeTokenTypes(p.tokenTypes),
-		RequestedTokenTypes: safeTokenTypes(p.requestedTokenTypes), CacheStatus: p.cacheStatus, CacheLayers: cacheLayers,
+		RequestedTokenTypes: safeTokenTypes(p.requestedTokenTypes), CacheLayers: cacheLayers,
 		FailedComponent: failedComponent, SignalsDropped: p.collector.Dropped(),
 		SignalsRejected: p.collector.Rejected(), MetadataKeysStripped: p.collector.StrippedKeys(),
 	})
@@ -751,9 +751,9 @@ func (o *Observer) event(outcome AuditOutcome) *zerolog.Event {
 }
 
 type lifecycleResource struct {
-	Type                string `json:"type"`
-	KeyPosition         string `json:"key_position,omitempty"`
-	InterruptedRequests *int64 `json:"interrupted_requests,omitempty"`
+	Type        string `json:"type"`
+	KeyPosition string `json:"key_position,omitempty"`
+	KeyName     string `json:"key_name,omitempty"`
 }
 
 type processConfig struct {
@@ -817,23 +817,21 @@ func (o *Observer) StopStarted(ctx context.Context) (context.Context, server.Sto
 	return ctx, &auditStopProbe{observer: o, started: time.Now()}
 }
 
-func (p *auditStopProbe) ShutdownCompleted(interrupted int64) {
-	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeSuccess, "", p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
+func (p *auditStopProbe) ShutdownCompleted() {
+	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeSuccess, "", p.started, lifecycleResource{Type: "process"}, nil)
 	p.emitted = true
 }
 
-func (p *auditStopProbe) ShutdownFailed(interrupted int64) {
-	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeFailure, auditctx.ReasonInternalError, p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
+func (p *auditStopProbe) ShutdownFailed() {
+	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeFailure, auditctx.ReasonInternalError, p.started, lifecycleResource{Type: "process"}, nil)
 	p.emitted = true
 }
 
 func (p *auditStopProbe) End() {
 	if !p.emitted {
-		p.ShutdownFailed(0)
+		p.ShutdownFailed()
 	}
 }
-
-func int64Pointer(value int64) *int64 { return &value }
 
 type auditRotationProbe struct {
 	keys.NoOpRotationCheckProbe
@@ -862,10 +860,13 @@ type auditKMSProbe struct {
 	keys.NoOpKMSRotateProbe
 	observer *Observer
 	started  time.Time
+	keyName  string
 }
 
-func (o *Observer) KMSRotateStarted(ctx context.Context, _, _, _ string) (context.Context, keys.KMSRotateProbe) {
-	return ctx, &auditKMSProbe{observer: o, started: time.Now()}
+// The key name identifies which signing key an event is about. Trust domain
+// and namespace are not recorded here.
+func (o *Observer) KMSRotateStarted(ctx context.Context, _, _, keyName string) (context.Context, keys.KMSRotateProbe) {
+	return ctx, &auditKMSProbe{observer: o, started: time.Now(), keyName: safeValue(keyName, 256)}
 }
 
 func (p *auditKMSProbe) emit(action string, outcome AuditOutcome) {
@@ -873,7 +874,7 @@ func (p *auditKMSProbe) emit(action string, outcome AuditOutcome) {
 	if outcome == AuditOutcomeFailure {
 		reason = auditctx.ReasonDependencyFailure
 	}
-	p.observer.emitLifecycle("key_rotation", action, outcome, reason, p.started, lifecycleResource{Type: "signing_key"}, nil)
+	p.observer.emitLifecycle("key_rotation", action, outcome, reason, p.started, lifecycleResource{Type: "signing_key", KeyName: p.keyName}, nil)
 }
 
 func (p *auditKMSProbe) KeyCreated()           { p.emit("key_create", AuditOutcomeSuccess) }
