@@ -51,8 +51,6 @@ type StopProbe interface {
 
 // ProcessInfo contains only allowlisted, non-secret startup configuration.
 type ProcessInfo struct {
-	Version     string
-	Commit      string
 	TrustDomain string
 	GRPCAddress string
 	HTTPAddress string

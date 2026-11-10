@@ -13,8 +13,7 @@ GOTESTENV=GOEXPERIMENT=jsonv2
 GOBUILDFLAGS=-gcflags="all=-trimpath=${GOPATH}" -asmflags="all=-trimpath=${GOPATH}"
 
 IMAGE_TAG := $(shell git rev-parse --short=7 HEAD)
-# Container builds have no .git directory and pass GIT_COMMIT in.
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
+GIT_COMMIT := $(shell git rev-parse --short HEAD)
 
 ifeq ($(DOCKER),)
 DOCKER := $(shell command -v podman || command -v docker)
@@ -29,17 +28,7 @@ API_PROTO_FILES:=$(shell find api -name *.proto)
 
 TITLE:="Kessel Parsec Service"
 ifeq ($(VERSION),)
-VERSION:=$(shell git describe --tags --always 2>/dev/null)
-endif
-
-# Only override a buildinfo default when there is a value to set.
-BUILDINFO:=github.com/project-kessel/parsec/internal/buildinfo
-LDFLAGS:=
-ifneq ($(strip $(VERSION)),)
-LDFLAGS+=-X $(BUILDINFO).Version=$(VERSION)
-endif
-ifneq ($(strip $(GIT_COMMIT)),)
-LDFLAGS+=-X $(BUILDINFO).Commit=$(GIT_COMMIT)
+VERSION:=$(shell git describe --tags --always)
 endif
 
 .PHONY: init
@@ -61,7 +50,7 @@ api:
 .PHONY: build
 # build
 build:
-	mkdir -p bin/ && ${GOENV} ${GO} build ${GOBUILDFLAGS} -ldflags "$(LDFLAGS)" -o ./bin/ ./cmd/parsec
+	mkdir -p bin/ && ${GOENV} ${GO} build ${GOBUILDFLAGS} -ldflags "-X cmd.Version=$(VERSION)" -o ./bin/ ./cmd/parsec
 
 .PHONY: docker-build-push
 # build and push container image to a registry

@@ -6,7 +6,6 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
@@ -170,9 +169,8 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 	opts = append(opts, audit.WithAllowedMetadataKeys(keys))
 
 	return audit.New(logger, audit.Metadata{
-		ServiceName:    "parsec",
-		ServiceVersion: buildinfo.Version,
-		TrustDomain:    p.config.TrustDomain,
+		ServiceName: "parsec",
+		TrustDomain: p.config.TrustDomain,
 	}, opts...)
 }
 

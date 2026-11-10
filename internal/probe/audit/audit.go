@@ -40,10 +40,9 @@ const (
 
 // Metadata is safe service metadata included in every audit record.
 type Metadata struct {
-	ServiceName    string `json:"name"`
-	ServiceVersion string `json:"version,omitempty"`
-	Environment    string `json:"environment,omitempty"`
-	TrustDomain    string `json:"trust_domain,omitempty"`
+	ServiceName string `json:"name"`
+	Environment string `json:"environment,omitempty"`
+	TrustDomain string `json:"trust_domain,omitempty"`
 }
 
 // Observer is intentionally separate from diagnostic logging. It emits a
@@ -774,7 +773,6 @@ type processConfig struct {
 	TrustDomain string `json:"trust_domain,omitempty"`
 	GRPCAddress string `json:"grpc_address,omitempty"`
 	HTTPAddress string `json:"http_address,omitempty"`
-	Commit      string `json:"commit,omitempty"`
 }
 
 func (o *Observer) emitLifecycle(suffix, action string, outcome AuditOutcome, reason string, started time.Time, resource lifecycleResource, config any) {
@@ -797,10 +795,6 @@ func (o *Observer) emitLifecycle(suffix, action string, outcome AuditOutcome, re
 }
 
 func (o *Observer) ProcessReady(info server.ProcessInfo) {
-	meta := o.meta
-	if meta.ServiceVersion == "" {
-		meta.ServiceVersion = safeValue(info.Version, 128)
-	}
 	name := o.eventName("process_status")
 	event := o.event(AuditOutcomeSuccess).
 		Str("event", name).
@@ -808,13 +802,12 @@ func (o *Observer) ProcessReady(info server.ProcessInfo) {
 		Str("action", "process_ready").
 		Str("outcome", string(AuditOutcomeSuccess)).
 		Int64("duration_ms", 0).
-		Interface("service", meta).
+		Interface("service", o.meta).
 		Interface("resource", lifecycleResource{Type: "process"}).
 		Interface("configuration", processConfig{
 			TrustDomain: safeValue(info.TrustDomain, 512),
 			GRPCAddress: safeValue(info.GRPCAddress, 256),
 			HTTPAddress: safeValue(info.HTTPAddress, 256),
-			Commit:      safeValue(info.Commit, 128),
 		})
 	// configuration values are static process startup config, not per-request.
 	event.Msg(name)

@@ -28,7 +28,7 @@ func mustNew(t *testing.T, logger zerolog.Logger, meta Metadata, options ...Opti
 
 func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	var output bytes.Buffer
-	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec", ServiceVersion: "v1"})
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	ctx := request.WithID(context.Background(), "request-123")
 	ctx, probe := obs.AuthzCheckStarted(ctx)
 
@@ -243,8 +243,8 @@ func TestAuditEmitsKeyLifecycleEvents(t *testing.T) {
 
 func TestAuditEmitsProcessReadyAndShutdown(t *testing.T) {
 	var output bytes.Buffer
-	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec", ServiceVersion: "v1"})
-	obs.ProcessReady(server.ProcessInfo{Version: "v1", Commit: "abc123", TrustDomain: "prod.example"})
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	obs.ProcessReady(server.ProcessInfo{TrustDomain: "prod.example"})
 	_, stop := obs.StopStarted(context.Background())
 	stop.ShutdownCompleted()
 	stop.End()
@@ -253,6 +253,8 @@ func TestAuditEmitsProcessReadyAndShutdown(t *testing.T) {
 	require.Len(t, records, 2)
 	require.Equal(t, "parsec_process_status", records[0]["event"])
 	require.Equal(t, "process_ready", records[0]["action"])
+	require.NotContains(t, records[0]["service"].(map[string]any), "version")
+	require.NotContains(t, records[0]["configuration"].(map[string]any), "commit")
 	require.Equal(t, "parsec_process_status", records[1]["event"])
 	require.Equal(t, "process_stop", records[1]["action"])
 }
@@ -664,7 +666,7 @@ func eventNames(records []map[string]any) []string {
 }
 
 func BenchmarkRequestProbeEnd(b *testing.B) {
-	obs, err := New(zerolog.New(io.Discard), Metadata{ServiceName: "parsec", ServiceVersion: "v1"})
+	obs, err := New(zerolog.New(io.Discard), Metadata{ServiceName: "parsec"})
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
-	"github.com/project-kessel/parsec/internal/buildinfo"
 	"github.com/project-kessel/parsec/internal/config"
 	"github.com/project-kessel/parsec/internal/server"
 )
@@ -172,8 +171,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
 	obs.ProcessReady(server.ProcessInfo{
-		Version:     buildinfo.Version,
-		Commit:      buildinfo.Commit,
 		TrustDomain: provider.TrustDomain(),
 		GRPCAddress: grpcAddr,
 		HTTPAddress: httpAddr,

@@ -193,7 +193,7 @@ func TestCompositeAll_GRPCAndHTTPServeFailed_FansOut(t *testing.T) {
 	composite := CompositeAll([]Observer{child1, child2})
 	composite.GRPCServeFailed(errors.New("bind failed"))
 	composite.HTTPServeFailed(errors.New("bind failed"))
-	composite.ProcessReady(server.ProcessInfo{Version: "v1"})
+	composite.ProcessReady(server.ProcessInfo{})
 
 	for _, tc := range []struct {
 		name   string
