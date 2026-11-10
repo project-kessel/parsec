@@ -73,3 +73,24 @@ func TestRegisterAuditServiceStripsBeforeValidating(t *testing.T) {
 	require.Equal(t, map[string]string{"k1": "a"}, reporter.Signals()[0].Metadata)
 	require.Equal(t, 8, reporter.StrippedKeys())
 }
+
+// A number or boolean metadata value is recorded as a string. Rejecting it
+// would lose the whole signal, uncounted, over a missing tostring().
+func TestRegisterAuditServiceConvertsScalarMetadataValues(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+	reporter := auditctx.NewCollector(nil)
+	RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
+	require.NoError(t, L.DoString(`assert(audit.record({
+		source = "data_source", operation = "cross_account_access", outcome = "success",
+		metadata = { target_org_id = 12345, approved = true, employee_user_id = "u1" }
+	}) == true)`))
+	require.Equal(t, map[string]string{"target_org_id": "12345", "approved": "true", "employee_user_id": "u1"},
+		reporter.Signals()[0].Metadata)
+
+	require.NoError(t, L.DoString(`assert(audit.record({
+		source = "data_source", operation = "cross_account_access", outcome = "success",
+		metadata = { nested = { a = 1 } }
+	}) == false)`))
+	require.Len(t, reporter.Signals(), 1, "a table value is still refused")
+}

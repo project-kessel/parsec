@@ -30,7 +30,8 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 		}
 		metadata, metadataValid := luaStringMap(state.GetField(table, "metadata"))
 		if !metadataValid {
-			// Metadata contained non-string keys or values; reject entire signal
+			// Metadata is not a table, or has a non-string key or a value
+			// that is not a string, number or boolean; reject entire signal
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
@@ -63,7 +64,9 @@ func luaString(value gopherlua.LValue) string {
 }
 
 // luaStringMap converts a Lua table to a map[string]string, returning both the
-// result and a validity flag. Returns (nil, false) if any key or value is not a string,
+// result and a validity flag. Number and boolean values are converted to
+// their string form: a script passing a raw id or flag must not lose the whole
+// signal. Returns (nil, false) for a non-string key or any other value type,
 // preventing silent skipping of invalid metadata entries.
 func luaStringMap(value gopherlua.LValue) (map[string]string, bool) {
 	if value == nil || value == gopherlua.LNil {
@@ -76,12 +79,16 @@ func luaStringMap(value gopherlua.LValue) (map[string]string, bool) {
 	result := make(map[string]string)
 	allValid := true
 	table.ForEach(func(k, v gopherlua.LValue) {
-		if k.Type() != gopherlua.LTString || v.Type() != gopherlua.LTString {
-			// Found non-string key or value; mark as invalid
+		if k.Type() != gopherlua.LTString {
 			allValid = false
 			return
 		}
-		result[k.String()] = v.String()
+		switch v.Type() {
+		case gopherlua.LTString, gopherlua.LTNumber, gopherlua.LTBool:
+			result[k.String()] = v.String()
+		default:
+			allValid = false
+		}
 	})
 	if !allValid {
 		return nil, false
