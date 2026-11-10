@@ -130,7 +130,7 @@ func TestAuditReporterPropagatesSignalsIntoRequestRecord(t *testing.T) {
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "signal-1"))
 	auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 		Source: auditctx.SourceDataSource, Operation: "user_enrichment",
-		Outcome: auditctx.OutcomeFailure, ReasonCode: ReasonSupplementalFailure,
+		Outcome: auditctx.OutcomeFailure, ReasonCode: auditctx.ReasonSupplementalFailure,
 	})
 	probe.PolicyEvaluationFailed(errors.New("data source failed"))
 	probe.End()
@@ -153,7 +153,7 @@ func TestCrossAccountDeniedSignalAppearsInRequestRecordOnly(t *testing.T) {
 		Source:     auditctx.SourceValidator,
 		Operation:  "cross_account_access",
 		Outcome:    auditctx.OutcomeDenied,
-		ReasonCode: ReasonCrossAccountDenied,
+		ReasonCode: auditctx.ReasonPolicyDenied, Classification: "rbac_denied",
 	})
 	probe.PolicyDecisionDeny("policy denied")
 	probe.End()
@@ -166,12 +166,14 @@ func TestCrossAccountDeniedSignalAppearsInRequestRecordOnly(t *testing.T) {
 	signals := records[0]["signals"].([]any)
 	sig := signals[0].(map[string]any)
 	require.Equal(t, "cross_account_access", sig["operation"])
-	require.Equal(t, "cross_account_denied", sig["reason_code"])
+	require.Equal(t, "policy_denied", sig["reason_code"])
+	require.Equal(t, "rbac_denied", sig["classification"])
 }
 
 func TestValidReasonCodeAcceptsKnownReasonsOnly(t *testing.T) {
-	require.True(t, ValidReasonCode(ReasonCrossAccountDenied))
-	require.True(t, ValidReasonCode(ReasonDependencyFailure))
+	require.False(t, ValidReasonCode("cross_account_denied"),
+		"deployment-specific reasons belong in a signal classification")
+	require.True(t, ValidReasonCode(auditctx.ReasonDependencyFailure))
 	require.False(t, ValidReasonCode("not_a_real_reason"))
 	require.False(t, ValidReasonCode(""))
 }
@@ -256,10 +258,10 @@ func TestAuditEmitsEveryThreeScaleFailureName(t *testing.T) {
 		reason string
 		name   string
 	}{
-		{ReasonComplianceDenied, "parsec_auth_compliance_failure"},
-		{ReasonComplianceFailure, "parsec_compliance_failure"},
-		{ReasonSupplementalFailure, "parsec_supplemental_user_data_failure"},
-		{ReasonDependencyFailure, "parsec_dependency_failure"},
+		{auditctx.ReasonComplianceDenied, "parsec_auth_compliance_failure"},
+		{auditctx.ReasonComplianceFailure, "parsec_compliance_failure"},
+		{auditctx.ReasonSupplementalFailure, "parsec_supplemental_user_data_failure"},
+		{auditctx.ReasonDependencyFailure, "parsec_dependency_failure"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -305,17 +307,17 @@ func TestAuditEmitsCertificateAndInternalAuthenticationNames(t *testing.T) {
 
 func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	var output bytes.Buffer
-	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
-		WithFailureClassifications(map[string]string{
-			"backoffice-proxy": ReasonSupplementalFailure,
-		}),
-	)
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-nested"))
 	_, cacheProbe := obs.InMemoryValidateStarted(ctx, "validator")
 	cacheProbe.CacheHit()
-	_, dataProbe := obs.LuaFetchStarted(ctx, "backoffice-proxy")
+	probe.PolicyDecisionIssue(1, "", "")
+	// The data source fails inside the mapper, so the failure surfaces through
+	// the issuance path, as it does in a real request.
+	issueCtx, issuance := obs.TokenIssuanceStarted(ctx, nil, nil, "", []service.TokenType{service.TokenTypeTransactionToken})
+	_, dataProbe := obs.LuaFetchStarted(issueCtx, "backoffice-proxy")
 	dataProbe.ScriptExecutionFailed(errors.New("secret dependency response"))
-	probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
+	issuance.TokenTypeIssuanceFailed(service.TokenTypeTransactionToken, errors.New("mapper failed"))
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
@@ -337,7 +339,9 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	for _, record := range records {
 		names[record["event"].(string)] = true
 	}
-	require.True(t, names["parsec_supplemental_user_data_failure"])
+	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"],
+		"a data source failure during issuance must not be reported as token_issuance_failed")
+	require.True(t, names["parsec_dependency_failure"])
 	require.NotContains(t, output.String(), "secret dependency response")
 }
 
@@ -402,7 +406,7 @@ func TestDistributedGetFailedEmitsCacheLayer(t *testing.T) {
 	require.Equal(t, "validator_distributed", layer0["layer"])
 	require.Equal(t, "failure", layer0["status"])
 
-	require.Equal(t, ReasonDependencyFailure, records[0]["reason_code"],
+	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"],
 		"GetFailed must classify as dependency_failure")
 	require.Equal(t, "validator_distributed", resource["failed_component"],
 		"GetFailed must identify the distributed validator as the failed component")
@@ -411,11 +415,7 @@ func TestDistributedGetFailedEmitsCacheLayer(t *testing.T) {
 
 func TestFirstFailureReasonWins(t *testing.T) {
 	var output bytes.Buffer
-	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
-		WithFailureClassifications(map[string]string{
-			"enrichment": ReasonSupplementalFailure,
-		}),
-	)
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "first-wins"))
 
 	_, jwtProbe := obs.JWTValidateStarted(ctx, "https://sso.example")
@@ -428,8 +428,8 @@ func TestFirstFailureReasonWins(t *testing.T) {
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
-	require.Equal(t, ReasonDependencyFailure, records[0]["reason_code"],
-		"first failure reason (dependency_failure from JWKS) must win over supplemental_user_data_failure")
+	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"],
+		"first failure reason (dependency_failure from JWKS) must win")
 
 	resource := records[0]["resource"].(map[string]any)
 	require.Equal(t, "jwks", resource["failed_component"],
@@ -494,7 +494,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.tokenIssuanceDenied = true
 			},
 			wantOutcome: AuditOutcomeDenied,
-			wantReason:  ReasonTokenIssuanceDenied,
+			wantReason:  auditctx.ReasonTokenIssuanceDenied,
 		},
 		{
 			name: "token issuance denied overrides policy issue",
@@ -503,7 +503,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.tokenIssuanceDenied = true
 			},
 			wantOutcome: AuditOutcomeDenied,
-			wantReason:  ReasonTokenIssuanceDenied,
+			wantReason:  auditctx.ReasonTokenIssuanceDenied,
 		},
 		{
 			name: "later issuance failure overrides earlier denial",
@@ -512,7 +512,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.tokenIssuanceFailed = true
 			},
 			wantOutcome: AuditOutcomeFailure,
-			wantReason:  ReasonTokenIssuanceFailed,
+			wantReason:  auditctx.ReasonTokenIssuanceFailed,
 		},
 		{
 			name: "token issuance failed overrides policy issue",
@@ -521,7 +521,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.tokenIssuanceFailed = true
 			},
 			wantOutcome: AuditOutcomeFailure,
-			wantReason:  ReasonTokenIssuanceFailed,
+			wantReason:  auditctx.ReasonTokenIssuanceFailed,
 		},
 		{
 			name: "token issuance failed without policy issue",
@@ -529,7 +529,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.tokenIssuanceFailed = true
 			},
 			wantOutcome: AuditOutcomeFailure,
-			wantReason:  ReasonTokenIssuanceFailed,
+			wantReason:  auditctx.ReasonTokenIssuanceFailed,
 		},
 		{
 			name: "request failed with typed grant_type error",
@@ -538,7 +538,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.requestFailedErr = fmt.Errorf("%w: foo", service.ErrUnsupportedGrantType)
 			},
 			wantOutcome: AuditOutcomeFailure,
-			wantReason:  ReasonGrantTypeUnsupported,
+			wantReason:  auditctx.ReasonGrantTypeUnsupported,
 		},
 		{
 			name: "request failed with generic error",
@@ -547,7 +547,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.requestFailedErr = errors.New("something unexpected")
 			},
 			wantOutcome: AuditOutcomeFailure,
-			wantReason:  ReasonInternalError,
+			wantReason:  auditctx.ReasonInternalError,
 		},
 		{
 			name: "actor extraction failed → denied credential_malformed",
@@ -555,16 +555,16 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.actorExtractionFailed = true
 			},
 			wantOutcome: AuditOutcomeDenied,
-			wantReason:  ReasonCredentialMalformed,
+			wantReason:  auditctx.ReasonCredentialMalformed,
 		},
 		{
-			name: "policy denied produces ReasonPolicyDenied",
+			name: "policy denied produces auditctx.ReasonPolicyDenied",
 			setup: func(p *requestProbe) {
 				p.policyDenied = true
 				p.policyDenyReason = "denied by policy"
 			},
 			wantOutcome: AuditOutcomeDenied,
-			wantReason:  ReasonPolicyDenied,
+			wantReason:  auditctx.ReasonPolicyDenied,
 		},
 		{
 			name: "policy allowed → success",
@@ -588,7 +588,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.subjectExtractionFailed = true
 			},
 			wantOutcome: AuditOutcomeDenied,
-			wantReason:  ReasonCredentialMalformed,
+			wantReason:  auditctx.ReasonCredentialMalformed,
 		},
 		{
 			name: "request context parse failed → failure internal_error",
@@ -596,7 +596,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.requestContextParseFailed = true
 			},
 			wantOutcome: AuditOutcomeFailure,
-			wantReason:  ReasonInternalError,
+			wantReason:  auditctx.ReasonInternalError,
 		},
 		{
 			name: "policy eval error → failure",
@@ -604,7 +604,7 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 				p.policyEvalErr = errors.New("evaluation error")
 			},
 			wantOutcome: AuditOutcomeFailure,
-			wantReason:  ReasonInternalError,
+			wantReason:  auditctx.ReasonInternalError,
 		},
 	}
 
@@ -629,7 +629,7 @@ func TestAuditRejectsUnrecognizedReasonAndTokenValues(t *testing.T) {
 	require.NotContains(t, output.String(), "secret-arbitrary-error")
 	require.NotContains(t, output.String(), "secret-requested-type")
 	require.NotContains(t, output.String(), "secret-issued-token-type")
-	require.Contains(t, output.String(), ReasonCredentialInvalid)
+	require.Contains(t, output.String(), auditctx.ReasonCredentialInvalid)
 }
 
 func decodeRecords(t *testing.T, data []byte) []map[string]any {
@@ -696,7 +696,7 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 			name: "credential_invalid_plus_JWKSLookupFailed_gives_failure_dependency_failure",
 			setup: func(ctx context.Context, p service.AuthzCheckProbe) {
 				state := request.AuditStateFrom(ctx)
-				state.SetFailureReason(ReasonDependencyFailure)
+				state.SetFailureReason(auditctx.ReasonDependencyFailure)
 				state.SetDependencyOutage()
 				p.SubjectValidationFailed(errors.New("token invalid"))
 			},
@@ -706,7 +706,7 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 			name: "credential_invalid_plus_distributed_GetFailed_gives_failure_dependency_failure",
 			setup: func(ctx context.Context, p service.AuthzCheckProbe) {
 				state := request.AuditStateFrom(ctx)
-				state.SetFailureReason(ReasonDependencyFailure)
+				state.SetFailureReason(auditctx.ReasonDependencyFailure)
 				state.SetDependencyOutage()
 				p.SubjectValidationFailed(errors.New("token invalid"))
 			},
@@ -723,7 +723,7 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 			name: "credential_expired_plus_JWKS_failure_stays_denied_credential_expired",
 			setup: func(ctx context.Context, p service.AuthzCheckProbe) {
 				state := request.AuditStateFrom(ctx)
-				state.SetFailureReason(ReasonDependencyFailure)
+				state.SetFailureReason(auditctx.ReasonDependencyFailure)
 				state.SetDependencyOutage()
 				p.SubjectValidationFailed(trust.ErrExpiredToken)
 			},
@@ -779,7 +779,7 @@ func TestEndOverlapRule(t *testing.T) {
 			Source:     auditctx.SourceDataSource,
 			Operation:  "compliance_check",
 			Outcome:    auditctx.OutcomeDenied,
-			ReasonCode: ReasonComplianceDenied,
+			ReasonCode: auditctx.ReasonComplianceDenied,
 		})
 		probe.PolicyDecisionDeny("compliance_denied")
 		probe.End()
@@ -805,13 +805,13 @@ func TestEndOverlapRule(t *testing.T) {
 			Source:     auditctx.SourceDataSource,
 			Operation:  "compliance_check_a",
 			Outcome:    auditctx.OutcomeDenied,
-			ReasonCode: ReasonComplianceDenied,
+			ReasonCode: auditctx.ReasonComplianceDenied,
 		})
 		auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 			Source:     auditctx.SourceDataSource,
 			Operation:  "compliance_check_b",
 			Outcome:    auditctx.OutcomeFailure,
-			ReasonCode: ReasonComplianceDenied,
+			ReasonCode: auditctx.ReasonComplianceDenied,
 		})
 		probe.PolicyDecisionDeny("compliance_denied")
 		probe.End()

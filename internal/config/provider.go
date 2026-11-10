@@ -161,16 +161,6 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 
 	opts := []audit.Option{audit.WithEventPrefix(prefix)}
 
-	classifications := p.failureClassifications()
-	for dataSourceName, classification := range classifications {
-		if !audit.ValidReasonCode(classification) {
-			return nil, fmt.Errorf("data source %q: invalid failure_classification %q: must be a known audit reason code", dataSourceName, classification)
-		}
-	}
-	if len(classifications) > 0 {
-		opts = append(opts, audit.WithFailureClassifications(classifications))
-	}
-
 	keys := p.allowedMetadataKeys(cfg)
 	if len(keys) == 0 {
 		startupLog := zerolog.New(logCtx.Writer).With().Timestamp().Logger()
@@ -227,18 +217,6 @@ func (p *Provider) allowedMetadataKeys(cfg *ObservabilityConfig) map[string]bool
 		}
 	}
 	return keys
-}
-
-// failureClassifications builds a map from datasource name to audit failure
-// classification from the DataSources config.
-func (p *Provider) failureClassifications() map[string]string {
-	result := make(map[string]string)
-	for _, ds := range p.config.DataSources {
-		if ds.FailureClassification != "" {
-			result[ds.Name] = ds.FailureClassification
-		}
-	}
-	return result
 }
 
 func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {

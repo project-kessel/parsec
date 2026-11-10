@@ -170,8 +170,8 @@ func TestCrossAccountLua_NonInternalForbidden(t *testing.T) {
 	if signal.Outcome != auditctx.OutcomeDenied {
 		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
 	}
-	if signal.ReasonCode != "cross_account_denied" {
-		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	if signal.ReasonCode != "policy_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want policy_denied", signal.ReasonCode)
 	}
 }
 
@@ -205,8 +205,8 @@ func TestCrossAccountLua_OversizedCookieStillAudited(t *testing.T) {
 	if signal.Outcome != auditctx.OutcomeDenied {
 		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
 	}
-	if signal.ReasonCode != "cross_account_denied" {
-		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	if signal.ReasonCode != "policy_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want policy_denied", signal.ReasonCode)
 	}
 	if got := len(signal.Metadata["target_account_number"]); got != auditctx.MaxMetadataValueLength {
 		t.Fatalf("target_account_number length=%d, want truncated to %d", got, auditctx.MaxMetadataValueLength)
@@ -234,8 +234,8 @@ func TestCrossAccountLua_NonRedhatEmailForbidden(t *testing.T) {
 	if signal.Outcome != auditctx.OutcomeDenied {
 		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
 	}
-	if signal.ReasonCode != "cross_account_denied" {
-		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	if signal.ReasonCode != "policy_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want policy_denied", signal.ReasonCode)
 	}
 }
 
@@ -272,8 +272,8 @@ func TestCrossAccountLua_RBACDenied(t *testing.T) {
 	if signal.Outcome != auditctx.OutcomeDenied {
 		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
 	}
-	if signal.ReasonCode != "cross_account_denied" {
-		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	if signal.ReasonCode != "policy_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want policy_denied", signal.ReasonCode)
 	}
 }
 
@@ -572,8 +572,8 @@ func TestCrossAccountLua_AccountCookieOnlyEmptyOrg(t *testing.T) {
 	if signal.Outcome != auditctx.OutcomeDenied {
 		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
 	}
-	if signal.ReasonCode != "cross_account_denied" {
-		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	if signal.ReasonCode != "policy_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want policy_denied", signal.ReasonCode)
 	}
 }
 
@@ -643,8 +643,8 @@ func TestCrossAccountLua_RBACRecordNotApproved(t *testing.T) {
 	if signal.Outcome != auditctx.OutcomeDenied {
 		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
 	}
-	if signal.ReasonCode != "cross_account_denied" {
-		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	if signal.ReasonCode != "policy_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want policy_denied", signal.ReasonCode)
 	}
 }
 
@@ -681,8 +681,8 @@ func TestCrossAccountLua_RBACRecordMismatch(t *testing.T) {
 	if signal.Outcome != auditctx.OutcomeDenied {
 		t.Fatalf("signal.Outcome=%v, want %v", signal.Outcome, auditctx.OutcomeDenied)
 	}
-	if signal.ReasonCode != "cross_account_denied" {
-		t.Fatalf("signal.ReasonCode=%v, want cross_account_denied", signal.ReasonCode)
+	if signal.ReasonCode != "policy_denied" {
+		t.Fatalf("signal.ReasonCode=%v, want policy_denied", signal.ReasonCode)
 	}
 }
 

@@ -255,11 +255,6 @@ type DataSourceConfig struct {
 
 	// Caching configuration
 	Caching *CachingConfig `koanf:"caching"`
-
-	// FailureClassification is the audit reason code to emit when this
-	// datasource fails (e.g. "compliance_failure", "supplemental_user_data_failure").
-	// Defaults to "dependency_failure" when unset.
-	FailureClassification string `koanf:"failure_classification"`
 }
 
 // HTTPClientSpec is the client configuration schema (no name).

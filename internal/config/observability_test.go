@@ -186,28 +186,6 @@ func TestNewAuditObserverWarnsWhenNoAllowlistConfigured(t *testing.T) {
 	assert.Contains(t, buf.String(), "audit_metadata_keys not configured")
 }
 
-func TestAuditObserverRejectsInvalidFailureClassification(t *testing.T) {
-	p := NewProvider(&Config{
-		Observability: &ObservabilityConfig{Type: "audit"},
-		DataSources: []DataSourceConfig{
-			{Name: "bad-ds", FailureClassification: "not_a_real_reason"},
-		},
-	})
-	_, err := p.Observer()
-	require.ErrorContains(t, err, "invalid failure_classification")
-}
-
-func TestAuditObserverAcceptsCrossAccountDeniedFailureClassification(t *testing.T) {
-	p := NewProvider(&Config{
-		Observability: &ObservabilityConfig{Type: "audit"},
-		DataSources: []DataSourceConfig{
-			{Name: "cross-account", FailureClassification: "cross_account_denied"},
-		},
-	})
-	_, err := p.Observer()
-	require.NoError(t, err)
-}
-
 func TestAuditObserverEventPrefixValidation(t *testing.T) {
 	custom := "custom."
 	p := providerWithObs(t, &ObservabilityConfig{Type: "audit", EventPrefix: &custom})

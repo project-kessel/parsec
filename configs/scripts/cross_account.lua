@@ -386,18 +386,18 @@ function fetch(input)
   end
 
   if not account_cookie_valid(target_account) then
-    audit_cross_account("denied", "cross_account_denied", "invalid_cookie", claims, "", target_org)
+    audit_cross_account("denied", "policy_denied", "invalid_cookie", claims, "", target_org)
     return encode_result({ error = "rbac_denied" })
   end
 
   if not resolve_is_internal(claims) then
-    audit_cross_account("denied", "cross_account_denied", "not_internal", claims, target_account, target_org)
+    audit_cross_account("denied", "policy_denied", "not_internal", claims, target_account, target_org)
     return encode_result({ error = "forbidden" })
   end
 
   local email = resolve_email(claims)
   if not email_allowed(email) then
-    audit_cross_account("denied", "cross_account_denied", "email_not_allowed", claims, target_account, target_org)
+    audit_cross_account("denied", "policy_denied", "email_not_allowed", claims, target_account, target_org)
     return encode_result({ error = "forbidden" })
   end
 
@@ -408,7 +408,7 @@ function fetch(input)
   end
 
   if target_org == "" then
-    audit_cross_account("denied", "cross_account_denied", "missing_org_cookie", claims, target_account, target_org)
+    audit_cross_account("denied", "policy_denied", "missing_org_cookie", claims, target_account, target_org)
     return encode_result({ error = "rbac_denied" })
   end
 
@@ -418,11 +418,11 @@ function fetch(input)
     return encode_result({ error = "infra" })
   end
   if record == nil then
-    audit_cross_account("denied", "cross_account_denied", "rbac_denied", claims, target_account, target_org)
+    audit_cross_account("denied", "policy_denied", "rbac_denied", claims, target_account, target_org)
     return encode_result({ error = "rbac_denied" })
   end
   if not org_matches_record(target_org, record) then
-    audit_cross_account("denied", "cross_account_denied", "org_mismatch", claims, target_account, target_org)
+    audit_cross_account("denied", "policy_denied", "org_mismatch", claims, target_account, target_org)
     return encode_result({ error = "rbac_denied" })
   end
 

@@ -36,23 +36,6 @@ const (
 const (
 	SchemaVersion      = "1.0"
 	DefaultEventPrefix = "parsec_"
-
-	ReasonCredentialMissing    = "credential_missing"
-	ReasonCredentialMalformed  = "credential_malformed"
-	ReasonCredentialInvalid    = "credential_invalid"
-	ReasonCredentialExpired    = "credential_expired"
-	ReasonInvalidRequest       = "invalid_request"
-	ReasonGrantTypeUnsupported = "grant_type_unsupported"
-	ReasonSchemeNotAllowed     = "scheme_not_allowed"
-	ReasonPolicyDenied         = "policy_denied"
-	ReasonComplianceDenied     = "compliance_denied"
-	ReasonComplianceFailure    = "compliance_failure"
-	ReasonSupplementalFailure  = "supplemental_user_data_failure"
-	ReasonDependencyFailure    = "dependency_failure"
-	ReasonInternalError        = "internal_error"
-	ReasonTokenIssuanceFailed  = "token_issuance_failed"
-	ReasonTokenIssuanceDenied  = "token_issuance_denied"
-	ReasonCrossAccountDenied   = "cross_account_denied"
 )
 
 // Metadata is safe service metadata included in every audit record.
@@ -73,12 +56,11 @@ type Observer struct {
 	server.NoOpServerObserver
 	httpclient.NoOpHTTPClientObserver
 
-	logger                 zerolog.Logger
-	meta                   Metadata
-	metaJSON               json.RawMessage
-	eventPrefix            string
-	failureClassifications map[string]string
-	allowedMetadataKeys    map[string]bool
+	logger              zerolog.Logger
+	meta                Metadata
+	metaJSON            json.RawMessage
+	eventPrefix         string
+	allowedMetadataKeys map[string]bool
 }
 
 // Option configures an audit observer.
@@ -88,15 +70,6 @@ type Option func(*Observer)
 func WithEventPrefix(prefix string) Option {
 	return func(observer *Observer) {
 		observer.eventPrefix = prefix
-	}
-}
-
-// WithFailureClassifications sets the mapping from datasource name to audit
-// failure reason code. When a datasource fails, the mapped classification is
-// used instead of the generic "dependency_failure" default.
-func WithFailureClassifications(classifications map[string]string) Option {
-	return func(observer *Observer) {
-		observer.failureClassifications = classifications
 	}
 }
 
@@ -391,13 +364,13 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 	// This fires when the policy decided to issue but the actual issuance
 	// (signing, system error) failed afterward.
 	if p.tokenIssuanceFailed {
-		return AuditOutcomeFailure, ReasonTokenIssuanceFailed
+		return AuditOutcomeFailure, auditctx.ReasonTokenIssuanceFailed
 	}
 	if p.tokenIssuanceDenied {
 		if p.issuanceDenialReason != "" {
 			return AuditOutcomeDenied, p.issuanceDenialReason
 		}
-		return AuditOutcomeDenied, ReasonTokenIssuanceDenied
+		return AuditOutcomeDenied, auditctx.ReasonTokenIssuanceDenied
 	}
 
 	// Success paths
@@ -408,51 +381,51 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 	// Explicit deny
 	if p.policyDenied {
 		if p.subjectAnonymous {
-			return AuditOutcomeDenied, ReasonCredentialMissing
+			return AuditOutcomeDenied, auditctx.ReasonCredentialMissing
 		}
-		return AuditOutcomeDenied, ReasonPolicyDenied
+		return AuditOutcomeDenied, auditctx.ReasonPolicyDenied
 	}
 
 	// Credential extraction failures
 	if p.subjectExtractionFailed {
-		return AuditOutcomeDenied, ReasonCredentialMalformed
+		return AuditOutcomeDenied, auditctx.ReasonCredentialMalformed
 	}
 	if p.actorExtractionFailed {
-		return AuditOutcomeDenied, ReasonCredentialMalformed
+		return AuditOutcomeDenied, auditctx.ReasonCredentialMalformed
 	}
 
 	// Validation failures
 	if p.subjectValidationErr != nil {
 		if errors.Is(p.subjectValidationErr, trust.ErrExpiredToken) {
-			return AuditOutcomeDenied, ReasonCredentialExpired
+			return AuditOutcomeDenied, auditctx.ReasonCredentialExpired
 		}
-		return AuditOutcomeDenied, ReasonCredentialInvalid
+		return AuditOutcomeDenied, auditctx.ReasonCredentialInvalid
 	}
 	if p.actorValidationErr != nil {
 		if errors.Is(p.actorValidationErr, trust.ErrExpiredToken) {
-			return AuditOutcomeDenied, ReasonCredentialExpired
+			return AuditOutcomeDenied, auditctx.ReasonCredentialExpired
 		}
-		return AuditOutcomeDenied, ReasonCredentialInvalid
+		return AuditOutcomeDenied, auditctx.ReasonCredentialInvalid
 	}
 
 	// Request context parse failure (token exchange path)
 	if p.requestContextParseFailed {
-		return AuditOutcomeFailure, ReasonInternalError
+		return AuditOutcomeFailure, auditctx.ReasonInternalError
 	}
 
 	// Policy evaluation error
 	if p.policyEvalErr != nil {
-		return AuditOutcomeFailure, ReasonInternalError
+		return AuditOutcomeFailure, auditctx.ReasonInternalError
 	}
 
 	// Catch-all request failure (e.g. unsupported grant type, audience mismatch)
 	if p.requestFailed {
 		if p.requestFailedErr != nil {
 			if errors.Is(p.requestFailedErr, service.ErrUnsupportedGrantType) {
-				return AuditOutcomeFailure, ReasonGrantTypeUnsupported
+				return AuditOutcomeFailure, auditctx.ReasonGrantTypeUnsupported
 			}
 		}
-		return AuditOutcomeFailure, ReasonInternalError
+		return AuditOutcomeFailure, auditctx.ReasonInternalError
 	}
 
 	// No failure was signaled — the request completed successfully.
@@ -465,15 +438,18 @@ func (p *requestProbe) End() {
 	outcome, reasonCode := p.deriveCompletion()
 
 	cacheStatus, cacheLayers, failureReason, failedComponent, dependencyOutage := p.state.Snapshot()
-	if outcome == AuditOutcomeFailure && (reasonCode == "" || reasonCode == ReasonInternalError) && failureReason != "" {
+	// A nested probe that recorded why a dependency failed is more specific
+	// than the generic reason derived from the handler callbacks.
+	generic := reasonCode == "" || reasonCode == auditctx.ReasonInternalError || reasonCode == auditctx.ReasonTokenIssuanceFailed
+	if outcome == AuditOutcomeFailure && generic && failureReason != "" {
 		reasonCode = failureReason
 	}
 	// A real infrastructure outage (JWKS down, distributed cache failure)
 	// overrides credential_invalid to failure/dependency_failure so that
 	// bad signatures are not reported as outages.
-	if dependencyOutage && outcome == AuditOutcomeDenied && reasonCode == ReasonCredentialInvalid {
+	if dependencyOutage && outcome == AuditOutcomeDenied && reasonCode == auditctx.ReasonCredentialInvalid {
 		outcome = AuditOutcomeFailure
-		reasonCode = ReasonDependencyFailure
+		reasonCode = auditctx.ReasonDependencyFailure
 	}
 	p.cacheStatus = cacheStatus
 	p.derivedOutcome = outcome
@@ -592,13 +568,13 @@ func resourceTypeForAction(action string) string {
 
 func signalEventSuffix(reason string) string {
 	switch reason {
-	case ReasonComplianceDenied:
+	case auditctx.ReasonComplianceDenied:
 		return "auth_compliance_failure"
-	case ReasonComplianceFailure:
+	case auditctx.ReasonComplianceFailure:
 		return "compliance_failure"
-	case ReasonSupplementalFailure:
+	case auditctx.ReasonSupplementalFailure:
 		return "supplemental_user_data_failure"
-	case ReasonDependencyFailure:
+	case auditctx.ReasonDependencyFailure:
 		return "dependency_failure"
 	default:
 		return ""
@@ -610,7 +586,7 @@ func safeReasonCode(reason string) string {
 		return ""
 	}
 	if !ValidReasonCode(reason) {
-		return ReasonInternalError
+		return auditctx.ReasonInternalError
 	}
 	return reason
 }
@@ -676,7 +652,7 @@ func (p *auditDistributedCacheProbe) CacheMiss() {
 }
 func (p *auditDistributedCacheProbe) GetFailed(error) {
 	p.state.RecordCacheLayer("validator_distributed", "failure")
-	p.state.SetFailureReason(ReasonDependencyFailure)
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent("validator_distributed")
 	p.state.SetDependencyOutage()
 }
@@ -695,7 +671,7 @@ func (o *Observer) CacheFetchStarted(ctx context.Context, name string) (context.
 	return ctx, &auditDataSourceCacheProbe{
 		state:         request.AuditStateFrom(ctx),
 		layer:         "datasource:" + name,
-		failureReason: o.classificationFor(name),
+		failureReason: auditctx.ReasonDependencyFailure,
 	}
 }
 func (p *auditDataSourceCacheProbe) CacheHit()     { p.state.RecordCacheLayer(p.layer, "hit") }
@@ -715,7 +691,7 @@ type auditLuaFetchProbe struct {
 }
 
 func (o *Observer) LuaFetchStarted(ctx context.Context, name string) (context.Context, datasource.LuaFetchProbe) {
-	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), name: name, failureReason: o.classificationFor(name)}
+	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), name: name, failureReason: auditctx.ReasonDependencyFailure}
 }
 func (p *auditLuaFetchProbe) ScriptLoadFailed(error) {
 	p.state.SetFailureReason(p.failureReason)
@@ -743,20 +719,9 @@ func (o *Observer) JWTValidateStarted(ctx context.Context, _ string) (context.Co
 	return ctx, &auditJWTProbe{state: request.AuditStateFrom(ctx)}
 }
 func (p *auditJWTProbe) JWKSLookupFailed(error) {
-	p.state.SetFailureReason(ReasonDependencyFailure)
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent("jwks")
 	p.state.SetDependencyOutage()
-}
-
-// classificationFor returns the configured failure classification for a
-// datasource, falling back to "dependency_failure" when not configured.
-func (o *Observer) classificationFor(name string) string {
-	if o.failureClassifications != nil {
-		if classification, ok := o.failureClassifications[name]; ok && classification != "" {
-			return classification
-		}
-	}
-	return ReasonDependencyFailure
 }
 
 func (o *Observer) event(outcome AuditOutcome) *zerolog.Event {
@@ -843,7 +808,7 @@ func (p *auditStopProbe) ShutdownCompleted(interrupted int64) {
 }
 
 func (p *auditStopProbe) ShutdownFailed(interrupted int64) {
-	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeFailure, ReasonInternalError, p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
+	p.observer.emitLifecycle("process_status", "process_stop", AuditOutcomeFailure, auditctx.ReasonInternalError, p.started, lifecycleResource{Type: "process", InterruptedRequests: int64Pointer(interrupted)}, nil)
 	p.emitted = true
 }
 
@@ -867,7 +832,7 @@ func (o *Observer) RotationCheckStarted(ctx context.Context) (context.Context, k
 }
 
 func (p *auditRotationProbe) RotationCheckFailed(error) {
-	p.observer.emitLifecycle("key_rotation", "key_rotate", AuditOutcomeFailure, ReasonDependencyFailure, p.started, lifecycleResource{Type: "signing_key"}, nil)
+	p.observer.emitLifecycle("key_rotation", "key_rotate", AuditOutcomeFailure, auditctx.ReasonDependencyFailure, p.started, lifecycleResource{Type: "signing_key"}, nil)
 	p.emitted = true
 }
 
@@ -891,7 +856,7 @@ func (o *Observer) KMSRotateStarted(ctx context.Context, _, _, _ string) (contex
 func (p *auditKMSProbe) emit(action string, outcome AuditOutcome) {
 	reason := ""
 	if outcome == AuditOutcomeFailure {
-		reason = ReasonDependencyFailure
+		reason = auditctx.ReasonDependencyFailure
 	}
 	p.observer.emitLifecycle("key_rotation", action, outcome, reason, p.started, lifecycleResource{Type: "signing_key"}, nil)
 }

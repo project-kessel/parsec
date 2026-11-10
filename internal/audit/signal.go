@@ -26,6 +26,45 @@ const (
 	OutcomeFailure = "failure"
 )
 
+// Reason codes are the closed set of values an audit record or signal may
+// carry in reason_code. Deployment-specific detail belongs in a signal's
+// classification, not in a new reason code.
+const (
+	ReasonCredentialMissing    = "credential_missing"
+	ReasonCredentialMalformed  = "credential_malformed"
+	ReasonCredentialInvalid    = "credential_invalid"
+	ReasonCredentialExpired    = "credential_expired"
+	ReasonInvalidRequest       = "invalid_request"
+	ReasonGrantTypeUnsupported = "grant_type_unsupported"
+	ReasonSchemeNotAllowed     = "scheme_not_allowed"
+	ReasonPolicyDenied         = "policy_denied"
+	ReasonComplianceDenied     = "compliance_denied"
+	ReasonComplianceFailure    = "compliance_failure"
+	ReasonSupplementalFailure  = "supplemental_user_data_failure"
+	ReasonDependencyFailure    = "dependency_failure"
+	ReasonInternalError        = "internal_error"
+	ReasonTokenIssuanceFailed  = "token_issuance_failed"
+	ReasonTokenIssuanceDenied  = "token_issuance_denied"
+)
+
+var reasonCodes = map[string]bool{
+	ReasonCredentialMissing:    true,
+	ReasonCredentialMalformed:  true,
+	ReasonCredentialInvalid:    true,
+	ReasonCredentialExpired:    true,
+	ReasonInvalidRequest:       true,
+	ReasonGrantTypeUnsupported: true,
+	ReasonSchemeNotAllowed:     true,
+	ReasonPolicyDenied:         true,
+	ReasonComplianceDenied:     true,
+	ReasonComplianceFailure:    true,
+	ReasonSupplementalFailure:  true,
+	ReasonDependencyFailure:    true,
+	ReasonInternalError:        true,
+	ReasonTokenIssuanceFailed:  true,
+	ReasonTokenIssuanceDenied:  true,
+}
+
 // Signal is bounded, deployment-neutral audit metadata emitted by an extension.
 type Signal struct {
 	Source         string            `json:"source"`
@@ -229,19 +268,7 @@ func validText(value string, max int) bool {
 }
 
 // ValidReasonCode reports whether reason is one of the known audit reason
-// codes, and passes the charset and length check.
+// codes.
 func ValidReasonCode(reason string) bool {
-	if !validText(reason, 128) {
-		return false
-	}
-	switch reason {
-	case "credential_missing", "credential_malformed", "credential_invalid", "credential_expired",
-		"invalid_request", "grant_type_unsupported", "scheme_not_allowed", "policy_denied",
-		"compliance_denied", "compliance_failure", "supplemental_user_data_failure", "dependency_failure",
-		"cross_account_denied",
-		"internal_error", "token_issuance_failed", "token_issuance_denied":
-		return true
-	default:
-		return false
-	}
+	return reasonCodes[reason]
 }

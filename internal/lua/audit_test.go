@@ -46,7 +46,7 @@ func TestRegisterAuditServiceSanitizesOversizedMetadata(t *testing.T) {
 		source = "data_source",
 		operation = "cross_account_access",
 		outcome = "denied",
-		reason_code = "cross_account_denied",
+		reason_code = "policy_denied",
 		metadata = { target_account_number = long_value, target_org_id = "  padded  " }
 	}) == true)`))
 

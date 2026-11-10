@@ -171,7 +171,7 @@ func TestCollectorRecordSanitizesInsteadOfDropping(t *testing.T) {
 		Source:     SourceDataSource,
 		Operation:  "cross_account_access",
 		Outcome:    OutcomeDenied,
-		ReasonCode: "cross_account_denied",
+		ReasonCode: "policy_denied",
 		Metadata:   map[string]string{"target_account_number": longValue},
 	})
 
