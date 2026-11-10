@@ -135,6 +135,8 @@ func TestCompositeTokenExchangeProbe_FansOutAllMethods(t *testing.T) {
 	composite.SubjectTokenValidationFailed(errors.New("test"))
 	composite.TokenIssuanceFailed(errors.New("issuance"))
 	composite.TokenIssuanceDenied(errors.New("denied"))
+	composite.TokenIssued()
+	composite.InvalidRequest(errors.New("invalid"))
 	composite.RequestFailed(errors.New("request"))
 	composite.End()
 
@@ -152,6 +154,8 @@ func TestCompositeTokenExchangeProbe_FansOutAllMethods(t *testing.T) {
 		{"SubjectTokenValidationFailed", &c1.subjectTokenValFail, &c2.subjectTokenValFail},
 		{"TokenIssuanceFailed", &c1.tokenIssuanceFailed, &c2.tokenIssuanceFailed},
 		{"TokenIssuanceDenied", &c1.tokenIssuanceDenied, &c2.tokenIssuanceDenied},
+		{"TokenIssued", &c1.tokenIssued, &c2.tokenIssued},
+		{"InvalidRequest", &c1.invalidRequest, &c2.invalidRequest},
 		{"RequestFailed", &c1.requestFailed, &c2.requestFailed},
 		{"End", &c1.end, &c2.end},
 	} {
@@ -291,6 +295,8 @@ type tokenExchangeProbeCalls struct {
 	subjectTokenValFail    atomic.Int32
 	tokenIssuanceFailed    atomic.Int32
 	tokenIssuanceDenied    atomic.Int32
+	tokenIssued            atomic.Int32
+	invalidRequest         atomic.Int32
 	requestFailed          atomic.Int32
 	end                    atomic.Int32
 }
@@ -329,6 +335,8 @@ func (p *trackingTokenExchangeProbe) TokenIssuanceFailed(error) {
 func (p *trackingTokenExchangeProbe) TokenIssuanceDenied(error) {
 	p.c.tokenIssuanceDenied.Add(1)
 }
+func (p *trackingTokenExchangeProbe) TokenIssued()         { p.c.tokenIssued.Add(1) }
+func (p *trackingTokenExchangeProbe) InvalidRequest(error) { p.c.invalidRequest.Add(1) }
 func (p *trackingTokenExchangeProbe) RequestFailed(error) {
 	p.c.requestFailed.Add(1)
 }

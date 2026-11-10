@@ -181,8 +181,9 @@ type requestProbe struct {
 	tokenIssuanceFailed       bool
 	tokenIssuanceDenied       bool
 	issuanceDenialReason      string
+	tokenIssued               bool
+	invalidRequestErr         error
 	requestFailed             bool
-	requestFailedErr          error
 	tokenTypes                []service.TokenType
 	requestedTokenTypes       []service.TokenType
 
@@ -350,10 +351,16 @@ func (p *requestProbe) TokenIssuanceDenied(err error) {
 	p.tokenIssuanceDenied = true
 }
 
-func (p *requestProbe) RequestFailed(err error) {
-	p.requestFailed = true
-	p.requestFailedErr = err
+func (p *requestProbe) TokenIssued() { p.tokenIssued = true }
+
+func (p *requestProbe) InvalidRequest(err error) {
+	if err == nil {
+		err = errors.New("invalid request")
+	}
+	p.invalidRequestErr = err
 }
+
+func (p *requestProbe) RequestFailed(error) { p.requestFailed = true }
 
 // deriveCompletion determines audit outcome and reason from the sequence of
 // probe callbacks received during the request. This keeps audit vocabulary
@@ -374,7 +381,7 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 	}
 
 	// Success paths
-	if p.policyAllowed || p.policyIssue {
+	if p.policyAllowed || p.policyIssue || p.tokenIssued {
 		return AuditOutcomeSuccess, ""
 	}
 
@@ -408,9 +415,16 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 		return AuditOutcomeDenied, auditctx.ReasonCredentialInvalid
 	}
 
-	// Request context parse failure (token exchange path)
+	// Client errors on the token exchange path: the caller sent something
+	// the server refuses. These are denials, not server failures.
+	if p.invalidRequestErr != nil {
+		if errors.Is(p.invalidRequestErr, service.ErrUnsupportedGrantType) {
+			return AuditOutcomeDenied, auditctx.ReasonGrantTypeUnsupported
+		}
+		return AuditOutcomeDenied, auditctx.ReasonInvalidRequest
+	}
 	if p.requestContextParseFailed {
-		return AuditOutcomeFailure, auditctx.ReasonInternalError
+		return AuditOutcomeDenied, auditctx.ReasonInvalidRequest
 	}
 
 	// Policy evaluation error
@@ -418,20 +432,14 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 		return AuditOutcomeFailure, auditctx.ReasonInternalError
 	}
 
-	// Catch-all request failure (e.g. unsupported grant type, audience mismatch)
+	// Server-side request failure not covered by a more specific callback.
 	if p.requestFailed {
-		if p.requestFailedErr != nil {
-			if errors.Is(p.requestFailedErr, service.ErrUnsupportedGrantType) {
-				return AuditOutcomeFailure, auditctx.ReasonGrantTypeUnsupported
-			}
-		}
 		return AuditOutcomeFailure, auditctx.ReasonInternalError
 	}
 
-	// No failure was signaled — the request completed successfully.
-	// For authz this is unreachable (policy callbacks always fire);
-	// for token exchange it means the token was issued without error.
-	return AuditOutcomeSuccess, ""
+	// No callback stated an outcome. Never report that as a success: a
+	// handler exit that forgot its callback must show up as a failure.
+	return AuditOutcomeFailure, auditctx.ReasonInternalError
 }
 
 func (p *requestProbe) End() {
@@ -677,8 +685,12 @@ func (o *Observer) CacheFetchStarted(ctx context.Context, name string) (context.
 func (p *auditDataSourceCacheProbe) CacheHit()     { p.state.RecordCacheLayer(p.layer, "hit") }
 func (p *auditDataSourceCacheProbe) CacheMiss()    { p.state.RecordCacheLayer(p.layer, "miss") }
 func (p *auditDataSourceCacheProbe) CacheExpired() { p.state.RecordCacheLayer(p.layer, "expired") }
+
+// FetchFailed means the cache missed and the source fetch then failed. The
+// cache itself worked, so the layer is a miss; the failure is carried by the
+// reason and failed_component.
 func (p *auditDataSourceCacheProbe) FetchFailed(error) {
-	p.state.RecordCacheLayer(p.layer, "failure")
+	p.state.RecordCacheLayer(p.layer, "miss")
 	p.state.SetFailureReason(p.failureReason)
 	p.state.SetFailedComponent(p.layer)
 }

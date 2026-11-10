@@ -3,6 +3,7 @@ package trust
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -657,6 +658,7 @@ func TestNewLuaValidatorConfig_NilOverrides(t *testing.T) {
 type countingCacheableValidator struct {
 	count     int
 	expiresAt time.Time
+	err       error
 }
 
 func (v *countingCacheableValidator) CredentialTypes() []CredentialType {
@@ -665,6 +667,9 @@ func (v *countingCacheableValidator) CredentialTypes() []CredentialType {
 
 func (v *countingCacheableValidator) Validate(_ context.Context, credential Credential) (*Result, error) {
 	v.count++
+	if v.err != nil {
+		return nil, v.err
+	}
 	bearer, ok := credential.(*BearerCredential)
 	if !ok {
 		return nil, ErrInvalidToken
@@ -823,10 +828,13 @@ func TestDistributedCachingValidator(t *testing.T) {
 // recordingDistributedValidateProbe captures which cache-outcome method was called.
 type recordingDistributedValidateProbe struct {
 	NoOpDistributedValidateProbe
-	hitCalled     bool
-	missCalled    bool
-	expiredCalled bool
+	hitCalled       bool
+	missCalled      bool
+	expiredCalled   bool
+	getFailedCalled bool
 }
+
+func (p *recordingDistributedValidateProbe) GetFailed(error) { p.getFailedCalled = true }
 
 func (p *recordingDistributedValidateProbe) CacheHit()      { p.hitCalled = true }
 func (p *recordingDistributedValidateProbe) CacheMiss()     { p.missCalled = true }
@@ -881,5 +889,49 @@ func TestDistributedCachingValidator_CacheOutcomesDistinguishHitFromMiss(t *test
 	}
 	if source.count != 1 {
 		t.Fatalf("count=%d, want 1 (second call must be served from cache)", source.count)
+	}
+}
+
+// A credential the source rejects is a cache miss with the source's own
+// error, not a cache failure: reporting GetFailed would make a forged or
+// expired token look like an infrastructure outage.
+func TestDistributedCachingValidator_SourceRejectionIsNotACacheFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  *countingCacheableValidator
+		wantErr error
+	}{
+		{
+			name:    "source rejects the credential",
+			source:  &countingCacheableValidator{err: ErrInvalidToken},
+			wantErr: ErrInvalidToken,
+		},
+		{
+			name:    "source returns an already expired result",
+			source:  &countingCacheableValidator{expiresAt: time.Now().Add(-time.Hour)},
+			wantErr: ErrExpiredToken,
+		},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obs := &recordingDistributedValidateObserver{}
+			cached := NewDistributedCachingValidator("test-distributed-rejection", tt.source, obs, DistributedValidatorCachingConfig{
+				GroupName:      fmt.Sprintf("test-validator-distributed-rejection-cache-%d", i),
+				CacheSizeBytes: 1 << 20,
+				CacheTTL:       time.Hour,
+			})
+
+			_, err := cached.Validate(context.Background(), &BearerCredential{Token: "forged"})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err=%v, want %v", err, tt.wantErr)
+			}
+			p := obs.probes[0]
+			if p.getFailedCalled {
+				t.Fatal("GetFailed must not be called when the source rejected the credential")
+			}
+			if !p.missCalled {
+				t.Fatal("expected CacheMiss: the load ran and the source rejected the credential")
+			}
+		})
 	}
 }

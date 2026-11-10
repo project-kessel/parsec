@@ -95,9 +95,18 @@ type TokenExchangeProbe interface {
 	// This is an expected denial, not a system failure.
 	TokenIssuanceDenied(err error)
 
-	// RequestFailed signals that the exchange request failed for a reason
-	// not covered by a more specific callback (e.g. unsupported grant type,
-	// audience mismatch, trust store filter failure).
+	// TokenIssued is called once, when the exchange is about to return the
+	// issued token to the caller.
+	TokenIssued()
+
+	// InvalidRequest is called when the caller sent a request the server
+	// refuses as malformed or unsupported (e.g. unsupported grant type,
+	// audience mismatch). This is a client error, not a system failure.
+	InvalidRequest(err error)
+
+	// RequestFailed signals that the exchange request failed on the server
+	// side for a reason not covered by a more specific callback (e.g. claims
+	// filter lookup or trust store filter failure).
 	RequestFailed(err error)
 
 	// End terminates the observation. Should be deferred to ensure cleanup.
@@ -212,6 +221,8 @@ func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)    
 func (NoOpTokenExchangeProbe) SubjectTokenValidationFailed(error)                  {}
 func (NoOpTokenExchangeProbe) TokenIssuanceFailed(error)                           {}
 func (NoOpTokenExchangeProbe) TokenIssuanceDenied(error)                           {}
+func (NoOpTokenExchangeProbe) TokenIssued()                                        {}
+func (NoOpTokenExchangeProbe) InvalidRequest(error)                                {}
 func (NoOpTokenExchangeProbe) RequestFailed(error)                                 {}
 func (NoOpTokenExchangeProbe) End()                                                {}
 

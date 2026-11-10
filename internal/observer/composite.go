@@ -787,6 +787,16 @@ func (m *compositeTokenExchangeProbe) TokenIssuanceDenied(err error) {
 		p.TokenIssuanceDenied(err)
 	}
 }
+func (m *compositeTokenExchangeProbe) TokenIssued() {
+	for _, p := range m.probes {
+		p.TokenIssued()
+	}
+}
+func (m *compositeTokenExchangeProbe) InvalidRequest(err error) {
+	for _, p := range m.probes {
+		p.InvalidRequest(err)
+	}
+}
 func (m *compositeTokenExchangeProbe) RequestFailed(err error) {
 	for _, p := range m.probes {
 		p.RequestFailed(err)

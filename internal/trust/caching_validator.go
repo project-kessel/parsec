@@ -3,6 +3,7 @@ package trust
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -158,6 +159,15 @@ func (v *InMemoryCachingValidator) Cleanup() {
 // this is a known limitation of groupcache's peer-to-peer design.
 type distributedCacheLoadedKey struct{}
 
+// sourceValidationError marks a loader error that is the source validator's
+// verdict on the credential (bad signature, expired token), as opposed to a
+// failure of the cache itself. groupcache retries a failed peer load locally,
+// so the error chain from this process's loader always reaches Validate.
+type sourceValidationError struct{ err error }
+
+func (e *sourceValidationError) Error() string { return e.err.Error() }
+func (e *sourceValidationError) Unwrap() error { return e.err }
+
 // DistributedCachingValidator wraps a cacheable validator with groupcache.
 type DistributedCachingValidator struct {
 	name      string
@@ -218,10 +228,10 @@ func NewDistributedCachingValidator(name string, source Validator, obs Distribut
 			}
 			result, err := source.Validate(ctx, input.Credential)
 			if err != nil {
-				return nil, fmt.Errorf("validator failed: %w", err)
+				return nil, &sourceValidationError{err: err}
 			}
 			if _, ok := validatorCacheExpiry(clk.Now(), cacheTTL, result); !ok {
-				return nil, fmt.Errorf("validator result is already expired")
+				return nil, &sourceValidationError{err: fmt.Errorf("validator result is already expired: %w", ErrExpiredToken)}
 			}
 			return result, nil
 		},
@@ -273,6 +283,13 @@ func (v *DistributedCachingValidator) Validate(ctx context.Context, credential C
 	getCtx := context.WithValue(ctx, distributedCacheLoadedKey{}, &loaded)
 	result, err := v.adapter.Get(getCtx, cacheInput)
 	if err != nil {
+		// The source rejected the credential. The cache did its job (a miss
+		// followed by a load), so this is not a cache failure.
+		var sourceErr *sourceValidationError
+		if errors.As(err, &sourceErr) {
+			p.CacheMiss()
+			return nil, sourceErr.err
+		}
 		p.GetFailed(err)
 		return nil, fmt.Errorf("groupcache validator get failed: %w", err)
 	}

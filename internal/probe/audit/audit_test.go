@@ -483,8 +483,16 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 		wantReason  string
 	}{
 		{
-			name:        "happy path — no callbacks → success",
+			name:        "no callbacks must not be reported as success",
 			setup:       func(_ *requestProbe) {},
+			wantOutcome: AuditOutcomeFailure,
+			wantReason:  auditctx.ReasonInternalError,
+		},
+		{
+			name: "token issued → success",
+			setup: func(p *requestProbe) {
+				p.TokenIssued()
+			},
 			wantOutcome: AuditOutcomeSuccess,
 			wantReason:  "",
 		},
@@ -532,19 +540,25 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 			wantReason:  auditctx.ReasonTokenIssuanceFailed,
 		},
 		{
-			name: "request failed with typed grant_type error",
+			name: "unsupported grant type is a client error → denied",
 			setup: func(p *requestProbe) {
-				p.requestFailed = true
-				p.requestFailedErr = fmt.Errorf("%w: foo", service.ErrUnsupportedGrantType)
+				p.InvalidRequest(fmt.Errorf("%w: foo", service.ErrUnsupportedGrantType))
 			},
-			wantOutcome: AuditOutcomeFailure,
+			wantOutcome: AuditOutcomeDenied,
 			wantReason:  auditctx.ReasonGrantTypeUnsupported,
 		},
 		{
-			name: "request failed with generic error",
+			name: "audience mismatch is a client error → denied invalid_request",
 			setup: func(p *requestProbe) {
-				p.requestFailed = true
-				p.requestFailedErr = errors.New("something unexpected")
+				p.InvalidRequest(errors.New("requested audience does not match trust domain"))
+			},
+			wantOutcome: AuditOutcomeDenied,
+			wantReason:  auditctx.ReasonInvalidRequest,
+		},
+		{
+			name: "server-side request failure → failure internal_error",
+			setup: func(p *requestProbe) {
+				p.RequestFailed(errors.New("something unexpected"))
 			},
 			wantOutcome: AuditOutcomeFailure,
 			wantReason:  auditctx.ReasonInternalError,
@@ -591,12 +605,12 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 			wantReason:  auditctx.ReasonCredentialMalformed,
 		},
 		{
-			name: "request context parse failed → failure internal_error",
+			name: "unparseable request_context is a client error → denied invalid_request",
 			setup: func(p *requestProbe) {
 				p.requestContextParseFailed = true
 			},
-			wantOutcome: AuditOutcomeFailure,
-			wantReason:  auditctx.ReasonInternalError,
+			wantOutcome: AuditOutcomeDenied,
+			wantReason:  auditctx.ReasonInvalidRequest,
 		},
 		{
 			name: "policy eval error → failure",
@@ -752,13 +766,13 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 		obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 		ctx := request.WithID(context.Background(), "test")
 		_, probe := obs.TokenExchangeStarted(ctx, "bad-grant", "", "", "")
-		probe.RequestFailed(fmt.Errorf("%w: bad-grant", service.ErrUnsupportedGrantType))
+		probe.InvalidRequest(fmt.Errorf("%w: bad-grant", service.ErrUnsupportedGrantType))
 		probe.End()
 
 		records := decodeRecords(t, output.Bytes())
 		require.NotEmpty(t, records)
 		got := records[0]["outcome"].(string) + "/" + stringOrEmpty(records[0]["reason_code"])
-		require.Equal(t, "failure/grant_type_unsupported", got)
+		require.Equal(t, "denied/grant_type_unsupported", got)
 	})
 }
 
@@ -874,4 +888,25 @@ func TestSignalsDroppedCounting(t *testing.T) {
 		require.False(t, hasDropped,
 			"a rejected signal due to invalid metadata must not increment signals_dropped")
 	})
+}
+
+// A failed source fetch behind a data source cache is a cache miss followed
+// by a dependency failure, not a failure of the cache layer itself.
+func TestDataSourceFetchFailureIsACacheMiss(t *testing.T) {
+	var output bytes.Buffer
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "fetch-failed"))
+
+	_, dsProbe := obs.CacheFetchStarted(ctx, "enrichment")
+	dsProbe.FetchFailed(errors.New("enrichment timeout"))
+	probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
+	probe.End()
+
+	records := decodeRecords(t, output.Bytes())
+	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"])
+	resource := records[0]["resource"].(map[string]any)
+	require.Equal(t, "datasource:enrichment", resource["failed_component"])
+	layers := resource["cache_layers"].([]any)
+	require.Len(t, layers, 1)
+	require.Equal(t, "miss", layers[0].(map[string]any)["status"])
 }

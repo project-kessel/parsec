@@ -52,7 +52,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	// 1. Validate the grant type
 	if req.GrantType != "urn:ietf:params:oauth:grant-type:token-exchange" {
 		err := fmt.Errorf("%w: %s", service.ErrUnsupportedGrantType, req.GrantType)
-		p.RequestFailed(err)
+		p.InvalidRequest(err)
 		return nil, err
 	}
 
@@ -76,7 +76,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 		// Get the claims filter for this actor
 		claimsFilter, err := s.claimsFilterRegistry.GetFilter(actor)
 		if err != nil {
-			p.RequestContextParseFailed(err)
+			p.RequestFailed(err)
 			return nil, fmt.Errorf("failed to get claims filter for actor: %w", err)
 		}
 
@@ -132,7 +132,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	if req.Audience != "" && req.Audience != s.tokenService.TrustDomain() {
 		err := fmt.Errorf("requested audience %q does not match trust domain %q",
 			req.Audience, s.tokenService.TrustDomain())
-		p.RequestFailed(err)
+		p.InvalidRequest(err)
 		return nil, err
 	}
 
@@ -166,6 +166,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 	}
 
 	// 9. Return response
+	p.TokenIssued()
 	return &parsecv1.ExchangeResponse{
 		AccessToken:     r.Token.Value,
 		IssuedTokenType: string(requestedTokenType),

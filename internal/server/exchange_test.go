@@ -831,6 +831,7 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 			"ActorValidationSucceeded",
 			"RequestContextParsed",
 			"SubjectTokenValidationSucceeded",
+			"TokenIssued",
 			"End",
 		)
 	})
