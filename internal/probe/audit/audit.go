@@ -715,6 +715,30 @@ func (p *auditLuaFetchProbe) ResultConversionFailed(error) {
 	p.state.SetFailedComponent(p.name)
 }
 
+// auditLuaValidateProbe marks a Lua validator that could not reach a verdict
+// (script failed to load or run, or returned something unusable) as a failed
+// dependency. A script that rejects the credential returns nil and reaches
+// ValidationRejected instead, which stays a credential denial.
+type auditLuaValidateProbe struct {
+	trust.NoOpLuaValidateProbe
+	state *request.AuditState
+	name  string
+}
+
+func (o *Observer) LuaValidateStarted(ctx context.Context, name string) (context.Context, trust.LuaValidateProbe) {
+	return ctx, &auditLuaValidateProbe{state: request.AuditStateFrom(ctx), name: "validator:" + name}
+}
+
+func (p *auditLuaValidateProbe) fault() {
+	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
+	p.state.SetFailedComponent(p.name)
+	p.state.SetDependencyOutage()
+}
+func (p *auditLuaValidateProbe) ScriptLoadFailed(error)       { p.fault() }
+func (p *auditLuaValidateProbe) ScriptExecutionFailed(error)  { p.fault() }
+func (p *auditLuaValidateProbe) InvalidReturnType(string)     { p.fault() }
+func (p *auditLuaValidateProbe) ResultConversionFailed(error) { p.fault() }
+
 type auditJWTProbe struct {
 	trust.NoOpJWTValidateProbe
 	state *request.AuditState

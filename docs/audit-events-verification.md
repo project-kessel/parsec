@@ -136,5 +136,7 @@ record's top-level `signals` array.
 - `failure`: parsec or a dependency failed. A request that ends without any
   component stating an outcome is recorded as `failure` / `internal_error`.
 
-Reason codes are a fixed list defined in `internal/audit/signal.go`.
+Reason codes are a fixed list defined in `internal/audit/signal.go`. A signal
+sent with a `reason_code` outside that list is kept: the value is cleared and,
+if the signal has no `classification`, moved there.
 Deployment-specific detail belongs in a signal's `classification`.

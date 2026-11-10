@@ -282,3 +282,35 @@ func TestEveryReasonConstantIsAValidReasonCode(t *testing.T) {
 	})
 	require.Equal(t, len(reasonCodes), found, "reasonCodes has entries with no Reason* constant")
 }
+
+// A script gets the same answer from audit.record() whether or not audit is
+// on: the no-op reporter still reports whether the signal is well formed.
+func TestNoOpReporterReportsMalformedSignals(t *testing.T) {
+	require.True(t, NoOpReporter{}.Record(Signal{Source: SourceValidator, Operation: "ok", Outcome: OutcomeDenied}))
+	require.False(t, NoOpReporter{}.Record(Signal{Source: SourceValidator, Operation: "bad operation", Outcome: OutcomeDenied}))
+	require.False(t, NoOpReporter{}.Record(Signal{Source: "nowhere", Operation: "ok", Outcome: OutcomeDenied}))
+}
+
+// A reason_code outside the core list must not cost the signal. Scripts
+// written against an older or deployment-specific vocabulary keep working.
+func TestCollectorKeepsSignalWithUnknownReasonCode(t *testing.T) {
+	collector := NewCollector(nil)
+
+	require.True(t, collector.Record(Signal{
+		Source: SourceDataSource, Operation: "cross_account_access", Outcome: OutcomeDenied,
+		ReasonCode: "cross_account_denied", Classification: "rbac_denied",
+	}))
+	require.True(t, collector.Record(Signal{
+		Source: SourceDataSource, Operation: "cross_account_access", Outcome: OutcomeDenied,
+		ReasonCode: "cross_account_denied",
+	}))
+
+	signals := collector.Signals()
+	require.Len(t, signals, 2)
+	require.Empty(t, signals[0].ReasonCode)
+	require.Equal(t, "rbac_denied", signals[0].Classification, "an existing classification is kept")
+	require.Empty(t, signals[1].ReasonCode)
+	require.Equal(t, "cross_account_denied", signals[1].Classification,
+		"with no classification, the unknown reason is kept there")
+	require.Zero(t, collector.Rejected())
+}

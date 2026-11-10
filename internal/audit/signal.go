@@ -76,10 +76,33 @@ type Signal struct {
 // Reporter accepts validated audit signals for the current request.
 type Reporter interface{ Record(Signal) bool }
 
-// NoOpReporter is safe to use when audit collection is disabled.
+// NoOpReporter is safe to use when audit collection is disabled. It stores
+// nothing but still reports whether the signal is well formed, so a script
+// gets the same answer from audit.record() whether or not audit is on.
 type NoOpReporter struct{}
 
-func (NoOpReporter) Record(Signal) bool { return true }
+func (NoOpReporter) Record(signal Signal) bool { return Valid(normalize(signal)) }
+
+// normalize prepares a signal for validation without discarding it.
+//
+// Metadata values are trimmed and truncated (this also clones the map, so a
+// caller cannot mutate it after validation).
+//
+// A reason_code outside the known set is cleared and, when the signal has no
+// classification of its own, kept as the classification. Reason codes are a
+// closed core vocabulary; a script that sends its own label there still has
+// its signal recorded, with the label where deployment-specific detail
+// belongs.
+func normalize(signal Signal) Signal {
+	signal.Metadata = SanitizeMetadata(signal.Metadata)
+	if signal.ReasonCode != "" && !ValidReasonCode(signal.ReasonCode) {
+		if signal.Classification == "" {
+			signal.Classification = signal.ReasonCode
+		}
+		signal.ReasonCode = ""
+	}
+	return signal
+}
 
 // Collector stores a bounded list of valid signals for one request.
 // When allowedKeys is non-nil, metadata keys that are not listed are stripped
@@ -107,9 +130,7 @@ func (c *Collector) Record(signal Signal) bool {
 	if c == nil {
 		return false
 	}
-	// Sanitize metadata values before validating/storing. This also clones
-	// the map, preventing caller mutations from bypassing validation.
-	signal.Metadata = SanitizeMetadata(signal.Metadata)
+	signal = normalize(signal)
 	// A key outside the allowlist costs only that key. Dropping the whole
 	// signal would lose a security-relevant event over a config omission.
 	stripped := 0

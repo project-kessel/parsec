@@ -907,3 +907,32 @@ func TestDataSourceFetchFailureIsACacheMiss(t *testing.T) {
 	require.Len(t, layers, 1, "a failed fetch must not add a second layer for the same lookup")
 	require.Equal(t, "miss", layers[0].(map[string]any)["status"])
 }
+
+// A Lua validator that cannot reach a verdict is a failed dependency. One
+// that rejects the credential is an ordinary denial.
+func TestLuaValidatorFaultIsADependencyFailure(t *testing.T) {
+	run := func(t *testing.T, report func(trust.LuaValidateProbe)) map[string]any {
+		var output bytes.Buffer
+		obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+		ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "lua-validator"))
+		_, luaProbe := obs.LuaValidateStarted(ctx, "registry-auth")
+		report(luaProbe)
+		probe.SubjectValidationFailed(errors.New("validation failed"))
+		probe.End()
+		return decodeRecords(t, output.Bytes())[0]
+	}
+
+	t.Run("script execution failed", func(t *testing.T) {
+		record := run(t, func(p trust.LuaValidateProbe) { p.ScriptExecutionFailed(errors.New("backend timeout")) })
+		require.Equal(t, "failure", record["outcome"])
+		require.Equal(t, auditctx.ReasonDependencyFailure, record["reason_code"])
+		require.Equal(t, "validator:registry-auth", record["resource"].(map[string]any)["failed_component"])
+	})
+
+	t.Run("script rejected the credential", func(t *testing.T) {
+		record := run(t, func(p trust.LuaValidateProbe) { p.ValidationRejected() })
+		require.Equal(t, "denied", record["outcome"])
+		require.Equal(t, auditctx.ReasonCredentialInvalid, record["reason_code"])
+		require.NotContains(t, record["resource"].(map[string]any), "failed_component")
+	})
+}
