@@ -95,7 +95,13 @@ type AuthzCheckPolicyConfig struct {
 	// AllowAnonymousWithoutIssuePaths is a list of RE2 regexes. Anonymous
 	// requests on matching URL paths are allowed without issuing tokens;
 	// all other anonymous requests are denied.
-	AllowAnonymousWithoutIssuePaths []string `koanf:"allow_anonymous_without_issue_paths"`
+	AllowAnonymousWithoutIssuePaths []string                   `koanf:"allow_anonymous_without_issue_paths"`
+	AllowAnonymousWithoutIssueRules []AllowAnonymousRuleConfig `koanf:"allow_anonymous_without_issue_rules"`
+}
+
+type AllowAnonymousRuleConfig struct {
+	Hosts []string `koanf:"hosts"`
+	Paths []string `koanf:"paths"`
 }
 
 // HeaderSpec configures a single header for extraction
