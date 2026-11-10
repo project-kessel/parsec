@@ -236,6 +236,12 @@ func (t *instrumentedTransport) RoundTrip(req *http.Request) (*http.Response, er
 
 	probe.StatusCode(resp.StatusCode)
 	probe.ProtocolVersion(resp.Proto)
+	// resp.TLS is populated on every response (including reused
+	// connections), unlike httptrace's TLSHandshakeDone. CurveID is zero
+	// when no key exchange group applies (e.g. TLS 1.2 RSA key exchange).
+	if resp.TLS != nil && resp.TLS.CurveID != 0 {
+		probe.TLSCurve(resp.TLS.CurveID.String())
+	}
 	return resp, nil
 }
 

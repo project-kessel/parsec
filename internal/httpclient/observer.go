@@ -31,6 +31,12 @@ type RequestProbe interface {
 	// successful round-trips; omitted on transport-level errors.
 	ProtocolVersion(proto string)
 
+	// TLSCurve records the negotiated TLS key exchange group
+	// (e.g. "X25519MLKEM768", "X25519", "CurveP256"). Only called on
+	// successful round-trips over TLS where a group was negotiated;
+	// omitted for plaintext HTTP and transport-level errors.
+	TLSCurve(curve string)
+
 	// End signals the request is complete (for timing). Called via defer.
 	End()
 }
@@ -51,4 +57,5 @@ func (NoOpRequestProbe) StatusCode(int)         {}
 func (NoOpRequestProbe) Error(error)            {}
 func (NoOpRequestProbe) ConnectionReused(bool)  {}
 func (NoOpRequestProbe) ProtocolVersion(string) {}
+func (NoOpRequestProbe) TLSCurve(string)        {}
 func (NoOpRequestProbe) End()                   {}

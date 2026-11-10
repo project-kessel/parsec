@@ -858,6 +858,11 @@ func (m *compositeRequestProbe) ProtocolVersion(proto string) {
 		p.ProtocolVersion(proto)
 	}
 }
+func (m *compositeRequestProbe) TLSCurve(curve string) {
+	for _, p := range m.probes {
+		p.TLSCurve(curve)
+	}
+}
 func (m *compositeRequestProbe) End() {
 	for _, p := range m.probes {
 		p.End()

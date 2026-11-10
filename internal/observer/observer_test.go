@@ -174,6 +174,7 @@ func TestNoOp_AllProbeMethodsCallable(t *testing.T) {
 		p.StatusCode(200)
 		p.Error(errors.New("x"))
 		p.ConnectionReused(true)
+		p.TLSCurve("X25519MLKEM768")
 		p.End()
 	}
 	if err := obs.Shutdown(ctx); err != nil {
@@ -454,6 +455,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 		httpSC1, httpSC2         atomic.Int32
 		httpErr1, httpErr2       atomic.Int32
 		httpConn1, httpConn2     atomic.Int32
+		httpCurve1, httpCurve2   atomic.Int32
 		httpEnd1, httpEnd2       atomic.Int32
 	)
 
@@ -476,7 +478,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 			server.JWKSObserver
 			server.LifecycleObserver
 		}{&spyJWKSObserver{called: &jwks1}, &spySrvLifeObserver{called: &srv1}},
-		&spyHTTPClientObserver{called: &http1, statusCode: &httpSC1, errored: &httpErr1, connReused: &httpConn1, ended: &httpEnd1},
+		&spyHTTPClientObserver{called: &http1, statusCode: &httpSC1, errored: &httpErr1, connReused: &httpConn1, tlsCurve: &httpCurve1, ended: &httpEnd1},
 	)
 	child2 := Compose(
 		service.NoOpServiceObserver{},
@@ -497,7 +499,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 			server.JWKSObserver
 			server.LifecycleObserver
 		}{&spyJWKSObserver{called: &jwks2}, &spySrvLifeObserver{called: &srv2}},
-		&spyHTTPClientObserver{called: &http2, statusCode: &httpSC2, errored: &httpErr2, connReused: &httpConn2, ended: &httpEnd2},
+		&spyHTTPClientObserver{called: &http2, statusCode: &httpSC2, errored: &httpErr2, connReused: &httpConn2, tlsCurve: &httpCurve2, ended: &httpEnd2},
 	)
 
 	composite := CompositeAll([]Observer{child1, child2})
@@ -523,6 +525,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 	probe.StatusCode(200)
 	probe.Error(errors.New("test"))
 	probe.ConnectionReused(true)
+	probe.TLSCurve("X25519MLKEM768")
 	probe.End()
 
 	for _, tc := range []struct {
@@ -547,6 +550,7 @@ func TestCompositeAll_FansOutAllInfraTypes(t *testing.T) {
 		{"HTTPClientStatusCode", &httpSC1, &httpSC2},
 		{"HTTPClientError", &httpErr1, &httpErr2},
 		{"HTTPClientConnReused", &httpConn1, &httpConn2},
+		{"HTTPClientTLSCurve", &httpCurve1, &httpCurve2},
 		{"HTTPClientEnd", &httpEnd1, &httpEnd2},
 	} {
 		if tc.c1.Load() != 1 {
@@ -810,12 +814,13 @@ type spyHTTPClientObserver struct {
 	statusCode *atomic.Int32
 	errored    *atomic.Int32
 	connReused *atomic.Int32
+	tlsCurve   *atomic.Int32
 	ended      *atomic.Int32
 }
 
 func (s *spyHTTPClientObserver) RequestStarted(ctx context.Context, _ string, _ string, _ string) (context.Context, httpclient.RequestProbe) {
 	s.called.Add(1)
-	return ctx, &spyHTTPClientProbe{statusCode: s.statusCode, errored: s.errored, connReused: s.connReused, ended: s.ended}
+	return ctx, &spyHTTPClientProbe{statusCode: s.statusCode, errored: s.errored, connReused: s.connReused, tlsCurve: s.tlsCurve, ended: s.ended}
 }
 
 type spyHTTPClientProbe struct {
@@ -823,10 +828,12 @@ type spyHTTPClientProbe struct {
 	statusCode *atomic.Int32
 	errored    *atomic.Int32
 	connReused *atomic.Int32
+	tlsCurve   *atomic.Int32
 	ended      *atomic.Int32
 }
 
 func (p *spyHTTPClientProbe) StatusCode(int)        { p.statusCode.Add(1) }
 func (p *spyHTTPClientProbe) Error(error)           { p.errored.Add(1) }
 func (p *spyHTTPClientProbe) ConnectionReused(bool) { p.connReused.Add(1) }
+func (p *spyHTTPClientProbe) TLSCurve(string)       { p.tlsCurve.Add(1) }
 func (p *spyHTTPClientProbe) End()                  { p.ended.Add(1) }
