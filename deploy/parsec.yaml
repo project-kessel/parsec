@@ -87,9 +87,6 @@ objects:
               - name: config-volume
                 mountPath: "/etc/parsec/scripts/forwarded_client_cert_auth.lua"
                 subPath: forwarded_client_cert_auth.lua
-              - name: registry-certs
-                mountPath: "/etc/parsec/secrets/registry-certs"
-                readOnly: true
               - name: rhcs-certs
                 mountPath: "/etc/parsec/secrets/rhcs-certs"
                 readOnly: true
@@ -100,10 +97,6 @@ objects:
               - name: config-volume
                 secret:
                   secretName: ${PARSEC_CONFIG_SECRET}
-              - name: registry-certs
-                secret:
-                  secretName: ${REGISTRY_CERTS_SECRET}
-                  optional: true
               - name: rhcs-certs
                 secret:
                   secretName: ${RHCS_CERTS_SECRET}
@@ -148,9 +141,6 @@ parameters:
   - description: Name of the K8s secret containing parsec config files (parsec.yaml, CEL scripts, etc.)
     name: PARSEC_CONFIG_SECRET
     value: parsec-config
-  - description: Name of the K8s secret containing registry mTLS client certs
-    name: REGISTRY_CERTS_SECRET
-    value: registry-certs
   - description: Name of the K8s secret containing RHCS issued mTLS client certs
     name: RHCS_CERTS_SECRET
   - description: Name of the K8s secret containing the BOP certauth proxy proof secret
