@@ -766,6 +766,12 @@ func (m *compositeTokenExchangeProbe) RequestContextParseFailed(err error) {
 	}
 }
 
+func (m *compositeTokenExchangeProbe) SubjectCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	for _, p := range m.probes {
+		p.SubjectCredentialExtracted(cred, headersUsed)
+	}
+}
+
 func (m *compositeTokenExchangeProbe) SubjectTokenValidationSucceeded(subject *trust.Result) {
 	for _, p := range m.probes {
 		p.SubjectTokenValidationSucceeded(subject)

@@ -75,6 +75,8 @@ View all available flags:
 ./bin/parsec serve --help
 ```
 
+### Audit logging
+
 Audit correlation reads the standard `x-request-id` from the checked HTTP
 request or incoming gRPC metadata. The HTTP token endpoint carries that header
 through its internal gateway hop. Missing or invalid IDs receive a local UUID.
@@ -84,7 +86,45 @@ requests. There is no `request_id_headers` configuration setting.
 
 Audit principal attributes (`observability.audit_principal_claims`) and
 per-credential events (`observability.audit_credential_events`) are off unless
-configured; see `docs/audit-events-verification.md` for the format.
+configured. To retain script audit signals, include `type: audit` in the
+observer list, for example:
+
+```yaml
+observability:
+  type: composite
+  # Allowlist for audit.record() metadata keys. Keys that are not listed are
+  # stripped and the signal is kept. When omitted, all metadata keys are
+  # stripped (fail-closed). An explicit list is required for production use.
+  audit_metadata_keys:
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_status"
+  # Validated claims copied into subject.attributes / actor.attributes.
+  # The first claim holding a non-empty string wins; dots reach nested claims.
+  audit_principal_claims:
+    org_id: ["org_id", "rh-org-id", "organization.id"]
+    account_number: ["account_number"]
+  # Extra events emitted when a principal presented a credential type.
+  audit_credential_events:
+    subject:
+      mtls: validate_ssl_cert
+      forwarded_client_cert: validate_ssl_cert
+    actor:
+      header: verify_psk
+  observers:
+    - type: audit
+    - type: logging
+```
+
+Credential events carry `principal: subject` or `principal: actor` and that
+principal's validation outcome, independently of the request outcome. No
+credential event is emitted for a principal whose credential was never
+validated. Subject and actor events are both emitted even when they share a
+name. Dedicated signal events include the triggering signal in `signal`;
+`signals` retains the full request list.
 
 Audit `resource.requested_token_types` contains the effective issuance request,
 including defaults. `resource.token_types` contains successfully minted types.
@@ -673,6 +713,12 @@ oc create secret generic parsec-config \
   --from-file=parsec.yaml=path/to/production-parsec.yaml \
   --from-file=scripts/redhat_identity.cel=configs/scripts/redhat_identity.cel
 ```
+
+The production `parsec.yaml` must also include the [audit observer and audit
+settings](#audit-logging) shown above. This applies to the external
+Secret selected by `PARSEC_CONFIG_SECRET` in `deploy/parsec.yaml`; changing the
+template alone does not update that Secret. Keep any existing metrics observer
+when adding audit to the observer list.
 
 The production `parsec.yaml` should include:
 ```yaml

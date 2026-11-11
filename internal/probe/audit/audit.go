@@ -220,9 +220,15 @@ type requestProbe struct {
 	// Callback state for reason derivation (set by probe methods)
 	subjectAnonymous          bool
 	subjectExtractionFailed   bool
+	subjectValidated          bool
 	subjectValidationErr      error
+	subjectOutagesAtStart     uint64
+	subjectDependencyOutage   bool
 	actorExtractionFailed     bool
+	actorValidated            bool
 	actorValidationErr        error
+	actorOutagesAtStart       uint64
+	actorDependencyOutage     bool
 	policyDenied              bool
 	policyEvalErr             error
 	policyAllowed             bool
@@ -333,25 +339,32 @@ func (p *requestProbe) RequestAttributesParsed(attrs *request.RequestAttributes)
 }
 
 func (p *requestProbe) ActorCredentialExtracted(credential trust.Credential, _ []string) {
+	p.actorOutagesAtStart = p.state.DependencyOutages()
 	if credential != nil {
 		p.actor.CredentialType = string(credential.Type())
 	}
 }
 
 func (p *requestProbe) SubjectCredentialExtracted(credential trust.Credential, _ []string) {
+	p.subjectOutagesAtStart = p.state.DependencyOutages()
 	if credential != nil {
 		p.subject.CredentialType = string(credential.Type())
 	}
 }
 
 func (p *requestProbe) ActorValidationSucceeded(result *trust.Result) {
+	p.actorValidated = true
 	p.observer.fillPrincipal(&p.actor, result)
 }
 
 func (p *requestProbe) ActorCredentialExtractionFailed(error) { p.actorExtractionFailed = true }
-func (p *requestProbe) ActorValidationFailed(err error)       { p.actorValidationErr = err }
+func (p *requestProbe) ActorValidationFailed(err error) {
+	p.actorValidationErr = err
+	p.actorDependencyOutage = p.state.DependencyOutages() > p.actorOutagesAtStart
+}
 
 func (p *requestProbe) SubjectValidationSucceeded(result *trust.Result) {
+	p.subjectValidated = true
 	p.observer.fillPrincipal(&p.subject, result)
 }
 
@@ -361,6 +374,7 @@ func (p *requestProbe) SubjectCredentialExtractionFailed(error) {
 
 func (p *requestProbe) SubjectValidationFailed(err error) {
 	p.subjectValidationErr = err
+	p.subjectDependencyOutage = p.state.DependencyOutages() > p.subjectOutagesAtStart
 }
 
 func (p *requestProbe) SubjectAnonymous() {
@@ -368,10 +382,11 @@ func (p *requestProbe) SubjectAnonymous() {
 }
 
 func (p *requestProbe) SubjectTokenValidationFailed(err error) {
-	p.subjectValidationErr = err
+	p.SubjectValidationFailed(err)
 }
 
 func (p *requestProbe) SubjectTokenValidationSucceeded(result *trust.Result) {
+	p.subjectValidated = true
 	p.observer.fillPrincipal(&p.subject, result)
 }
 
@@ -458,16 +473,10 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 
 	// Validation failures
 	if p.subjectValidationErr != nil {
-		if errors.Is(p.subjectValidationErr, trust.ErrExpiredToken) {
-			return AuditOutcomeDenied, auditctx.ReasonCredentialExpired
-		}
-		return AuditOutcomeDenied, auditctx.ReasonCredentialInvalid
+		return AuditOutcomeDenied, credentialFailureReason(p.subjectValidationErr)
 	}
 	if p.actorValidationErr != nil {
-		if errors.Is(p.actorValidationErr, trust.ErrExpiredToken) {
-			return AuditOutcomeDenied, auditctx.ReasonCredentialExpired
-		}
-		return AuditOutcomeDenied, auditctx.ReasonCredentialInvalid
+		return AuditOutcomeDenied, credentialFailureReason(p.actorValidationErr)
 	}
 
 	// Client errors on the token exchange path: the caller sent something
@@ -494,10 +503,53 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 	return AuditOutcomeFailure, auditctx.ReasonInternalError
 }
 
+// credentialFailureReason classifies a credential validation error.
+func credentialFailureReason(err error) string {
+	if errors.Is(err, trust.ErrExpiredToken) {
+		return auditctx.ReasonCredentialExpired
+	}
+	return auditctx.ReasonCredentialInvalid
+}
+
+// eventDetail is what varies between the events of one request.
+type eventDetail struct {
+	outcome        AuditOutcome
+	reasonCode     string
+	classification string
+	// principal is "subject" or "actor" on a credential event.
+	principal string
+	// signal is the one signal a dedicated signal event is about.
+	signal json.RawMessage
+}
+
+// emitCredentialEvent emits the event configured for the credential type a
+// principal presented, with that principal's own validation result. Nothing
+// is emitted when the credential was never validated: the request ended
+// first, and the request record says why.
+func (p *requestProbe) emitCredentialEvent(role, suffix string, validated bool, validationErr error, dependencyOutage bool, env *emitEnvelope) {
+	if suffix == "" {
+		return
+	}
+	detail := eventDetail{principal: role}
+	switch {
+	case validationErr != nil:
+		detail.outcome, detail.reasonCode = AuditOutcomeDenied, credentialFailureReason(validationErr)
+		// Same rule as the request record: an outage is not a bad credential.
+		if dependencyOutage && detail.reasonCode == auditctx.ReasonCredentialInvalid {
+			detail.outcome, detail.reasonCode = AuditOutcomeFailure, auditctx.ReasonDependencyFailure
+		}
+	case validated:
+		detail.outcome = AuditOutcomeSuccess
+	default:
+		return
+	}
+	p.emitRaw(suffix, detail, env)
+}
+
 func (p *requestProbe) End() {
 	outcome, reasonCode := p.deriveCompletion()
 
-	cacheLayers, failureReason, failedComponent, dependencyOutage := p.state.Snapshot()
+	cacheLayers, failureReason, failedComponent, _ := p.state.Snapshot()
 	// token_issuance_failed is not replaced: a dependency may have failed
 	// earlier and been tolerated, so it cannot be assumed to be the cause.
 	// failed_component still names it.
@@ -507,7 +559,7 @@ func (p *requestProbe) End() {
 	// A real infrastructure outage (JWKS down, distributed cache failure)
 	// overrides credential_invalid to failure/dependency_failure so that
 	// bad signatures are not reported as outages.
-	if dependencyOutage && outcome == AuditOutcomeDenied && reasonCode == auditctx.ReasonCredentialInvalid {
+	if (p.subjectDependencyOutage || p.actorDependencyOutage) && outcome == AuditOutcomeDenied && reasonCode == auditctx.ReasonCredentialInvalid {
 		outcome = AuditOutcomeFailure
 		reasonCode = auditctx.ReasonDependencyFailure
 	}
@@ -531,19 +583,17 @@ func (p *requestProbe) End() {
 		env.signals, _ = json.Marshal(signals)
 	}
 
-	p.emitRaw("request", nil, &env)
+	final := eventDetail{outcome: outcome, reasonCode: reasonCode}
+	p.emitRaw("request", final, &env)
 
 	if p.authorize {
-		p.emitRaw("authorize", nil, &env)
+		p.emitRaw("authorize", final, &env)
 	}
 	credentialEvents := p.observer.credentialEvents
-	subjectEvent := credentialEvents.Subject[p.subject.CredentialType]
-	if subjectEvent != "" {
-		p.emitRaw(subjectEvent, nil, &env)
-	}
-	if actorEvent := credentialEvents.Actor[p.actor.CredentialType]; actorEvent != "" && actorEvent != subjectEvent {
-		p.emitRaw(actorEvent, nil, &env)
-	}
+	p.emitCredentialEvent("subject", credentialEvents.Subject[p.subject.CredentialType],
+		p.subjectValidated, p.subjectValidationErr, p.subjectDependencyOutage, &env)
+	p.emitCredentialEvent("actor", credentialEvents.Actor[p.actor.CredentialType],
+		p.actorValidated, p.actorValidationErr, p.actorDependencyOutage, &env)
 
 	// Each signal that names an event, or whose reason maps to one, emits
 	// its own event with its own outcome. Two such signals emit two events.
@@ -553,11 +603,16 @@ func (p *requestProbe) End() {
 		// Only a signal's reason can stand in for the request's final
 		// reason event; an event the signal names itself never does.
 		reasonSuffix := reasonEventSuffix(signal.ReasonCode)
+		detail := eventDetail{
+			outcome:    signalOutcomeToAuditOutcome(signal.Outcome),
+			reasonCode: signal.ReasonCode, classification: signal.Classification,
+		}
+		detail.signal, _ = json.Marshal(signal)
 		switch {
 		case signal.Event != "":
-			p.emitRaw(signal.Event, &signal, &env)
+			p.emitRaw(signal.Event, detail, &env)
 		case reasonSuffix != "":
-			p.emitRaw(reasonSuffix, &signal, &env)
+			p.emitRaw(reasonSuffix, detail, &env)
 			if reasonSuffix == finalSuffix {
 				signalCoveredSuffix = true
 			}
@@ -567,27 +622,17 @@ func (p *requestProbe) End() {
 	// Emit the reason-specific event for the request's final reason only
 	// when no signal already carries the same reason.
 	if finalSuffix != "" && !signalCoveredSuffix {
-		p.emitRaw(finalSuffix, nil, &env)
+		p.emitRaw(finalSuffix, final, &env)
 	}
 }
 
 // emitRaw writes a single audit event record using pre-serialized envelope
-// fields. Only outcome and reason_code vary per event; the shared fields are
-// serialized once in End().
-func (p *requestProbe) emitRaw(suffix string, signal *auditctx.Signal, env *emitEnvelope) {
+// fields. Only detail varies per event; the shared fields are serialized once
+// in End().
+func (p *requestProbe) emitRaw(suffix string, detail eventDetail, env *emitEnvelope) {
 	name := p.observer.eventName(suffix)
-	var outcome AuditOutcome
-	var reasonCode, classification string
-	if signal != nil {
-		outcome = signalOutcomeToAuditOutcome(signal.Outcome)
-		reasonCode = signal.ReasonCode
-		classification = signal.Classification
-	} else {
-		outcome = p.derivedOutcome
-		reasonCode = p.derivedReasonCode
-	}
-
-	reason := safeReasonCode(reasonCode)
+	outcome := detail.outcome
+	reason := safeReasonCode(detail.reasonCode)
 
 	event := p.observer.event(outcome).
 		Str("event", name).
@@ -607,8 +652,14 @@ func (p *requestProbe) emitRaw(suffix string, signal *auditctx.Signal, env *emit
 	if reason != "" {
 		event = event.Str("reason_code", reason)
 	}
-	if classification != "" {
-		event = event.Str("classification", classification)
+	if detail.classification != "" {
+		event = event.Str("classification", detail.classification)
+	}
+	if detail.principal != "" {
+		event = event.Str("principal", detail.principal)
+	}
+	if len(detail.signal) > 0 {
+		event = event.RawJSON("signal", detail.signal)
 	}
 	event.Msg(name)
 }

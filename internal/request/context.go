@@ -38,11 +38,11 @@ const maxLayerNameLength = 128
 // failure (first-writer-wins). Subsequent failures do not overwrite it,
 // ensuring the audit record reflects the root-cause failure.
 type AuditState struct {
-	mu               sync.RWMutex
-	cacheLayers      []CacheLayer
-	failureReason    string
-	failedComponent  string
-	dependencyOutage bool
+	mu                sync.RWMutex
+	cacheLayers       []CacheLayer
+	failureReason     string
+	failedComponent   string
+	dependencyOutages uint64
 }
 
 // WithID adds a request correlation identifier to ctx.
@@ -155,8 +155,21 @@ func (s *AuditState) SetDependencyOutage() {
 		return
 	}
 	s.mu.Lock()
-	s.dependencyOutage = true
+	s.dependencyOutages++
 	s.mu.Unlock()
+}
+
+// DependencyOutages returns the number of observed outages. Probes compare
+// counts at credential extraction and validation failure to attribute only
+// outages observed during that principal's validation, without clearing the
+// request's accumulated diagnostics.
+func (s *AuditState) DependencyOutages() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.dependencyOutages
 }
 
 // Snapshot returns a consistent point-in-time copy of the audit
@@ -169,5 +182,5 @@ func (s *AuditState) Snapshot() (cacheLayers []CacheLayer, failureReason string,
 	defer s.mu.RUnlock()
 	layers := make([]CacheLayer, len(s.cacheLayers))
 	copy(layers, s.cacheLayers)
-	return layers, s.failureReason, s.failedComponent, s.dependencyOutage
+	return layers, s.failureReason, s.failedComponent, s.dependencyOutages > 0
 }

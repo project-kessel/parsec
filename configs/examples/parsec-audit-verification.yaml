@@ -15,8 +15,8 @@
 #   go build -o bin/parsec ./cmd/parsec
 #   ./bin/parsec serve --config ./configs/examples/parsec-audit-verification.yaml
 #
-# See docs/audit-events-verification.md for captured curl/grpcurl output
-# alongside the corresponding structured audit log lines.
+# See configs/README.md for the audit settings and event fields.
+# test/e2e/hermetic_audit_test.go verifies structured audit output.
 
 server:
   grpc_port: 9090

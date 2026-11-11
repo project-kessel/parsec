@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	auditctx "github.com/project-kessel/parsec/internal/audit"
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/trust"
 )
@@ -643,38 +644,54 @@ observability:
 }
 
 // TestShippedConfigKeepsDeploymentAuditOutput checks that the deployment
-// names core no longer knows about are reproduced by configs/parsec.yaml.
+// names core no longer knows about are reproduced by shipped application configs.
 func TestShippedConfigKeepsDeploymentAuditOutput(t *testing.T) {
-	loader, err := NewLoader("../../configs/parsec.yaml")
-	require.NoError(t, err)
-	cfg, err := loader.Get()
-	require.NoError(t, err)
+	for _, path := range []string{
+		"../../configs/parsec.yaml",
+		"../../configs/examples/parsec-cross-account-local.yaml",
+		"../../configs/examples/parsec-production.yaml",
+	} {
+		t.Run(path, func(t *testing.T) {
+			loader, err := NewLoader(path)
+			require.NoError(t, err)
+			cfg, err := loader.Get()
+			require.NoError(t, err)
 
-	var buf bytes.Buffer
-	logCtx := jsonLogCtx(&buf)
-	p := NewProvider(cfg)
-	p.logCtx = &logCtx
-	obs, err := p.Observer()
-	require.NoError(t, err)
+			var buf bytes.Buffer
+			logCtx := jsonLogCtx(&buf)
+			p := NewProvider(cfg)
+			p.logCtx = &logCtx
+			obs, err := p.Observer()
+			require.NoError(t, err)
 
-	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "shipped-config"))
-	probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("c")}, nil)
-	probe.SubjectValidationSucceeded(&trust.Result{Subject: "s", Claims: map[string]any{
-		"organization": map[string]any{"id": "org-1"}, "account_number": "acct-1",
-	}})
-	probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-key": "k"}}, nil)
-	probe.PolicyDecisionAllowWithoutIssue("allowed")
-	probe.End()
+			ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "shipped-config"))
+			require.True(t, auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+				Source: auditctx.SourceDataSource, Operation: "cross_account_access", Outcome: auditctx.OutcomeSuccess,
+				Metadata: map[string]string{"target_org_id": "target-1"},
+			}))
+			probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("c")}, nil)
+			probe.SubjectValidationSucceeded(&trust.Result{Subject: "s", Claims: map[string]any{
+				"organization": map[string]any{"id": "org-1"}, "account_number": "acct-1",
+			}})
+			probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-key": "k"}}, nil)
+			probe.ActorValidationSucceeded(&trust.Result{})
+			probe.PolicyDecisionAllowWithoutIssue("allowed")
+			probe.End()
 
-	events := map[string]map[string]any{}
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
-		var record map[string]any
-		if json.Unmarshal([]byte(line), &record) == nil && record["schema_version"] != nil {
-			events[record["event"].(string)] = record
-		}
+			events := map[string]map[string]any{}
+			for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+				var record map[string]any
+				if json.Unmarshal([]byte(line), &record) == nil && record["schema_version"] != nil {
+					events[record["event"].(string)] = record
+				}
+			}
+			require.Contains(t, events, "parsec_validate_ssl_cert")
+			require.Contains(t, events, "parsec_verify_psk")
+			signals := events["parsec_request"]["signals"].([]any)
+			require.Len(t, signals, 1)
+			assert.Equal(t, "target-1", signals[0].(map[string]any)["metadata"].(map[string]any)["target_org_id"])
+			subject := events["parsec_request"]["subject"].(map[string]any)
+			assert.Equal(t, map[string]any{"org_id": "org-1", "account_number": "acct-1"}, subject["attributes"])
+		})
 	}
-	require.Contains(t, events, "parsec_validate_ssl_cert")
-	require.Contains(t, events, "parsec_verify_psk")
-	subject := events["parsec_request"]["subject"].(map[string]any)
-	assert.Equal(t, map[string]any{"org_id": "org-1", "account_number": "acct-1"}, subject["attributes"])
 }

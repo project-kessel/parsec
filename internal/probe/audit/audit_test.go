@@ -144,6 +144,7 @@ func TestAuditReporterPropagatesSignalsIntoRequestRecord(t *testing.T) {
 	require.Equal(t, "user_enrichment", signals[0].(map[string]any)["operation"])
 	require.Equal(t, "parsec_deployment_enrichment_failure", records[2]["event"])
 	require.Equal(t, "failure", records[2]["outcome"])
+	require.Equal(t, signals[0], records[2]["signal"])
 	require.Equal(t, "http_error", records[2]["classification"])
 	require.NotContains(t, records[2], "reason_code")
 }
@@ -305,6 +306,8 @@ func TestAuditEmitsConfiguredCredentialEvents(t *testing.T) {
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-auth"))
 	probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("secret-certificate")}, nil)
 	probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-shared-key": "secret-shared-key"}}, nil)
+	probe.SubjectValidationSucceeded(&trust.Result{})
+	probe.ActorValidationSucceeded(&trust.Result{})
 	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
@@ -836,6 +839,9 @@ func TestEndOverlapRule(t *testing.T) {
 		eventCount := 0
 		for _, r := range records {
 			if r["event"] == "parsec_dependency_failure" {
+				signal := r["signal"].(map[string]any)
+				require.Equal(t, r["outcome"], signal["outcome"])
+				require.Equal(t, []string{"lookup_a", "lookup_b"}[eventCount], signal["operation"])
 				eventCount++
 			}
 		}
@@ -959,18 +965,76 @@ func TestAuditCredentialEventsDefaultToNone(t *testing.T) {
 	require.Equal(t, []string{"parsec_request", "parsec_authorize"}, eventNames(decodeRecords(t, output.Bytes())))
 }
 
-func TestAuditCredentialEventEmittedOnceWhenSubjectAndActorShareIt(t *testing.T) {
-	var output bytes.Buffer
-	events := map[string]string{"bearer": "token_presented"}
-	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
-		WithCredentialEvents(CredentialEvents{Subject: events, Actor: events}))
-	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-auth"))
-	probe.SubjectCredentialExtracted(&trust.BearerCredential{Token: "a"}, nil)
-	probe.ActorCredentialExtracted(&trust.BearerCredential{Token: "b"}, nil)
-	probe.PolicyDecisionAllowWithoutIssue("allowed")
-	probe.End()
+func TestAuditCredentialEventsPreserveEachPrincipalsResult(t *testing.T) {
+	for _, mode := range []string{"policy denied", "actor invalid", "subject expired", "not validated"} {
+		t.Run(mode, func(t *testing.T) {
+			var output bytes.Buffer
+			events := map[string]string{"bearer": "token_presented"}
+			obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
+				WithCredentialEvents(CredentialEvents{Subject: events, Actor: events}))
+			_, probe := obs.AuthzCheckStarted(context.Background())
+			probe.SubjectCredentialExtracted(&trust.BearerCredential{Token: "secret-subject"}, nil)
+			probe.ActorCredentialExtracted(&trust.BearerCredential{Token: "secret-actor"}, nil)
+			switch mode {
+			case "policy denied":
+				probe.SubjectValidationSucceeded(&trust.Result{})
+				probe.ActorValidationSucceeded(&trust.Result{})
+				probe.PolicyDecisionDeny("denied")
+			case "actor invalid":
+				probe.ActorValidationFailed(errors.New("invalid"))
+			case "subject expired":
+				probe.ActorValidationSucceeded(&trust.Result{})
+				probe.SubjectValidationFailed(trust.ErrExpiredToken)
+			}
+			probe.End()
+			var credentials []map[string]any
+			for _, record := range decodeRecords(t, output.Bytes()) {
+				if record["event"] == "parsec_token_presented" {
+					credentials = append(credentials, record)
+				}
+			}
+			switch mode {
+			case "policy denied", "subject expired":
+				require.Len(t, credentials, 2)
+				require.Equal(t, "subject", credentials[0]["principal"])
+				require.Equal(t, "actor", credentials[1]["principal"])
+				require.Equal(t, "success", credentials[1]["outcome"])
+				require.NotContains(t, credentials[1], "reason_code")
+				if mode == "policy denied" {
+					require.Equal(t, "success", credentials[0]["outcome"])
+					require.NotContains(t, credentials[0], "reason_code")
+				} else {
+					require.Equal(t, "denied", credentials[0]["outcome"])
+					require.Equal(t, auditctx.ReasonCredentialExpired, credentials[0]["reason_code"])
+				}
+			case "actor invalid":
+				require.Len(t, credentials, 1)
+				require.Equal(t, "actor", credentials[0]["principal"])
+				require.Equal(t, "denied", credentials[0]["outcome"])
+				require.Equal(t, auditctx.ReasonCredentialInvalid, credentials[0]["reason_code"])
+			case "not validated":
+				require.Empty(t, credentials)
+			}
+			require.NotContains(t, output.String(), "secret-")
+		})
+	}
+}
 
-	require.Equal(t, []string{"parsec_request", "parsec_authorize", "parsec_token_presented"}, eventNames(decodeRecords(t, output.Bytes())))
+func TestAuditExchangeFailedSubjectRetainsCredentialType(t *testing.T) {
+	var output bytes.Buffer
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
+		WithCredentialEvents(CredentialEvents{Subject: map[string]string{"jwt": "validate_token"}}))
+	_, probe := obs.TokenExchangeStarted(context.Background(), "", "", "", "")
+	probe.SubjectCredentialExtracted(&trust.JWTCredential{BearerCredential: trust.BearerCredential{Token: "secret-token"}}, nil)
+	probe.SubjectTokenValidationFailed(trust.ErrExpiredToken)
+	probe.End()
+	records := decodeRecords(t, output.Bytes())
+	require.Equal(t, "jwt", records[0]["subject"].(map[string]any)["credential_type"])
+	require.Equal(t, "parsec_validate_token", records[1]["event"])
+	require.Equal(t, "subject", records[1]["principal"])
+	require.Equal(t, "denied", records[1]["outcome"])
+	require.Equal(t, auditctx.ReasonCredentialExpired, records[1]["reason_code"])
+	require.NotContains(t, output.String(), "secret-token")
 }
 
 func TestAuditPrincipalAttributesFromConfiguredClaims(t *testing.T) {
@@ -1070,5 +1134,104 @@ func TestNamedSignalEventDoesNotSuppressFinalReasonEvent(t *testing.T) {
 			require.Equal(t, "failure", failures[0]["outcome"])
 			require.Equal(t, "dependency_failure", failures[0]["reason_code"])
 		})
+	}
+}
+
+func TestDedicatedEventsIdentifySignalsWithDifferentMetadata(t *testing.T) {
+	var output bytes.Buffer
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
+		WithAllowedMetadataKeys(map[string]bool{"target_org_id": true}))
+	ctx, probe := obs.AuthzCheckStarted(context.Background())
+	for _, target := range []string{"org-a", "org-b"} {
+		require.True(t, auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+			Source: auditctx.SourceDataSource, Operation: "lookup", Outcome: auditctx.OutcomeSuccess,
+			Event: "ext", Classification: "lookup_result", Metadata: map[string]string{"target_org_id": target},
+		}))
+	}
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
+	probe.End()
+	var dedicated []map[string]any
+	for _, record := range decodeRecords(t, output.Bytes()) {
+		if record["event"] == "parsec_ext" {
+			dedicated = append(dedicated, record)
+		}
+	}
+	require.Len(t, dedicated, 2)
+	for i, target := range []string{"org-a", "org-b"} {
+		signal := dedicated[i]["signal"].(map[string]any)
+		require.Equal(t, target, signal["metadata"].(map[string]any)["target_org_id"])
+		require.Len(t, dedicated[i]["signals"].([]any), 2)
+	}
+}
+
+// Actor validation can recover through another validator in FilteredStore.
+// Its outage must not affect the subject, but a new subject outage still must.
+func TestCredentialOutagesAreScopedToPrincipal(t *testing.T) {
+	for _, exchange := range []bool{false, true} {
+		for _, source := range []string{"jwks", "distributed", "lua"} {
+			for _, actorOutage := range []bool{false, true} {
+				for _, subjectOutage := range []bool{false, true} {
+					t.Run(fmt.Sprintf("exchange=%t/%s/actor=%t/subject=%t", exchange, source, actorOutage, subjectOutage), func(t *testing.T) {
+						var output bytes.Buffer
+						obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"}, WithCredentialEvents(CredentialEvents{
+							Subject: map[string]string{"bearer": "credential_check"}, Actor: map[string]string{"bearer": "credential_check"},
+						}))
+						ctx, probe := obs.startRequest(context.Background(), "authorize", requestInfo{})
+						failDependency := func() {
+							switch source {
+							case "jwks":
+								_, p := obs.JWTValidateStarted(ctx, "validator")
+								p.JWKSLookupFailed(errors.New("unavailable"))
+								p.End()
+							case "distributed":
+								_, p := obs.DistributedValidateStarted(ctx, "validator")
+								p.GetFailed(errors.New("unavailable"))
+								p.End()
+							case "lua":
+								_, p := obs.LuaValidateStarted(ctx, "validator")
+								p.ScriptExecutionFailed(errors.New("unavailable"))
+								p.End()
+							}
+						}
+						probe.ActorCredentialExtracted(&trust.BearerCredential{}, nil)
+						if actorOutage {
+							failDependency()
+						}
+						probe.ActorValidationSucceeded(&trust.Result{Subject: "actor"})
+						probe.SubjectCredentialExtracted(&trust.BearerCredential{}, nil)
+						if subjectOutage {
+							failDependency()
+						}
+						if exchange {
+							probe.SubjectTokenValidationFailed(errors.New("invalid subject"))
+						} else {
+							probe.SubjectValidationFailed(errors.New("invalid subject"))
+						}
+						probe.End()
+						wantOutcome, wantReason := "denied", "credential_invalid"
+						if subjectOutage {
+							wantOutcome, wantReason = "failure", "dependency_failure"
+						}
+						var subjectEvents, actorEvents int
+						for _, record := range decodeRecords(t, output.Bytes()) {
+							if record["event"] == "parsec_request" || record["principal"] == "subject" {
+								require.Equal(t, wantOutcome, record["outcome"])
+								require.Equal(t, wantReason, record["reason_code"])
+							}
+							if record["principal"] == "subject" {
+								subjectEvents++
+							}
+							if record["principal"] == "actor" {
+								actorEvents++
+								require.Equal(t, "success", record["outcome"])
+								require.NotContains(t, record, "reason_code")
+							}
+						}
+						require.Equal(t, 1, subjectEvents)
+						require.Equal(t, 1, actorEvents)
+					})
+				}
+			}
+		}
 	}
 }

@@ -110,6 +110,7 @@ func (s *ExchangeServer) Exchange(ctx context.Context, req *parsecv1.ExchangeReq
 
 	// 5. Validate subject_token
 	cred := subjectCredential(req.SubjectToken, req.SubjectTokenType)
+	p.SubjectCredentialExtracted(cred, nil)
 
 	// Validate subject credential against filtered trust store
 	result, err := filteredStore.Validate(ctx, cred)

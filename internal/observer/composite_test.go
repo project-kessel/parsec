@@ -131,6 +131,7 @@ func TestCompositeTokenExchangeProbe_FansOutAllMethods(t *testing.T) {
 	composite.ActorValidationFailed(errors.New("test"))
 	composite.RequestContextParsed(nil)
 	composite.RequestContextParseFailed(errors.New("test"))
+	composite.SubjectCredentialExtracted(nil, nil)
 	composite.SubjectTokenValidationSucceeded(nil)
 	composite.SubjectTokenValidationFailed(errors.New("test"))
 	composite.TokenIssuanceFailed(errors.New("issuance"))
@@ -150,6 +151,7 @@ func TestCompositeTokenExchangeProbe_FansOutAllMethods(t *testing.T) {
 		{"ActorValidationFailed", &c1.actorValFailed, &c2.actorValFailed},
 		{"RequestContextParsed", &c1.reqCtxParsed, &c2.reqCtxParsed},
 		{"RequestContextParseFailed", &c1.reqCtxParseFail, &c2.reqCtxParseFail},
+		{"SubjectCredentialExtracted", &c1.subjectCredExtracted, &c2.subjectCredExtracted},
 		{"SubjectTokenValidationSucceeded", &c1.subjectTokenValSuccess, &c2.subjectTokenValSuccess},
 		{"SubjectTokenValidationFailed", &c1.subjectTokenValFail, &c2.subjectTokenValFail},
 		{"TokenIssuanceFailed", &c1.tokenIssuanceFailed, &c2.tokenIssuanceFailed},
@@ -285,6 +287,7 @@ func (p *trackingStopProbe) ShutdownFailed()    { p.failed.Add(1) }
 func (p *trackingStopProbe) End()               { p.ended.Add(1) }
 
 type tokenExchangeProbeCalls struct {
+	subjectCredExtracted   atomic.Int32
 	actorCredExtracted     atomic.Int32
 	actorCredExtrFail      atomic.Int32
 	actorValSucceeded      atomic.Int32
@@ -323,6 +326,10 @@ func (p *trackingTokenExchangeProbe) RequestContextParsed(*request.RequestAttrib
 func (p *trackingTokenExchangeProbe) RequestContextParseFailed(error) {
 	p.c.reqCtxParseFail.Add(1)
 }
+func (p *trackingTokenExchangeProbe) SubjectCredentialExtracted(trust.Credential, []string) {
+	p.c.subjectCredExtracted.Add(1)
+}
+
 func (p *trackingTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result) {
 	p.c.subjectTokenValSuccess.Add(1)
 }

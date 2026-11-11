@@ -79,6 +79,9 @@ type TokenExchangeProbe interface {
 	// RequestContextParseFailed is called when request_context parsing fails.
 	RequestContextParseFailed(err error)
 
+	// SubjectCredentialExtracted is called before validating the subject token.
+	SubjectCredentialExtracted(cred trust.Credential, headersUsed []string)
+
 	// SubjectTokenValidationSucceeded is called when subject token validation succeeds.
 	SubjectTokenValidationSucceeded(subject *trust.Result)
 
@@ -210,6 +213,8 @@ func (NoOpTokenIssuanceProbe) End()                                             
 // NoOpTokenExchangeProbe is a no-op implementation of TokenExchangeProbe.
 // Embed this in concrete probe types for forward compatibility.
 type NoOpTokenExchangeProbe struct{}
+
+func (NoOpTokenExchangeProbe) SubjectCredentialExtracted(trust.Credential, []string) {}
 
 func (NoOpTokenExchangeProbe) ActorCredentialExtracted(trust.Credential, []string) {}
 func (NoOpTokenExchangeProbe) ActorCredentialExtractionFailed(error)               {}
