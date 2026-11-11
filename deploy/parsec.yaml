@@ -153,6 +153,7 @@ parameters:
     value: registry-certs
   - description: Name of the K8s secret containing RHCS issued mTLS client certs
     name: RHCS_CERTS_SECRET
+    value: hcc-parsec-rhcs-cert
   - description: Name of the K8s secret containing the BOP certauth proxy proof secret
     name: BOP_CERTAUTH_SECRET
     value: backoffice-proxy-config
