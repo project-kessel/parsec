@@ -251,6 +251,24 @@ func TestProvider_Observer_CompositeAudit_HonorsTopLevelEventPrefix(t *testing.T
 	assert.Contains(t, buf.String(), `"event":"custom_request"`)
 }
 
+func TestProvider_Observer_RejectsMoreThanOneAuditObserver(t *testing.T) {
+	var buf bytes.Buffer
+	logCtx := jsonLogCtx(&buf)
+
+	p := providerWithObs(t, &ObservabilityConfig{
+		Type: "composite",
+		Observers: []ObservabilityConfig{
+			{Type: "audit"},
+			{Type: "composite", Observers: []ObservabilityConfig{{Type: "audit"}}},
+		},
+	})
+	p.logCtx = &logCtx
+
+	_, err := p.Observer()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "2 audit observers configured; at most one is supported")
+}
+
 func TestAllowedMetadataKeys(t *testing.T) {
 	p := NewProvider(&Config{})
 

@@ -82,6 +82,13 @@ func (p *Provider) Observer() (observer.Observer, error) {
 	}
 	p.obsBuilt = true
 
+	// Audit observers share request-scoped context state, so nested cache,
+	// dependency and script signals would all reach the last one started.
+	if n := countAuditObservers(p.config.Observability); n > 1 {
+		p.obsErr = fmt.Errorf("failed to create observer: %d audit observers configured; at most one is supported", n)
+		return nil, p.obsErr
+	}
+
 	obs, err := p.buildObserver(p.config.Observability, nil)
 	if err != nil {
 		p.obsErr = fmt.Errorf("failed to create observer: %w", err)
@@ -90,6 +97,24 @@ func (p *Provider) Observer() (observer.Observer, error) {
 
 	p.obs = obs
 	return obs, nil
+}
+
+// countAuditObservers returns the number of `type: audit` entries in cfg,
+// including composite children at any depth.
+func countAuditObservers(cfg *ObservabilityConfig) int {
+	if cfg == nil {
+		return 0
+	}
+	n := 0
+	if cfg.Type == "audit" {
+		n++
+	}
+	if cfg.Type == "composite" {
+		for i := range cfg.Observers {
+			n += countAuditObservers(&cfg.Observers[i])
+		}
+	}
+	return n
 }
 
 // BootstrapFields returns key-value pairs contributed during the
