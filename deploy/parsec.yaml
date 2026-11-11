@@ -90,6 +90,9 @@ objects:
               - name: registry-certs
                 mountPath: "/etc/parsec/secrets/registry-certs"
                 readOnly: true
+              - name: rhcs-certs
+                mountPath: "/etc/parsec/secrets/rhcs-certs"
+                readOnly: true
               - name: it-ca-bundle
                 mountPath: "/etc/parsec/secrets/it-ca-bundle"
                 readOnly: true
@@ -100,6 +103,10 @@ objects:
               - name: registry-certs
                 secret:
                   secretName: ${REGISTRY_CERTS_SECRET}
+                  optional: true
+              - name: rhcs-certs
+                secret:
+                  secretName: ${RHCS_CERTS_SECRET}
                   optional: true
               - name: it-ca-bundle
                 secret:
@@ -144,6 +151,9 @@ parameters:
   - description: Name of the K8s secret containing registry mTLS client certs
     name: REGISTRY_CERTS_SECRET
     value: registry-certs
+  - description: Name of the K8s secret containing RHCS issued mTLS client certs
+    name: RHCS_CERTS_SECRET
+    value: hcc-parsec-rhcs-cert
   - description: Name of the K8s secret containing the BOP certauth proxy proof secret
     name: BOP_CERTAUTH_SECRET
     value: backoffice-proxy-config
