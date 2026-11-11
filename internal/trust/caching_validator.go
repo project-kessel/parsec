@@ -161,8 +161,9 @@ type distributedCacheLoadedKey struct{}
 
 // sourceValidationError marks a loader error that is the source validator's
 // verdict on the credential (bad signature, expired token), as opposed to a
-// failure of the cache itself. groupcache retries a failed peer load locally,
-// so the error chain from this process's loader always reaches Validate.
+// failure of the cache itself. It adds nothing to the error text. groupcache
+// retries a failed peer load locally, so the error chain from this process's
+// loader always reaches Validate.
 type sourceValidationError struct{ err error }
 
 func (e *sourceValidationError) Error() string { return e.err.Error() }
@@ -228,14 +229,15 @@ func NewDistributedCachingValidator(name string, source Validator, obs Distribut
 			}
 			result, err := source.Validate(ctx, input.Credential)
 			if err != nil {
-				return nil, &sourceValidationError{err: err}
-			}
-			if result == nil {
-				// A validator bug, not a verdict on the credential.
-				return nil, errors.New("validator returned no result")
+				return nil, &sourceValidationError{err: fmt.Errorf("validator failed: %w", err)}
 			}
 			if _, ok := validatorCacheExpiry(clk.Now(), cacheTTL, result); !ok {
-				return nil, &sourceValidationError{err: fmt.Errorf("validator result is already expired: %w", ErrExpiredToken)}
+				expired := fmt.Errorf("validator result is already expired")
+				if result == nil {
+					// A validator bug, not a verdict on the credential.
+					return nil, expired
+				}
+				return nil, &sourceValidationError{err: expired}
 			}
 			return result, nil
 		},
@@ -287,14 +289,15 @@ func (v *DistributedCachingValidator) Validate(ctx context.Context, credential C
 	getCtx := context.WithValue(ctx, distributedCacheLoadedKey{}, &loaded)
 	result, err := v.adapter.Get(getCtx, cacheInput)
 	if err != nil {
-		// The source rejected the credential. The cache did its job (a miss
-		// followed by a load), so this is not a cache failure.
+		// When the source rejected the credential the cache did its job (a
+		// miss followed by a load), so observers see a miss, not a cache
+		// failure. The error returned to the caller is the same either way.
 		var sourceErr *sourceValidationError
 		if errors.As(err, &sourceErr) {
 			p.CacheMiss()
-			return nil, sourceErr.err
+		} else {
+			p.GetFailed(err)
 		}
-		p.GetFailed(err)
 		return nil, fmt.Errorf("groupcache validator get failed: %w", err)
 	}
 

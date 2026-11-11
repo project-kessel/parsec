@@ -896,24 +896,27 @@ func TestDistributedCachingValidator_CacheOutcomesDistinguishHitFromMiss(t *test
 	}
 }
 
-// A credential the source rejects is a cache miss with the source's own
-// error, not a cache failure: reporting GetFailed would make a forged or
-// expired token look like an infrastructure outage.
+// A credential the source rejects is reported to observers as a cache miss,
+// not a cache failure: GetFailed would make a forged or expired token look
+// like an infrastructure outage. The error returned to the caller keeps its
+// existing wrapping and text.
 func TestDistributedCachingValidator_SourceRejectionIsNotACacheFailure(t *testing.T) {
 	tests := []struct {
-		name    string
-		source  *countingCacheableValidator
-		wantErr error
+		name     string
+		source   *countingCacheableValidator
+		wantErr  error
+		wantText string
 	}{
 		{
-			name:    "source rejects the credential",
-			source:  &countingCacheableValidator{err: ErrInvalidToken},
-			wantErr: ErrInvalidToken,
+			name:     "source rejects the credential",
+			source:   &countingCacheableValidator{err: ErrInvalidToken},
+			wantErr:  ErrInvalidToken,
+			wantText: "groupcache validator get failed: cache: fetch failed: validator failed: ",
 		},
 		{
-			name:    "source returns an already expired result",
-			source:  &countingCacheableValidator{expiresAt: time.Now().Add(-time.Hour)},
-			wantErr: ErrExpiredToken,
+			name:     "source returns an already expired result",
+			source:   &countingCacheableValidator{expiresAt: time.Now().Add(-time.Hour)},
+			wantText: "groupcache validator get failed: cache: fetch failed: validator result is already expired",
 		},
 	}
 	for i, tt := range tests {
@@ -926,7 +929,10 @@ func TestDistributedCachingValidator_SourceRejectionIsNotACacheFailure(t *testin
 			})
 
 			_, err := cached.Validate(context.Background(), &BearerCredential{Token: "forged"})
-			if !errors.Is(err, tt.wantErr) {
+			if err == nil || !strings.HasPrefix(err.Error(), tt.wantText) {
+				t.Fatalf("err=%v, want text starting %q", err, tt.wantText)
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err=%v, want %v", err, tt.wantErr)
 			}
 			p := obs.probes[0]
