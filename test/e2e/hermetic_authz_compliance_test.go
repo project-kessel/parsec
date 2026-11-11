@@ -237,11 +237,12 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 				if record["event"] == "parsec_auth_compliance_failure" {
 					complianceEvents++
 					require.Equal(t, "denied", record["outcome"])
-					require.Equal(t, "compliance_denied", record["reason_code"])
+					require.Equal(t, "token_issuance_denied", record["reason_code"])
+					require.Equal(t, "compliance_denied", record["classification"])
 				}
 			}
 			require.Equal(t, 1, complianceEvents, "cache %s: %s", cacheStatus, output.String())
-			require.Equal(t, "compliance_denied", records[0]["reason_code"])
+			require.Equal(t, "token_issuance_denied", records[0]["reason_code"])
 			resource := records[0]["resource"].(map[string]any)
 			layers := resource["cache_layers"].([]any)
 			require.Equal(t, cacheStatus, layers[len(layers)-1].(map[string]any)["status"])
@@ -284,13 +285,23 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 
 	t.Run("gate on + compliance service down → fail-open token issued (AC3)", func(t *testing.T) {
 		client := makeHTTPClient(`{"error":"unavailable"}`, 503)
-		authz, _ := newAuthz(true, client)
+		authz, output := newAuthz(true, client)
 		token := mustSignToken(t, jwksFixture, consoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithBearer(token))
 		if err != nil {
 			t.Fatalf("Check: %v", err)
 		}
 		assertOKResponse(t, resp) // fail-open
+		// The script names its own event; core has no knowledge of it.
+		var failureEvents int
+		for _, record := range auditRecords(t, output.String()) {
+			if record["event"] == "parsec_compliance_failure" {
+				failureEvents++
+				require.Equal(t, "failure", record["outcome"])
+				require.Equal(t, "compliance_failure", record["classification"])
+			}
+		}
+		require.Equal(t, 1, failureEvents, output.String())
 	})
 
 	t.Run("service account: no compliance check (AC1)", func(t *testing.T) {

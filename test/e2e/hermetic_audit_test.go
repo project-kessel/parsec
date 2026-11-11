@@ -224,8 +224,8 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 		{"partial denial", []string{`{"ok": true}`, `accessDenied("denied")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, []any{txn}},
 		{"partial failure", []string{`{"ok": true}`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, []any{txn}},
 		{"denial then failure", []string{`accessDenied("denied")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
-		{"compliance denial then failure", []string{`accessDenied("denied", "compliance_denied")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
-		{"first denial selects terminal reason", []string{`accessDenied("denied")`, `accessDenied("denied", "compliance_denied")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, nil},
+		{"classified denial then failure", []string{`accessDenied("denied", "tenant_policy", "tenant_policy_denial")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
+		{"first denial selects terminal reason", []string{`accessDenied("denied")`, `accessDenied("denied", "tenant_policy", "tenant_policy_denial")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -254,13 +254,14 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 			} else {
 				require.Equal(t, tt.issued, resource["token_types"])
 			}
-			if strings.Contains(strings.Join(tt.scripts, ""), "compliance_denied") {
+			if strings.Contains(strings.Join(tt.scripts, ""), "tenant_policy") {
 				var count int
 				for _, record := range api.output.records(t) {
-					if record["event"] == "parsec_auth_compliance_failure" {
+					if record["event"] == "parsec_tenant_policy_denial" {
 						count++
 						require.Equal(t, "denied", record["outcome"])
-						require.Equal(t, "compliance_denied", record["reason_code"])
+						require.Equal(t, "token_issuance_denied", record["reason_code"])
+						require.Equal(t, "tenant_policy", record["classification"])
 					}
 				}
 				require.Equal(t, 1, count)
@@ -270,7 +271,7 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 }
 
 func TestHermeticAuditExchangeDefaultTypeAndErrors(t *testing.T) {
-	for _, script := range []string{`{"ok": true}`, `accessDenied("denied")`, `accessDenied("denied", "compliance_denied")`, `fail("unavailable")`} {
+	for _, script := range []string{`{"ok": true}`, `accessDenied("denied")`, `accessDenied("denied", "policy_denied")`, `accessDenied("denied", "tenant_policy")`, `fail("unavailable")`} {
 		t.Run(script, func(t *testing.T) {
 			api := newAuditAPI(t, []string{script})
 			resp, err := api.exchange.Exchange(context.Background(), auditExchangeRequest())
@@ -283,7 +284,7 @@ func TestHermeticAuditExchangeDefaultTypeAndErrors(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, string(service.TokenTypeTransactionToken), resp.IssuedTokenType)
 				require.Equal(t, types, resource["token_types"])
-			case `accessDenied("denied")`, `accessDenied("denied", "compliance_denied")`:
+			case `accessDenied("denied")`, `accessDenied("denied", "policy_denied")`, `accessDenied("denied", "tenant_policy")`:
 				require.Equal(t, codes.PermissionDenied, status.Code(err))
 				require.Equal(t, "denied", status.Convert(err).Message())
 				require.Equal(t, "denied", record["outcome"])
@@ -294,8 +295,15 @@ func TestHermeticAuditExchangeDefaultTypeAndErrors(t *testing.T) {
 				require.Equal(t, "access_denied", info.Reason)
 				require.Equal(t, map[string]string{"error_description": "denied"}, info.Metadata,
 					"audit classification must not change the gRPC error details")
-				if strings.Contains(script, "compliance_denied") {
-					require.Equal(t, "compliance_denied", record["reason_code"])
+				switch {
+				case strings.Contains(script, "policy_denied"):
+					require.Equal(t, "policy_denied", record["reason_code"])
+				case strings.Contains(script, "tenant_policy"):
+					// A label outside the core reason codes classifies the
+					// decision's signal; the request keeps a core reason.
+					require.Equal(t, "token_issuance_denied", record["reason_code"])
+					signal := record["signals"].([]any)[0].(map[string]any)
+					require.Equal(t, "tenant_policy", signal["classification"])
 				}
 			default:
 				require.Equal(t, codes.Internal, status.Code(err))

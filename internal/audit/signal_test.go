@@ -28,16 +28,16 @@ func TestReporterFromMissingContextIsNoOp(t *testing.T) {
 }
 
 func TestSignalMetadataValidation(t *testing.T) {
-	base := Signal{Source: SourceValidator, Operation: "cross_account_access", Outcome: OutcomeSuccess}
+	base := Signal{Source: SourceValidator, Operation: "lookup", Outcome: OutcomeSuccess}
 
 	valid := base
-	valid.Metadata = map[string]string{"target_org_id": "org-123", "target_account_number": "acct-456"}
+	valid.Metadata = map[string]string{"key_a": "org-123", "key_b": "acct-456"}
 	require.True(t, Valid(valid))
 
 	collector := NewCollector(nil)
 	collector.Record(valid)
 	require.Len(t, collector.Signals(), 1)
-	require.Equal(t, "org-123", collector.Signals()[0].Metadata["target_org_id"])
+	require.Equal(t, "org-123", collector.Signals()[0].Metadata["key_a"])
 
 	tooMany := base
 	tooMany.Metadata = make(map[string]string)
@@ -47,22 +47,22 @@ func TestSignalMetadataValidation(t *testing.T) {
 	require.False(t, Valid(tooMany))
 
 	badValue := base
-	badValue.Metadata = map[string]string{"target_org_id": " leading-space"}
+	badValue.Metadata = map[string]string{"key_a": " leading-space"}
 	require.False(t, Valid(badValue))
 }
 
 func TestCollectorEnforcesMetadataAllowlist(t *testing.T) {
-	base := Signal{Source: SourceValidator, Operation: "cross_account_access", Outcome: OutcomeSuccess}
+	base := Signal{Source: SourceValidator, Operation: "lookup", Outcome: OutcomeSuccess}
 	allowlist := map[string]bool{
-		"cache_status":            true,
-		"classification":          true,
-		"target_account_number":   true,
-		"target_org_id":           true,
-		"employee_user_id":        true,
-		"employee_account_number": true,
-		"employee_org_id":         true,
-		"dependency_name":         true,
-		"dependency_status":       true,
+		"cache_status":      true,
+		"classification":    true,
+		"key_b":             true,
+		"key_a":             true,
+		"key_c":             true,
+		"key_d":             true,
+		"key_e":             true,
+		"dependency_name":   true,
+		"dependency_status": true,
 	}
 	collector := NewCollector(allowlist)
 
@@ -70,7 +70,7 @@ func TestCollectorEnforcesMetadataAllowlist(t *testing.T) {
 	for _, md := range []map[string]string{
 		{"authorization": "Bearer secret-token"},
 		{"jwt_claims": `{"sub":"user-1"}`},
-		{"password": "secret123", "target_org_id": "org-123"},
+		{"password": "secret123", "key_a": "org-123"},
 	} {
 		c := NewCollector(allowlist)
 		s := base
@@ -89,14 +89,14 @@ func TestCollectorEnforcesMetadataAllowlist(t *testing.T) {
 
 	allowlisted := base
 	allowlisted.Metadata = map[string]string{
-		"cache_status":            "hit",
-		"classification":          "compliance",
-		"target_account_number":   "999999",
-		"target_org_id":           "org-123",
-		"employee_user_id":        "emp-1",
-		"employee_account_number": "111111",
-		"employee_org_id":         "emp-org",
-		"dependency_name":         "rbac",
+		"cache_status":    "hit",
+		"classification":  "tenant",
+		"key_b":           "999999",
+		"key_a":           "org-123",
+		"key_c":           "emp-1",
+		"key_d":           "111111",
+		"key_e":           "emp-org",
+		"dependency_name": "upstream",
 	}
 	collector.Record(allowlisted)
 	require.Len(t, collector.Signals(), 1, "all allowlisted keys should be accepted")
@@ -106,7 +106,7 @@ func TestCollectorAllowAllWhenAllowlistNil(t *testing.T) {
 	collector := NewCollector(nil)
 	signal := Signal{
 		Source:    SourceValidator,
-		Operation: "cross_account_access",
+		Operation: "lookup",
 		Outcome:   OutcomeSuccess,
 		Metadata:  map[string]string{"custom_key": "custom-value"},
 	}
@@ -118,7 +118,7 @@ func TestCollectorStripsAllMetadataWhenAllowlistEmptyNonNil(t *testing.T) {
 	collector := NewCollector(map[string]bool{})
 	signal := Signal{
 		Source:    SourceValidator,
-		Operation: "cross_account_access",
+		Operation: "lookup",
 		Outcome:   OutcomeSuccess,
 		Metadata:  map[string]string{"custom_key": "custom-value"},
 	}
@@ -170,7 +170,7 @@ func TestSanitizeMetadataTruncatesOnRuneBoundary(t *testing.T) {
 }
 
 // TestCollectorRecordSanitizesInsteadOfDropping guards against a regression
-// where attacker-controlled metadata values (e.g. cross-account cookie
+// where attacker-controlled metadata values (e.g. a cookie
 // values surfaced via a Lua data source) exceeding MaxMetadataValueLength,
 // or carrying incidental whitespace, would cause the *entire* audit signal
 // to be silently discarded — losing a security-relevant denial event.
@@ -183,42 +183,42 @@ func TestCollectorRecordSanitizesInsteadOfDropping(t *testing.T) {
 	collector := NewCollector(nil)
 	collector.Record(Signal{
 		Source:     SourceDataSource,
-		Operation:  "cross_account_access",
+		Operation:  "lookup",
 		Outcome:    OutcomeDenied,
 		ReasonCode: "policy_denied",
-		Metadata:   map[string]string{"target_account_number": longValue},
+		Metadata:   map[string]string{"key_b": longValue},
 	})
 
 	signals := collector.Signals()
 	require.Len(t, signals, 1, "oversized metadata value must be truncated, not dropped")
-	require.Len(t, signals[0].Metadata["target_account_number"], MaxMetadataValueLength)
+	require.Len(t, signals[0].Metadata["key_b"], MaxMetadataValueLength)
 
 	collector2 := NewCollector(nil)
 	collector2.Record(Signal{
 		Source:    SourceDataSource,
-		Operation: "cross_account_access",
+		Operation: "lookup",
 		Outcome:   OutcomeDenied,
-		Metadata:  map[string]string{"target_org_id": "  padded-org  "},
+		Metadata:  map[string]string{"key_a": "  padded-org  "},
 	})
 
 	signals2 := collector2.Signals()
 	require.Len(t, signals2, 1, "whitespace-padded metadata value must be trimmed, not dropped")
-	require.Equal(t, "padded-org", signals2[0].Metadata["target_org_id"])
+	require.Equal(t, "padded-org", signals2[0].Metadata["key_a"])
 }
 
 func TestCollectorClonesMetadataToPreventMutation(t *testing.T) {
 	collector := NewCollector(map[string]bool{
-		"target_org_id":         true,
-		"target_account_number": true,
+		"key_a": true,
+		"key_b": true,
 	})
 
 	metadata := map[string]string{
-		"target_org_id":         "org-123",
-		"target_account_number": "acct-456",
+		"key_a": "org-123",
+		"key_b": "acct-456",
 	}
 	signal := Signal{
 		Source:    SourceValidator,
-		Operation: "cross_account_access",
+		Operation: "lookup",
 		Outcome:   OutcomeSuccess,
 		Metadata:  metadata,
 	}
@@ -230,8 +230,8 @@ func TestCollectorClonesMetadataToPreventMutation(t *testing.T) {
 
 	stored := collector.Signals()
 	require.Len(t, stored, 1)
-	require.Equal(t, "org-123", stored[0].Metadata["target_org_id"])
-	require.Equal(t, "acct-456", stored[0].Metadata["target_account_number"])
+	require.Equal(t, "org-123", stored[0].Metadata["key_a"])
+	require.Equal(t, "acct-456", stored[0].Metadata["key_b"])
 
 	_, hasAuth := stored[0].Metadata["authorization"]
 	require.False(t, hasAuth, "stored signal must not contain authorization added after recording")
@@ -297,20 +297,30 @@ func TestCollectorKeepsSignalWithUnknownReasonCode(t *testing.T) {
 	collector := NewCollector(nil)
 
 	require.True(t, collector.Record(Signal{
-		Source: SourceDataSource, Operation: "cross_account_access", Outcome: OutcomeDenied,
-		ReasonCode: "cross_account_denied", Classification: "rbac_denied",
+		Source: SourceDataSource, Operation: "lookup", Outcome: OutcomeDenied,
+		ReasonCode: "deployment_denied", Classification: "tenant_policy",
 	}))
 	require.True(t, collector.Record(Signal{
-		Source: SourceDataSource, Operation: "cross_account_access", Outcome: OutcomeDenied,
-		ReasonCode: "cross_account_denied",
+		Source: SourceDataSource, Operation: "lookup", Outcome: OutcomeDenied,
+		ReasonCode: "deployment_denied",
 	}))
 
 	signals := collector.Signals()
 	require.Len(t, signals, 2)
 	require.Empty(t, signals[0].ReasonCode)
-	require.Equal(t, "rbac_denied", signals[0].Classification, "an existing classification is kept")
+	require.Equal(t, "tenant_policy", signals[0].Classification, "an existing classification is kept")
 	require.Empty(t, signals[1].ReasonCode)
-	require.Equal(t, "cross_account_denied", signals[1].Classification,
+	require.Equal(t, "deployment_denied", signals[1].Classification,
 		"with no classification, the unknown reason is kept there")
 	require.Zero(t, collector.Rejected())
+}
+
+func TestSignalEventIsValidated(t *testing.T) {
+	signal := Signal{Source: SourceDataSource, Operation: "lookup", Outcome: OutcomeFailure, Event: "deployment_lookup_failure"}
+	require.True(t, Valid(signal))
+
+	for _, event := range []string{"bad event", "bad\nevent", strings.Repeat("a", MaxEventLength+1)} {
+		signal.Event = event
+		require.False(t, Valid(signal), "event %q", event)
+	}
 }

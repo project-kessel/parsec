@@ -114,11 +114,13 @@ end
 -- cache wrappers do not store the result (AC7).
 local function fail_open(reason)
   if reason ~= nil and reason ~= "" then
+    -- event asks the audit observer for a dedicated <prefix><reason> event.
     audit.record({
       source = "data_source",
       operation = "export_compliance",
       outcome = "failure",
-      reason_code = reason,
+      classification = reason,
+      event = reason,
     })
   end
   return nil

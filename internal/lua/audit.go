@@ -17,7 +17,7 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
-		validFields := map[string]bool{"source": true, "operation": true, "outcome": true, "reason_code": true, "classification": true, "metadata": true}
+		validFields := map[string]bool{"source": true, "operation": true, "outcome": true, "reason_code": true, "classification": true, "event": true, "metadata": true}
 		unknown := false
 		table.ForEach(func(key, _ gopherlua.LValue) {
 			if key.Type() != gopherlua.LTString || !validFields[key.String()] {
@@ -41,6 +41,7 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			Outcome:        luaString(state.GetField(table, "outcome")),
 			ReasonCode:     luaString(state.GetField(table, "reason_code")),
 			Classification: luaString(state.GetField(table, "classification")),
+			Event:          luaString(state.GetField(table, "event")),
 			Metadata:       metadata,
 		}
 		// The reporter sanitizes, strips disallowed metadata keys and

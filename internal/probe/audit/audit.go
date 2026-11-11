@@ -34,7 +34,7 @@ const (
 )
 
 const (
-	SchemaVersion      = "1.0"
+	SchemaVersion      = "1.1"
 	DefaultEventPrefix = "parsec_"
 )
 
@@ -59,6 +59,15 @@ type Observer struct {
 	metaJSON            json.RawMessage
 	eventPrefix         string
 	allowedMetadataKeys map[string]bool
+	principalClaims     map[string][]string
+	credentialEvents    CredentialEvents
+}
+
+// CredentialEvents names an extra event to emit when a principal presented a
+// given credential type, keyed by the credential type's string value.
+type CredentialEvents struct {
+	Subject map[string]string
+	Actor   map[string]string
 }
 
 // Option configures an audit observer.
@@ -78,6 +87,26 @@ func WithEventPrefix(prefix string) Option {
 func WithAllowedMetadataKeys(keys map[string]bool) Option {
 	return func(observer *Observer) {
 		observer.allowedMetadataKeys = keys
+	}
+}
+
+// WithPrincipalClaims selects the validated claims copied into a principal's
+// attributes. Each attribute name maps to an ordered list of claim paths; the
+// first one holding a non-empty string wins. A path names a top-level claim
+// or, with dots, a claim nested in objects ("organization.id"). By default
+// no claims are copied.
+func WithPrincipalClaims(claims map[string][]string) Option {
+	return func(observer *Observer) {
+		observer.principalClaims = claims
+	}
+}
+
+// WithCredentialEvents emits an extra event, next to the request event, when
+// the subject or actor presented a listed credential type. By default no
+// such events are emitted.
+func WithCredentialEvents(events CredentialEvents) Option {
+	return func(observer *Observer) {
+		observer.credentialEvents = events
 	}
 }
 
@@ -109,15 +138,38 @@ func ValidEventPrefix(prefix string) bool {
 
 func (o *Observer) eventName(suffix string) string { return o.eventPrefix + suffix }
 
+// ReservedEvent reports whether name is an event the observer emits itself
+// with a fixed meaning. Extensions and configuration cannot name their own
+// events after these, so a request or lifecycle record always comes from
+// parsec.
+func ReservedEvent(name string) bool {
+	switch name {
+	case "request", "authorize", "process_status", "key_rotation", "dependency_failure":
+		return true
+	}
+	return false
+}
+
+// signalReporter is the request's Reporter. A signal that names a reserved
+// event keeps its place in the request record but loses the event, in the
+// same way a metadata key outside the allowlist is stripped.
+type signalReporter struct{ collector *auditctx.Collector }
+
+func (r signalReporter) Record(signal auditctx.Signal) bool {
+	if ReservedEvent(signal.Event) {
+		signal.Event = ""
+	}
+	return r.collector.Record(signal)
+}
+
 func (o *Observer) Shutdown(context.Context) error  { return nil }
 func (o *Observer) ConfigureHTTPMux(*http.ServeMux) {}
 
 type principal struct {
-	ID             string `json:"id,omitempty"`
-	TrustDomain    string `json:"trust_domain,omitempty"`
-	OrgID          string `json:"org_id,omitempty"`
-	AccountNumber  string `json:"account_number,omitempty"`
-	CredentialType string `json:"credential_type,omitempty"`
+	ID             string            `json:"id,omitempty"`
+	TrustDomain    string            `json:"trust_domain,omitempty"`
+	CredentialType string            `json:"credential_type,omitempty"`
+	Attributes     map[string]string `json:"attributes,omitempty"`
 }
 
 type requestInfo struct {
@@ -208,7 +260,7 @@ func (o *Observer) TokenExchangeStarted(ctx context.Context, _, _, _, _ string) 
 func (o *Observer) startRequest(ctx context.Context, action string, info requestInfo) (context.Context, *requestProbe) {
 	ctx, state := request.WithAuditState(ctx)
 	collector := auditctx.NewCollector(o.allowedMetadataKeys)
-	ctx = auditctx.WithReporter(ctx, collector)
+	ctx = auditctx.WithReporter(ctx, signalReporter{collector})
 	p := &requestProbe{
 		observer:  o,
 		requestID: safeValue(request.ID(ctx), 128),
@@ -254,13 +306,20 @@ func (p *issuanceProbe) IssuerNotFound(_ service.TokenType, err error) {
 
 func (p *issuanceProbe) TokenTypeIssuanceDenied(_ service.TokenType, denial *service.ExchangeError) {
 	p.request.TokenIssuanceDenied(denial)
-	if denial != nil && ValidReasonCode(denial.Classification) {
+	if denial != nil && (denial.Classification != "" || denial.AuditEvent != "") {
 		// Preserve the individual policy decision even if another token type
-		// later fails and changes the terminal request outcome.
-		p.request.collector.Record(auditctx.Signal{
+		// later fails and changes the terminal request outcome. A label that
+		// is not a core reason code is the deployment's own classification.
+		signal := auditctx.Signal{
 			Source: auditctx.SourcePolicy, Operation: "token_issuance",
 			Outcome: auditctx.OutcomeDenied, ReasonCode: denial.Classification,
-		})
+			Event: denial.AuditEvent,
+		}
+		if !ValidReasonCode(denial.Classification) {
+			signal.ReasonCode = auditctx.ReasonTokenIssuanceDenied
+			signal.Classification = denial.Classification
+		}
+		signalReporter{p.request.collector}.Record(signal)
 	}
 }
 
@@ -286,14 +345,14 @@ func (p *requestProbe) SubjectCredentialExtracted(credential trust.Credential, _
 }
 
 func (p *requestProbe) ActorValidationSucceeded(result *trust.Result) {
-	fillPrincipal(&p.actor, result)
+	p.observer.fillPrincipal(&p.actor, result)
 }
 
 func (p *requestProbe) ActorCredentialExtractionFailed(error) { p.actorExtractionFailed = true }
 func (p *requestProbe) ActorValidationFailed(err error)       { p.actorValidationErr = err }
 
 func (p *requestProbe) SubjectValidationSucceeded(result *trust.Result) {
-	fillPrincipal(&p.subject, result)
+	p.observer.fillPrincipal(&p.subject, result)
 }
 
 func (p *requestProbe) SubjectCredentialExtractionFailed(error) {
@@ -313,7 +372,7 @@ func (p *requestProbe) SubjectTokenValidationFailed(err error) {
 }
 
 func (p *requestProbe) SubjectTokenValidationSucceeded(result *trust.Result) {
-	fillPrincipal(&p.subject, result)
+	p.observer.fillPrincipal(&p.subject, result)
 }
 
 func (p *requestProbe) RequestContextParseFailed(error) {
@@ -477,21 +536,29 @@ func (p *requestProbe) End() {
 	if p.authorize {
 		p.emitRaw("authorize", nil, &env)
 	}
-	if p.subject.CredentialType == string(trust.CredentialTypeMTLS) || p.subject.CredentialType == string(trust.CredentialTypeForwardedClientCert) {
-		p.emitRaw("validate_ssl_cert", nil, &env)
+	credentialEvents := p.observer.credentialEvents
+	subjectEvent := credentialEvents.Subject[p.subject.CredentialType]
+	if subjectEvent != "" {
+		p.emitRaw(subjectEvent, nil, &env)
 	}
-	if p.actor.CredentialType == string(trust.CredentialTypeHeader) {
-		p.emitRaw("verify_psk", nil, &env)
+	if actorEvent := credentialEvents.Actor[p.actor.CredentialType]; actorEvent != "" && actorEvent != subjectEvent {
+		p.emitRaw(actorEvent, nil, &env)
 	}
 
-	// Each signal whose reason maps to an event emits its own event with
-	// its own outcome. Two signals with the same reason emit two events.
+	// Each signal that names an event, or whose reason maps to one, emits
+	// its own event with its own outcome. Two such signals emit two events.
 	signalCoveredSuffix := false
-	finalSuffix := signalEventSuffix(reasonCode)
+	finalSuffix := reasonEventSuffix(reasonCode)
 	for _, signal := range signals {
-		if suffix := signalEventSuffix(signal.ReasonCode); suffix != "" {
-			p.emitRaw(suffix, &signal, &env)
-			if suffix == finalSuffix {
+		// Only a signal's reason can stand in for the request's final
+		// reason event; an event the signal names itself never does.
+		reasonSuffix := reasonEventSuffix(signal.ReasonCode)
+		switch {
+		case signal.Event != "":
+			p.emitRaw(signal.Event, &signal, &env)
+		case reasonSuffix != "":
+			p.emitRaw(reasonSuffix, &signal, &env)
+			if reasonSuffix == finalSuffix {
 				signalCoveredSuffix = true
 			}
 		}
@@ -510,10 +577,11 @@ func (p *requestProbe) End() {
 func (p *requestProbe) emitRaw(suffix string, signal *auditctx.Signal, env *emitEnvelope) {
 	name := p.observer.eventName(suffix)
 	var outcome AuditOutcome
-	var reasonCode string
+	var reasonCode, classification string
 	if signal != nil {
 		outcome = signalOutcomeToAuditOutcome(signal.Outcome)
 		reasonCode = signal.ReasonCode
+		classification = signal.Classification
 	} else {
 		outcome = p.derivedOutcome
 		reasonCode = p.derivedReasonCode
@@ -538,6 +606,9 @@ func (p *requestProbe) emitRaw(suffix string, signal *auditctx.Signal, env *emit
 	}
 	if reason != "" {
 		event = event.Str("reason_code", reason)
+	}
+	if classification != "" {
+		event = event.Str("classification", classification)
 	}
 	event.Msg(name)
 }
@@ -567,19 +638,13 @@ func resourceTypeForAction(action string) string {
 	}
 }
 
-func signalEventSuffix(reason string) string {
-	switch reason {
-	case auditctx.ReasonComplianceDenied:
-		return "auth_compliance_failure"
-	case auditctx.ReasonComplianceFailure:
-		return "compliance_failure"
-	case auditctx.ReasonSupplementalFailure:
-		return "supplemental_user_data_failure"
-	case auditctx.ReasonDependencyFailure:
+// reasonEventSuffix returns the event emitted for a core reason code that
+// has one. Deployment-specific events are named by the signal itself.
+func reasonEventSuffix(reason string) string {
+	if reason == auditctx.ReasonDependencyFailure {
 		return "dependency_failure"
-	default:
-		return ""
 	}
+	return ""
 }
 
 func safeReasonCode(reason string) string {
@@ -901,41 +966,43 @@ func (p *auditKMSProbe) OldKeyDeletionFailed(string, error) {
 }
 func (p *auditKMSProbe) End() {}
 
-func fillPrincipal(dst *principal, result *trust.Result) {
+func (o *Observer) fillPrincipal(dst *principal, result *trust.Result) {
 	if result == nil {
 		return
 	}
 	dst.ID = safeValue(result.Subject, 256)
 	dst.TrustDomain = safeValue(result.TrustDomain, 512)
-	dst.OrgID = orgID(result)
-	dst.AccountNumber = scalarClaim(result, "account_number")
-}
-
-func orgID(result *trust.Result) string {
-	if result == nil || result.Claims == nil {
-		return ""
-	}
-	for _, key := range []string{"org_id", "rh-org-id"} {
-		if value, ok := result.Claims[key].(string); ok {
-			if safe := safeValue(value, 256); safe != "" {
-				return safe
+	dst.Attributes = nil
+	for name, paths := range o.principalClaims {
+		for _, path := range paths {
+			if value := safeValue(stringClaim(result.Claims, path), 256); value != "" {
+				if dst.Attributes == nil {
+					dst.Attributes = make(map[string]string, len(o.principalClaims))
+				}
+				dst.Attributes[name] = value
+				break
 			}
 		}
 	}
-	if organization, ok := result.Claims["organization"].(map[string]any); ok {
-		if value, ok := organization["id"].(string); ok {
-			return safeValue(value, 256)
-		}
-	}
-	return ""
 }
 
-func scalarClaim(result *trust.Result, key string) string {
-	if result == nil || result.Claims == nil {
-		return ""
+// stringClaim returns the string claim at path: a top-level claim of that
+// exact name, or else a claim nested in objects along its dot-separated
+// segments. Anything that is not a string yields "".
+func stringClaim(claims map[string]any, path string) string {
+	if value, ok := claims[path].(string); ok {
+		return value
 	}
-	value, _ := result.Claims[key].(string)
-	return safeValue(value, 256)
+	var current any = claims
+	for _, segment := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = object[segment]
+	}
+	value, _ := current.(string)
+	return value
 }
 
 func safePath(path string) string {

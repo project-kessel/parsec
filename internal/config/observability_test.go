@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/project-kessel/parsec/internal/request"
+	"github.com/project-kessel/parsec/internal/trust"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -552,4 +555,126 @@ func TestEventLogger_InvalidLogFormat_ReturnsError(t *testing.T) {
 	_, err := EventLogger(logCtx, "test", &EventLoggingConfig{LogFormat: "xml"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid log_format")
+}
+
+func TestNewAuditObserverPrincipalClaimsAndCredentialEvents(t *testing.T) {
+	emit := func(t *testing.T, cfg, top *ObservabilityConfig) string {
+		t.Helper()
+		var buf bytes.Buffer
+		p := NewProvider(&Config{TrustDomain: "td.example", Observability: top})
+		obs, err := p.newAuditObserver(cfg, LoggerContext{Logger: zerolog.New(&buf), Writer: &buf})
+		require.NoError(t, err)
+		_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-cfg"))
+		probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("c")}, nil)
+		probe.SubjectValidationSucceeded(&trust.Result{Subject: "s", Claims: map[string]any{"tenant": "t-1"}})
+		probe.PolicyDecisionAllowWithoutIssue("allowed")
+		probe.End()
+		return buf.String()
+	}
+	configured := &ObservabilityConfig{
+		Type:             "audit",
+		PrincipalClaims:  map[string][]string{"tenant_id": {"tenant"}},
+		CredentialEvents: &AuditCredentialEventsConfig{Subject: map[string]string{"mtls": "cert_seen"}},
+	}
+
+	t.Run("from the observer entry", func(t *testing.T) {
+		out := emit(t, configured, nil)
+		assert.Contains(t, out, `"attributes":{"tenant_id":"t-1"}`)
+		assert.Contains(t, out, `"event":"parsec_cert_seen"`)
+	})
+
+	t.Run("from the top level", func(t *testing.T) {
+		out := emit(t, &ObservabilityConfig{Type: "audit"}, configured)
+		assert.Contains(t, out, `"attributes":{"tenant_id":"t-1"}`)
+		assert.Contains(t, out, `"event":"parsec_cert_seen"`)
+	})
+
+	t.Run("none when unset", func(t *testing.T) {
+		out := emit(t, &ObservabilityConfig{Type: "audit"}, nil)
+		assert.NotContains(t, out, "attributes")
+		assert.NotContains(t, out, "cert_seen")
+	})
+}
+
+func TestNewAuditObserverRejectsInvalidPrincipalClaimsAndCredentialEvents(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  ObservabilityConfig
+		want string
+	}{
+		{"bad attribute name", ObservabilityConfig{PrincipalClaims: map[string][]string{"bad name": {"c"}}}, "invalid audit_principal_claims attribute"},
+		{"attribute without claims", ObservabilityConfig{PrincipalClaims: map[string][]string{"tenant": {}}}, "lists no claims"},
+		{"unknown credential type", ObservabilityConfig{CredentialEvents: &AuditCredentialEventsConfig{Actor: map[string]string{"api_key": "x"}}}, "unknown credential type"},
+		{"bad event name", ObservabilityConfig{CredentialEvents: &AuditCredentialEventsConfig{Subject: map[string]string{"mtls": "bad event"}}}, "invalid event name"},
+		{"reserved event name", ObservabilityConfig{CredentialEvents: &AuditCredentialEventsConfig{Subject: map[string]string{"mtls": "request"}}}, "invalid event name"},
+		{"empty event name", ObservabilityConfig{CredentialEvents: &AuditCredentialEventsConfig{Subject: map[string]string{"mtls": ""}}}, "invalid event name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.Type = "audit"
+			p := providerWithObs(t, &tt.cfg)
+			_, err := p.Observer()
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestLoaderReadsAuditPrincipalClaimsAndCredentialEvents(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "parsec.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`
+observability:
+  type: audit
+  audit_principal_claims:
+    org_id: ["org_id", "organization.id"]
+  audit_credential_events:
+    subject:
+      mtls: cert_seen
+    actor:
+      header: key_seen
+`), 0o600))
+	loader, err := NewLoader(configPath)
+	require.NoError(t, err)
+	cfg, err := loader.Get()
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]string{"org_id": {"org_id", "organization.id"}}, cfg.Observability.PrincipalClaims)
+	require.NotNil(t, cfg.Observability.CredentialEvents)
+	assert.Equal(t, map[string]string{"mtls": "cert_seen"}, cfg.Observability.CredentialEvents.Subject)
+	assert.Equal(t, map[string]string{"header": "key_seen"}, cfg.Observability.CredentialEvents.Actor)
+}
+
+// TestShippedConfigKeepsDeploymentAuditOutput checks that the deployment
+// names core no longer knows about are reproduced by configs/parsec.yaml.
+func TestShippedConfigKeepsDeploymentAuditOutput(t *testing.T) {
+	loader, err := NewLoader("../../configs/parsec.yaml")
+	require.NoError(t, err)
+	cfg, err := loader.Get()
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	logCtx := jsonLogCtx(&buf)
+	p := NewProvider(cfg)
+	p.logCtx = &logCtx
+	obs, err := p.Observer()
+	require.NoError(t, err)
+
+	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "shipped-config"))
+	probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("c")}, nil)
+	probe.SubjectValidationSucceeded(&trust.Result{Subject: "s", Claims: map[string]any{
+		"organization": map[string]any{"id": "org-1"}, "account_number": "acct-1",
+	}})
+	probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-key": "k"}}, nil)
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
+	probe.End()
+
+	events := map[string]map[string]any{}
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var record map[string]any
+		if json.Unmarshal([]byte(line), &record) == nil && record["schema_version"] != nil {
+			events[record["event"].(string)] = record
+		}
+	}
+	require.Contains(t, events, "parsec_validate_ssl_cert")
+	require.Contains(t, events, "parsec_verify_psk")
+	subject := events["parsec_request"]["subject"].(map[string]any)
+	assert.Equal(t, map[string]any{"org_id": "org-1", "account_number": "acct-1"}, subject["attributes"])
 }

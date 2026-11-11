@@ -44,7 +44,7 @@ Override specific configuration values via command-line flags (highest precedenc
 # Override observability settings
 ./bin/parsec serve --observability-type=logging --observability-log-level=debug
 
-# Use 3scale-compatible audit event names instead of the default parsec_ prefix
+# Use a deployment-specific audit event prefix instead of the default parsec_
 ./bin/parsec serve --observability-type=audit --observability-event-prefix=insights_
 
 # Override trust store type
@@ -81,6 +81,10 @@ through its internal gateway hop. Missing or invalid IDs receive a local UUID.
 Parsec stores the ID in context for observability; it does not add or rewrite
 request-ID headers on authorization responses, client responses, or dependency
 requests. There is no `request_id_headers` configuration setting.
+
+Audit principal attributes (`observability.audit_principal_claims`) and
+per-credential events (`observability.audit_credential_events`) are off unless
+configured; see `docs/audit-events-verification.md` for the format.
 
 Audit `resource.requested_token_types` contains the effective issuance request,
 including defaults. `resource.token_types` contains successfully minted types.

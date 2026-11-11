@@ -933,8 +933,30 @@ func TestCELMapper_LayerA(t *testing.T) {
 	}
 }
 
+func TestCELMapperAccessDeniedAuditEvent(t *testing.T) {
+	m, err := NewCELMapper(`accessDenied("policy denied", "tenant_policy", "tenant_policy_denial")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.Map(context.Background(), &service.MapperInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision.Classification != "tenant_policy" || result.Decision.AuditEvent != "tenant_policy_denial" {
+		t.Errorf("Classification=%q AuditEvent=%q", result.Decision.Classification, result.Decision.AuditEvent)
+	}
+
+	m, err = NewCELMapper(`accessDenied("policy denied", "tenant_policy", "bad event")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Map(context.Background(), &service.MapperInput{}); err == nil {
+		t.Fatal("invalid event accepted")
+	}
+}
+
 func TestCELMapperClassifiedAccessDenied(t *testing.T) {
-	for _, classification := range []string{"compliance_denied", "tenant.policy-1", "", "bad label", "bad\nlabel", "é", strings.Repeat("a", 129)} {
+	for _, classification := range []string{"policy_denied", "tenant.policy-1", "", "bad label", "bad\nlabel", "é", strings.Repeat("a", 129)} {
 		t.Run(classification, func(t *testing.T) {
 			encoded, err := json.Marshal(classification)
 			if err != nil {
@@ -945,7 +967,7 @@ func TestCELMapperClassifiedAccessDenied(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := m.Map(context.Background(), &service.MapperInput{})
-			if classification != "compliance_denied" && classification != "tenant.policy-1" {
+			if classification != "policy_denied" && classification != "tenant.policy-1" {
 				if err == nil {
 					t.Fatal("invalid classification accepted")
 				}

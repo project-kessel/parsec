@@ -52,6 +52,18 @@ observability:
     - "employee_account_number"
     - "employee_org_id"
     - "dependency_status"
+  # Validated claims copied into subject.attributes / actor.attributes.
+  # The first claim holding a non-empty string wins; dots reach nested claims.
+  audit_principal_claims:
+    org_id: ["org_id", "rh-org-id", "organization.id"]
+    account_number: ["account_number"]
+  # Extra events emitted when a principal presented a credential type.
+  audit_credential_events:
+    subject:
+      mtls: validate_ssl_cert
+      forwarded_client_cert: validate_ssl_cert
+    actor:
+      header: verify_psk
   observers:
     - type: audit
     - type: logging

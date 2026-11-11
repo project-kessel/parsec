@@ -491,6 +491,13 @@ type FixtureResponse struct {
 	Body string `koanf:"body"`
 }
 
+// AuditCredentialEventsConfig maps a credential type (for example "mtls" or
+// "header") to the audit event suffix emitted when that principal presented it.
+type AuditCredentialEventsConfig struct {
+	Subject map[string]string `koanf:"subject"`
+	Actor   map[string]string `koanf:"actor"`
+}
+
 // ObservabilityConfig configures application observability
 type ObservabilityConfig struct {
 	// Type selects the observer implementation
@@ -517,6 +524,16 @@ type ObservabilityConfig struct {
 	// that are not listed are stripped and the signal is kept (prevents
 	// secrets leakage).
 	AllowedMetadataKeys []string `koanf:"audit_metadata_keys" usage:"optional allowlist of audit.record() metadata keys"`
+
+	// PrincipalClaims selects the validated claims the audit observer copies
+	// into subject.attributes and actor.attributes: attribute name -> ordered
+	// claim paths (dots reach nested claims); the first non-empty string wins.
+	// When unset, no claims are copied.
+	PrincipalClaims map[string][]string `koanf:"audit_principal_claims"`
+
+	// CredentialEvents names extra audit events emitted when the subject or
+	// actor presented a given credential type. When unset, none are emitted.
+	CredentialEvents *AuditCredentialEventsConfig `koanf:"audit_credential_events"`
 
 	// Event-specific logging configuration
 	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`

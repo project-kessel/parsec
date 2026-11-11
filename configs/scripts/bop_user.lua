@@ -22,7 +22,8 @@
 --   bop_env     (optional) x-rh-insights-env value, defaults to "stage"
 
 -- audit_bop_failure emits a structured audit signal for a BOP enrichment
--- failure. classification distinguishes the failure cause (e.g. "missing_config",
+-- failure, and asks the audit observer for a dedicated
+-- <prefix>supplemental_user_data_failure event. classification distinguishes the failure cause (e.g. "missing_config",
 -- "http_error", "decode_error"); dependency_status carries the HTTP status
 -- when available.
 local function audit_bop_failure(classification, dependency_status)
@@ -30,7 +31,7 @@ local function audit_bop_failure(classification, dependency_status)
     source = "data_source",
     operation = "user_enrichment",
     outcome = "failure",
-    reason_code = "supplemental_user_data_failure",
+    event = "supplemental_user_data_failure",
   }
   if classification ~= nil and classification ~= "" then
     record.classification = classification

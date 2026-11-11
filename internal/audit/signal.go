@@ -13,6 +13,7 @@ type contextKey struct{}
 const (
 	MaxOperationLength      = 128
 	MaxClassificationLength = 128
+	MaxEventLength          = 128
 	MaxMetadataKeys         = 8
 	MaxMetadataValueLength  = 256
 
@@ -27,8 +28,9 @@ const (
 )
 
 // Reason codes are the closed set of values an audit record or signal may
-// carry in reason_code. Deployment-specific detail belongs in a signal's
-// classification, not in a new reason code.
+// carry in reason_code. They describe what parsec itself can observe.
+// Deployment-specific detail belongs in a signal's classification, and a
+// deployment-specific event name in its event, not in a new reason code.
 const (
 	ReasonCredentialMissing    = "credential_missing"
 	ReasonCredentialMalformed  = "credential_malformed"
@@ -37,9 +39,6 @@ const (
 	ReasonInvalidRequest       = "invalid_request"
 	ReasonGrantTypeUnsupported = "grant_type_unsupported"
 	ReasonPolicyDenied         = "policy_denied"
-	ReasonComplianceDenied     = "compliance_denied"
-	ReasonComplianceFailure    = "compliance_failure"
-	ReasonSupplementalFailure  = "supplemental_user_data_failure"
 	ReasonDependencyFailure    = "dependency_failure"
 	ReasonInternalError        = "internal_error"
 	ReasonTokenIssuanceFailed  = "token_issuance_failed"
@@ -54,9 +53,6 @@ var reasonCodes = map[string]bool{
 	ReasonInvalidRequest:       true,
 	ReasonGrantTypeUnsupported: true,
 	ReasonPolicyDenied:         true,
-	ReasonComplianceDenied:     true,
-	ReasonComplianceFailure:    true,
-	ReasonSupplementalFailure:  true,
 	ReasonDependencyFailure:    true,
 	ReasonInternalError:        true,
 	ReasonTokenIssuanceFailed:  true,
@@ -65,12 +61,16 @@ var reasonCodes = map[string]bool{
 
 // Signal is bounded, deployment-neutral audit metadata emitted by an extension.
 type Signal struct {
-	Source         string            `json:"source"`
-	Operation      string            `json:"operation"`
-	Outcome        string            `json:"outcome"`
-	ReasonCode     string            `json:"reason_code,omitempty"`
-	Classification string            `json:"classification,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	Source         string `json:"source"`
+	Operation      string `json:"operation"`
+	Outcome        string `json:"outcome"`
+	ReasonCode     string `json:"reason_code,omitempty"`
+	Classification string `json:"classification,omitempty"`
+	// Event, when set, asks the audit observer to emit this signal as its
+	// own event under that name (after the observer's event prefix), in
+	// addition to listing it in the request record.
+	Event    string            `json:"event,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // Reporter accepts validated audit signals for the current request.
@@ -237,7 +237,8 @@ func Valid(signal Signal) bool {
 	if !validEnum(signal.Source, SourceValidator, SourceDataSource, SourceMapper, SourcePolicy) ||
 		!validEnum(signal.Outcome, OutcomeSuccess, OutcomeDenied, OutcomeFailure) ||
 		!validText(signal.Operation, MaxOperationLength) ||
-		(signal.Classification != "" && !validText(signal.Classification, MaxClassificationLength)) {
+		(signal.Classification != "" && !validText(signal.Classification, MaxClassificationLength)) ||
+		(signal.Event != "" && !validText(signal.Event, MaxEventLength)) {
 		return false
 	}
 	if signal.ReasonCode != "" && !ValidReasonCode(signal.ReasonCode) {
@@ -252,7 +253,7 @@ func Valid(signal Signal) bool {
 // influenced input surfaced by Lua/CEL scripts (request cookies, headers,
 // claims); without sanitization, a single oversized or padded value would
 // cause validMetadata to reject the *entire* signal, silently dropping a
-// security-relevant audit event (e.g. a cross-account access denial).
+// security-relevant audit event.
 // Truncating/trimming here preserves the event with a bounded value instead.
 // Keys are left unmodified: callers are expected to use fixed,
 // script-defined key names, not attacker-controlled strings.

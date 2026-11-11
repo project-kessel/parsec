@@ -32,13 +32,13 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	ctx := request.WithID(context.Background(), "request-123")
 	ctx, probe := obs.AuthzCheckStarted(ctx)
 
-	// Simulate Lua validator emitting a cross-account signal (previously detected by Go cookie parsing).
+	// Simulate a Lua validator emitting a signal.
 	auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 		Source:    auditctx.SourceValidator,
-		Operation: "cross_account_access",
+		Operation: "lookup",
 		Outcome:   auditctx.OutcomeSuccess,
 		Metadata: map[string]string{
-			"target_org_id": "target-org",
+			"key_a": "target-org",
 		},
 	})
 
@@ -47,7 +47,7 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 		Path:   "/api/widgets?access_token=secret-query",
 		Headers: map[string]string{
 			"authorization": "Bearer secret-token",
-			"cookie":        "cross_access_org_id=target-org; session=secret-cookie",
+			"cookie":        "session_hint=target-org; session=secret-cookie",
 		},
 	})
 	probe.SubjectCredentialExtracted(&trust.BearerCredential{Token: "secret-token"}, []string{"authorization"})
@@ -65,7 +65,7 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	records := decodeRecords(t, output.Bytes())
 	require.Len(t, records, 2)
 	require.Equal(t, "parsec_request", records[0]["event"])
-	require.Equal(t, "1.0", records[0]["schema_version"])
+	require.Equal(t, SchemaVersion, records[0]["schema_version"])
 	require.Equal(t, "request-123", records[0]["request_id"])
 	require.Equal(t, "success", records[0]["outcome"])
 	require.Equal(t, "info", records[0]["level"])
@@ -74,13 +74,12 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	require.Equal(t, "authorization_request", resource["type"],
 		"ext_authz must emit resource type 'authorization_request'")
 
-	// Cross-account access is recorded as a signal inside the request record,
-	// not as a separate event.
+	// A signal without an event is recorded inside the request record only.
 	signals, hasSignals := records[0]["signals"].([]any)
 	require.True(t, hasSignals, "request record must include signals")
 	require.Len(t, signals, 1)
 	sig := signals[0].(map[string]any)
-	require.Equal(t, "cross_account_access", sig["operation"])
+	require.Equal(t, "lookup", sig["operation"])
 
 	serialized := output.String()
 	require.NotContains(t, serialized, "secret-token")
@@ -130,7 +129,8 @@ func TestAuditReporterPropagatesSignalsIntoRequestRecord(t *testing.T) {
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "signal-1"))
 	auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 		Source: auditctx.SourceDataSource, Operation: "user_enrichment",
-		Outcome: auditctx.OutcomeFailure, ReasonCode: auditctx.ReasonSupplementalFailure,
+		Outcome: auditctx.OutcomeFailure, Classification: "http_error",
+		Event: "deployment_enrichment_failure",
 	})
 	probe.PolicyEvaluationFailed(errors.New("data source failed"))
 	probe.End()
@@ -142,36 +142,39 @@ func TestAuditReporterPropagatesSignalsIntoRequestRecord(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, signals, 1)
 	require.Equal(t, "user_enrichment", signals[0].(map[string]any)["operation"])
-	require.Equal(t, "parsec_supplemental_user_data_failure", records[2]["event"])
+	require.Equal(t, "parsec_deployment_enrichment_failure", records[2]["event"])
+	require.Equal(t, "failure", records[2]["outcome"])
+	require.Equal(t, "http_error", records[2]["classification"])
+	require.NotContains(t, records[2], "reason_code")
 }
 
-func TestCrossAccountDeniedSignalAppearsInRequestRecordOnly(t *testing.T) {
+func TestSignalWithoutEventAppearsInRequestRecordOnly(t *testing.T) {
 	var output bytes.Buffer
 	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
-	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "cross-account-1"))
+	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "signal-only-1"))
 	auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 		Source:     auditctx.SourceValidator,
-		Operation:  "cross_account_access",
+		Operation:  "lookup",
 		Outcome:    auditctx.OutcomeDenied,
-		ReasonCode: auditctx.ReasonPolicyDenied, Classification: "rbac_denied",
+		ReasonCode: auditctx.ReasonPolicyDenied, Classification: "tenant_policy",
 	})
 	probe.PolicyDecisionDeny("policy denied")
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
 	for _, record := range records {
-		require.NotEqual(t, "parsec_rbac_cross_access_audit", record["event"],
-			"cross_account_access must not produce a separate rbac_cross_access_audit event")
+		require.NotEqual(t, "parsec_lookup_audit", record["event"],
+			"a signal without an event must not produce a separate lookup_audit event")
 	}
 	signals := records[0]["signals"].([]any)
 	sig := signals[0].(map[string]any)
-	require.Equal(t, "cross_account_access", sig["operation"])
+	require.Equal(t, "lookup", sig["operation"])
 	require.Equal(t, "policy_denied", sig["reason_code"])
-	require.Equal(t, "rbac_denied", sig["classification"])
+	require.Equal(t, "tenant_policy", sig["classification"])
 }
 
 func TestValidReasonCodeAcceptsKnownReasonsOnly(t *testing.T) {
-	require.False(t, ValidReasonCode("cross_account_denied"),
+	require.False(t, ValidReasonCode("deployment_denied"),
 		"deployment-specific reasons belong in a signal classification")
 	require.True(t, ValidReasonCode(auditctx.ReasonDependencyFailure))
 	require.False(t, ValidReasonCode("not_a_real_reason"))
@@ -184,7 +187,7 @@ func TestAuditEventPrefixCanBeCustomizedOrRemoved(t *testing.T) {
 		prefix string
 		want   string
 	}{
-		{name: "3scale compatibility", prefix: "parsec_", want: "parsec_request"},
+		{name: "default prefix", prefix: "parsec_", want: "parsec_request"},
 		{name: "no prefix", prefix: "", want: "request"},
 	}
 	for _, tt := range tests {
@@ -259,15 +262,15 @@ func TestAuditEmitsProcessReadyAndShutdown(t *testing.T) {
 	require.Equal(t, "process_stop", records[1]["action"])
 }
 
-func TestAuditEmitsEveryThreeScaleFailureName(t *testing.T) {
+func TestAuditEmitsSignalEvents(t *testing.T) {
 	tests := []struct {
 		reason string
+		event  string
 		name   string
 	}{
-		{auditctx.ReasonComplianceDenied, "parsec_auth_compliance_failure"},
-		{auditctx.ReasonComplianceFailure, "parsec_compliance_failure"},
-		{auditctx.ReasonSupplementalFailure, "parsec_supplemental_user_data_failure"},
-		{auditctx.ReasonDependencyFailure, "parsec_dependency_failure"},
+		{"", "deployment_check_failure", "parsec_deployment_check_failure"},
+		{auditctx.ReasonDependencyFailure, "deployment_check_failure", "parsec_deployment_check_failure"},
+		{auditctx.ReasonDependencyFailure, "", "parsec_dependency_failure"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -279,6 +282,7 @@ func TestAuditEmitsEveryThreeScaleFailureName(t *testing.T) {
 				Operation:  "test",
 				Outcome:    auditctx.OutcomeFailure,
 				ReasonCode: tt.reason,
+				Event:      tt.event,
 			})
 			probe.PolicyEvaluationFailed(errors.New("evaluation failed"))
 			probe.End()
@@ -292,12 +296,15 @@ func TestAuditEmitsEveryThreeScaleFailureName(t *testing.T) {
 	}
 }
 
-func TestAuditEmitsCertificateAndInternalAuthenticationNames(t *testing.T) {
+func TestAuditEmitsConfiguredCredentialEvents(t *testing.T) {
 	var output bytes.Buffer
-	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"}, WithCredentialEvents(CredentialEvents{
+		Subject: map[string]string{"mtls": "cert_presented"},
+		Actor:   map[string]string{"header": "shared_key_presented"},
+	}))
 	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-auth"))
 	probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("secret-certificate")}, nil)
-	probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-psk": "secret-psk"}}, nil)
+	probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-shared-key": "secret-shared-key"}}, nil)
 	probe.PolicyDecisionAllowWithoutIssue("allowed")
 	probe.End()
 
@@ -305,10 +312,10 @@ func TestAuditEmitsCertificateAndInternalAuthenticationNames(t *testing.T) {
 	for _, record := range decodeRecords(t, output.Bytes()) {
 		names[record["event"].(string)] = true
 	}
-	require.True(t, names["parsec_validate_ssl_cert"])
-	require.True(t, names["parsec_verify_psk"])
+	require.True(t, names["parsec_cert_presented"])
+	require.True(t, names["parsec_shared_key_presented"])
 	require.NotContains(t, output.String(), "secret-certificate")
-	require.NotContains(t, output.String(), "secret-psk")
+	require.NotContains(t, output.String(), "secret-shared-key")
 }
 
 func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
@@ -321,7 +328,7 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	// The data source fails inside the mapper, so the failure surfaces through
 	// the issuance path, as it does in a real request.
 	issueCtx, issuance := obs.TokenIssuanceStarted(ctx, nil, nil, "", []service.TokenType{service.TokenTypeTransactionToken})
-	_, dataProbe := obs.LuaFetchStarted(issueCtx, "backoffice-proxy")
+	_, dataProbe := obs.LuaFetchStarted(issueCtx, "upstream-proxy")
 	dataProbe.ScriptExecutionFailed(errors.New("secret dependency response"))
 	issuance.TokenTypeIssuanceFailed(service.TokenTypeTransactionToken, errors.New("mapper failed"))
 	probe.End()
@@ -336,7 +343,7 @@ func TestAuditCorrelatesNestedCacheAndDependencyProbes(t *testing.T) {
 	require.Equal(t, "validator_memory", layer0["layer"])
 	require.Equal(t, "hit", layer0["status"])
 
-	require.Equal(t, "backoffice-proxy", resource["failed_component"],
+	require.Equal(t, "upstream-proxy", resource["failed_component"],
 		"failed_component must identify the datasource that failed")
 
 	names := map[string]bool{}
@@ -360,7 +367,7 @@ func TestCacheLayersEmittedPerComponent(t *testing.T) {
 	_, distProbe := obs.DistributedValidateStarted(ctx, "jwt-validator")
 	distProbe.ResultExpired()
 
-	_, dsProbe := obs.CacheFetchStarted(ctx, "backoffice")
+	_, dsProbe := obs.CacheFetchStarted(ctx, "upstream")
 	dsProbe.CacheHit()
 
 	probe.PolicyDecisionAllowWithoutIssue("allowed")
@@ -381,7 +388,7 @@ func TestCacheLayersEmittedPerComponent(t *testing.T) {
 	require.Equal(t, "expired", layer1["status"])
 
 	layer2 := layers[2].(map[string]any)
-	require.Equal(t, "datasource:backoffice", layer2["layer"])
+	require.Equal(t, "datasource:upstream", layer2["layer"])
 	require.Equal(t, "hit", layer2["status"])
 }
 
@@ -674,20 +681,20 @@ func BenchmarkRequestProbeEnd(b *testing.B) {
 		ctx, probe := obs.AuthzCheckStarted(ctx)
 		auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 			Source:    auditctx.SourceDataSource,
-			Operation: "cross_account_access",
+			Operation: "lookup",
 			Outcome:   auditctx.OutcomeSuccess,
-			Metadata:  map[string]string{"target_org_id": "org-1"},
+			Metadata:  map[string]string{"key_a": "org-1"},
 		})
 
 		_, memProbe := obs.InMemoryValidateStarted(ctx, "validator")
 		memProbe.CacheMiss()
 		_, distProbe := obs.DistributedValidateStarted(ctx, "validator")
 		distProbe.CacheHit()
-		_, dsProbe := obs.CacheFetchStarted(ctx, "backoffice")
+		_, dsProbe := obs.CacheFetchStarted(ctx, "upstream")
 		dsProbe.CacheHit()
 
 		probe.SubjectCredentialExtracted(&trust.MTLSCredential{}, nil)
-		probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-psk": "test"}}, nil)
+		probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-shared-key": "test"}}, nil)
 		probe.PolicyDecisionIssue(1, "", "")
 		probe.End()
 	}
@@ -777,30 +784,31 @@ func stringOrEmpty(v any) string {
 }
 
 func TestEndOverlapRule(t *testing.T) {
-	t.Run("final_reason_compliance_denied_plus_signal_same_reason_gives_signal_event_only", func(t *testing.T) {
+	t.Run("final_reason_plus_signal_same_reason_gives_signal_event_only", func(t *testing.T) {
 		var output bytes.Buffer
 		obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 		ctx := request.WithID(context.Background(), "overlap-1")
 		ctx, probe := obs.AuthzCheckStarted(ctx)
 		auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 			Source:     auditctx.SourceDataSource,
-			Operation:  "compliance_check",
-			Outcome:    auditctx.OutcomeDenied,
-			ReasonCode: auditctx.ReasonComplianceDenied,
+			Operation:  "lookup",
+			Outcome:    auditctx.OutcomeFailure,
+			ReasonCode: auditctx.ReasonDependencyFailure,
 		})
-		probe.PolicyDecisionDeny("compliance_denied")
+		request.AuditStateFrom(ctx).SetFailureReason(auditctx.ReasonDependencyFailure)
+		probe.PolicyEvaluationFailed(errors.New("lookup failed"))
 		probe.End()
 
 		records := decodeRecords(t, output.Bytes())
 		names := eventNames(records)
-		complianceCount := 0
+		eventCount := 0
 		for _, name := range names {
-			if name == "parsec_auth_compliance_failure" {
-				complianceCount++
+			if name == "parsec_dependency_failure" {
+				eventCount++
 			}
 		}
-		require.Equal(t, 1, complianceCount,
-			"overlap rule: signal covers the reason, so only 1 auth_compliance_failure event")
+		require.Equal(t, 1, eventCount,
+			"overlap rule: signal covers the reason, so only 1 dependency_failure event")
 	})
 
 	t.Run("two_signals_same_reason_different_outcomes_gives_2_signal_events", func(t *testing.T) {
@@ -810,27 +818,28 @@ func TestEndOverlapRule(t *testing.T) {
 		ctx, probe := obs.AuthzCheckStarted(ctx)
 		auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 			Source:     auditctx.SourceDataSource,
-			Operation:  "compliance_check_a",
+			Operation:  "lookup_a",
 			Outcome:    auditctx.OutcomeDenied,
-			ReasonCode: auditctx.ReasonComplianceDenied,
+			ReasonCode: auditctx.ReasonDependencyFailure,
 		})
 		auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
 			Source:     auditctx.SourceDataSource,
-			Operation:  "compliance_check_b",
+			Operation:  "lookup_b",
 			Outcome:    auditctx.OutcomeFailure,
-			ReasonCode: auditctx.ReasonComplianceDenied,
+			ReasonCode: auditctx.ReasonDependencyFailure,
 		})
-		probe.PolicyDecisionDeny("compliance_denied")
+		request.AuditStateFrom(ctx).SetFailureReason(auditctx.ReasonDependencyFailure)
+		probe.PolicyEvaluationFailed(errors.New("lookup failed"))
 		probe.End()
 
 		records := decodeRecords(t, output.Bytes())
-		complianceCount := 0
+		eventCount := 0
 		for _, r := range records {
-			if r["event"] == "parsec_auth_compliance_failure" {
-				complianceCount++
+			if r["event"] == "parsec_dependency_failure" {
+				eventCount++
 			}
 		}
-		require.Equal(t, 2, complianceCount,
+		require.Equal(t, 2, eventCount,
 			"two signals with the same reason but different outcomes give two events")
 	})
 }
@@ -936,4 +945,130 @@ func TestLuaValidatorFaultIsADependencyFailure(t *testing.T) {
 		require.Equal(t, auditctx.ReasonCredentialInvalid, record["reason_code"])
 		require.NotContains(t, record["resource"].(map[string]any), "failed_component")
 	})
+}
+
+func TestAuditCredentialEventsDefaultToNone(t *testing.T) {
+	var output bytes.Buffer
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-auth"))
+	probe.SubjectCredentialExtracted(&trust.MTLSCredential{Certificate: []byte("cert")}, nil)
+	probe.ActorCredentialExtracted(&trust.HeaderCredential{Headers: map[string]string{"x-key": "k"}}, nil)
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
+	probe.End()
+
+	require.Equal(t, []string{"parsec_request", "parsec_authorize"}, eventNames(decodeRecords(t, output.Bytes())))
+}
+
+func TestAuditCredentialEventEmittedOnceWhenSubjectAndActorShareIt(t *testing.T) {
+	var output bytes.Buffer
+	events := map[string]string{"bearer": "token_presented"}
+	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"},
+		WithCredentialEvents(CredentialEvents{Subject: events, Actor: events}))
+	_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "request-auth"))
+	probe.SubjectCredentialExtracted(&trust.BearerCredential{Token: "a"}, nil)
+	probe.ActorCredentialExtracted(&trust.BearerCredential{Token: "b"}, nil)
+	probe.PolicyDecisionAllowWithoutIssue("allowed")
+	probe.End()
+
+	require.Equal(t, []string{"parsec_request", "parsec_authorize", "parsec_token_presented"}, eventNames(decodeRecords(t, output.Bytes())))
+}
+
+func TestAuditPrincipalAttributesFromConfiguredClaims(t *testing.T) {
+	result := &trust.Result{
+		Subject: "user-1",
+		Claims: map[string]any{
+			"tenant_alias": "  ",
+			"tenant":       map[string]any{"id": "tenant-nested"},
+			"account":      "acct-1",
+			"bad":          "line\nbreak",
+			"number":       42,
+			"secret":       "do-not-copy",
+		},
+	}
+	emit := func(t *testing.T, options ...Option) map[string]any {
+		t.Helper()
+		var output bytes.Buffer
+		obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"}, options...)
+		_, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "attrs"))
+		probe.SubjectValidationSucceeded(result)
+		probe.PolicyDecisionAllowWithoutIssue("allowed")
+		probe.End()
+		require.NotContains(t, output.String(), "do-not-copy")
+		return decodeRecords(t, output.Bytes())[0]["subject"].(map[string]any)
+	}
+
+	t.Run("none by default", func(t *testing.T) {
+		require.NotContains(t, emit(t), "attributes")
+	})
+
+	t.Run("first non-empty claim wins and dots reach nested claims", func(t *testing.T) {
+		subject := emit(t, WithPrincipalClaims(map[string][]string{
+			"tenant":  {"tenant_alias", "missing", "tenant.id"},
+			"account": {"account"},
+			"bad":     {"bad"},
+			"number":  {"number"},
+		}))
+		require.Equal(t, map[string]any{"tenant": "tenant-nested", "account": "acct-1"}, subject["attributes"],
+			"blank, control-character and non-string claims are skipped")
+	})
+
+	t.Run("a top-level claim whose name contains a dot is matched first", func(t *testing.T) {
+		result.Claims["tenant.id"] = "tenant-flat"
+		defer delete(result.Claims, "tenant.id")
+		subject := emit(t, WithPrincipalClaims(map[string][]string{"tenant": {"tenant.id"}}))
+		require.Equal(t, map[string]any{"tenant": "tenant-flat"}, subject["attributes"])
+	})
+}
+
+func TestSignalCannotNameReservedEvent(t *testing.T) {
+	for _, event := range []string{"request", "authorize", "process_status", "key_rotation", "dependency_failure"} {
+		t.Run(event, func(t *testing.T) {
+			var output bytes.Buffer
+			obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+			ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "reserved"))
+			require.True(t, auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+				Source: auditctx.SourceDataSource, Operation: "lookup",
+				Outcome: auditctx.OutcomeSuccess, Event: event,
+			}), "the signal itself is kept")
+			probe.PolicyDecisionDeny("no")
+			probe.End()
+
+			records := decodeRecords(t, output.Bytes())
+			require.Equal(t, []string{"parsec_request", "parsec_authorize"}, eventNames(records))
+			for _, record := range records {
+				require.Equal(t, "denied", record["outcome"])
+			}
+			signal := records[0]["signals"].([]any)[0].(map[string]any)
+			require.NotContains(t, signal, "event")
+		})
+	}
+}
+
+// A signal that names its own event must not stand in for the request's
+// final dependency_failure event, whatever it calls that event.
+func TestNamedSignalEventDoesNotSuppressFinalReasonEvent(t *testing.T) {
+	for _, event := range []string{"dependency_failure", "deployment_check"} {
+		t.Run(event, func(t *testing.T) {
+			var output bytes.Buffer
+			obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+			ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "no-suppress"))
+			auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+				Source: auditctx.SourceDataSource, Operation: "lookup",
+				Outcome: auditctx.OutcomeDenied, ReasonCode: auditctx.ReasonPolicyDenied, Event: event,
+			})
+			request.AuditStateFrom(ctx).SetFailureReason(auditctx.ReasonDependencyFailure)
+			probe.PolicyEvaluationFailed(errors.New("lookup failed"))
+			probe.End()
+
+			var failures []map[string]any
+			for _, record := range decodeRecords(t, output.Bytes()) {
+				if record["event"] == "parsec_dependency_failure" {
+					failures = append(failures, record)
+				}
+			}
+			require.Len(t, failures, 1)
+			require.Equal(t, "failure", failures[0]["outcome"])
+			require.Equal(t, "dependency_failure", failures[0]["reason_code"])
+		})
+	}
 }

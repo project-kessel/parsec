@@ -22,8 +22,7 @@ const (
 	OAuthInvalidScope         OAuthErrorCode = "invalid_scope"
 	// OAuthAccessDenied is used for policy-level denials (RFC 6749 §4.1.2.1:
 	// "the resource owner or authorization server denied the request"). Maps to
-	// HTTP 403 in ext_authz — appropriate for export compliance and similar
-	// access-control policies that are not protocol errors.
+	// HTTP 403 in ext_authz — appropriate for access-control policies that are not protocol errors.
 	OAuthAccessDenied OAuthErrorCode = "access_denied"
 )
 
@@ -180,6 +179,9 @@ type ExchangeError struct {
 	// Classification describes the deployment policy decision for observers.
 	// It is not part of the OAuth/gRPC response.
 	Classification string `json:"-"`
+	// AuditEvent optionally names a dedicated audit event for this decision.
+	// It is not part of the OAuth/gRPC response.
+	AuditEvent string `json:"-"`
 }
 
 func (e *ExchangeError) Error() string {
