@@ -569,7 +569,6 @@ func TestDeriveCompletion_ExchangeErrorPaths(t *testing.T) {
 			name: "policy denied produces auditctx.ReasonPolicyDenied",
 			setup: func(p *requestProbe) {
 				p.policyDenied = true
-				p.policyDenyReason = "denied by policy"
 			},
 			wantOutcome: AuditOutcomeDenied,
 			wantReason:  auditctx.ReasonPolicyDenied,

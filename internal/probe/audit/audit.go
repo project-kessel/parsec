@@ -41,7 +41,6 @@ const (
 // Metadata is safe service metadata included in every audit record.
 type Metadata struct {
 	ServiceName string `json:"name"`
-	Environment string `json:"environment,omitempty"`
 	TrustDomain string `json:"trust_domain,omitempty"`
 }
 
@@ -173,7 +172,6 @@ type requestProbe struct {
 	actorExtractionFailed     bool
 	actorValidationErr        error
 	policyDenied              bool
-	policyDenyReason          string
 	policyEvalErr             error
 	policyAllowed             bool
 	policyIssue               bool
@@ -322,9 +320,8 @@ func (p *requestProbe) RequestContextParseFailed(error) {
 	p.requestContextParseFailed = true
 }
 
-func (p *requestProbe) PolicyDecisionDeny(reason string) {
+func (p *requestProbe) PolicyDecisionDeny(string) {
 	p.policyDenied = true
-	p.policyDenyReason = reason
 }
 
 func (p *requestProbe) PolicyDecisionAllowWithoutIssue(string) {
@@ -844,7 +841,6 @@ type auditRotationProbe struct {
 	keys.NoOpRotationCheckProbe
 	observer *Observer
 	started  time.Time
-	emitted  bool
 }
 
 func (o *Observer) RotationCheckStarted(ctx context.Context) (context.Context, keys.RotationCheckProbe) {
@@ -853,12 +849,10 @@ func (o *Observer) RotationCheckStarted(ctx context.Context) (context.Context, k
 
 func (p *auditRotationProbe) RotationCheckFailed(error) {
 	p.observer.emitLifecycle("key_rotation", "key_rotate", AuditOutcomeFailure, auditctx.ReasonDependencyFailure, p.started, lifecycleResource{Type: "signing_key"}, nil)
-	p.emitted = true
 }
 
 func (p *auditRotationProbe) RotationCompleted(slot string) {
 	p.observer.emitLifecycle("key_rotation", "key_rotate", AuditOutcomeSuccess, "", p.started, lifecycleResource{Type: "signing_key", KeyPosition: safeValue(slot, 64)}, nil)
-	p.emitted = true
 }
 
 func (p *auditRotationProbe) End() {}
