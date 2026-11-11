@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -245,37 +244,5 @@ http_clients:
 	got := cfg.HTTPClients[0].BaseURL
 	if got != "https://entitlements.stage.example" {
 		t.Errorf("HTTPClients[0].BaseURL = %q, want env overlay value", got)
-	}
-}
-
-// A removed key must fail loading. Unknown keys are otherwise ignored, which
-// would let a deployment start while silently losing configured behavior.
-func TestLoaderRejectsRemovedFailureClassification(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "parsec.yaml")
-	const yamlConfig = `
-data_sources:
-  - name: ok
-    type: static
-    data: {}
-  - name: export_compliance
-    type: static
-    data: {}
-    failure_classification: compliance_failure
-`
-	if err := os.WriteFile(configPath, []byte(yamlConfig), 0o600); err != nil {
-		t.Fatalf("failed to write config file: %v", err)
-	}
-	loader, err := NewLoader(configPath)
-	if err != nil {
-		t.Fatalf("NewLoader: %v", err)
-	}
-	_, err = loader.Get()
-	if err == nil {
-		t.Fatal("expected an error for the removed failure_classification key")
-	}
-	for _, want := range []string{"data_sources[1]", "export_compliance", "failure_classification is no longer supported"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q does not mention %q", err, want)
-		}
 	}
 }

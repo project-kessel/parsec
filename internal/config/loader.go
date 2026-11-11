@@ -131,26 +131,7 @@ func (l *Loader) Get() (*Config, error) {
 	if err := l.k.Unmarshal("", &cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	if err := l.rejectRemovedKeys(); err != nil {
-		return nil, err
-	}
 	return &cfg, nil
-}
-
-// rejectRemovedKeys fails loading when the config still sets a key that was
-// removed. Unknown keys are otherwise ignored, so without this a deployment
-// would start cleanly while silently losing the behavior it configured.
-func (l *Loader) rejectRemovedKeys() error {
-	dataSources, _ := l.k.Get("data_sources").([]any)
-	for i, raw := range dataSources {
-		ds, _ := raw.(map[string]any)
-		if _, ok := ds["failure_classification"]; ok {
-			return fmt.Errorf("data_sources[%d] (%v): failure_classification is no longer supported; remove it. "+
-				"A failed data source is audited as dependency_failure and named in failed_component; "+
-				"a script that needs a specific reason reports it with audit.record()", i, ds["name"])
-		}
-	}
-	return nil
 }
 
 // getParserForFile returns the appropriate koanf parser based on file extension
