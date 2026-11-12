@@ -1,9 +1,10 @@
 # parsec Configuration - Audit Event Verification (RHCLOUD-50612)
 #
 # WARNING: This configuration uses stub_validator (accepts ANY bearer token)
-# and listens on all network interfaces. It MUST only be run in an isolated
-# development environment (e.g. localhost-only or a local container). Do NOT
-# expose this configuration to untrusted networks or production environments.
+# and listens on all network interfaces. Run it only inside a network-isolated
+# VM, namespace, or container with no external ingress or published ports.
+# A container on the default network is not isolated. Never run this command
+# directly on a network-connected host or in production.
 #
 # Fully hermetic (no fixtures, no network) configuration used to demonstrate
 # and verify structured audit logging end-to-end for both the ext_authz
@@ -11,7 +12,8 @@
 # bearer token) and stub issuers (no signing) so the full request lifecycle
 # can be exercised with plain curl/grpcurl and no external dependencies.
 #
-# Usage:
+# Usage (first enter the isolated environment described above; run curl and
+# grpcurl inside that same environment so no listener is exposed remotely):
 #   go build -o bin/parsec ./cmd/parsec
 #   ./bin/parsec serve --config ./configs/examples/parsec-audit-verification.yaml
 #
