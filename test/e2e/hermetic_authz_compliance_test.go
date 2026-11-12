@@ -291,6 +291,8 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 		// core has no knowledge of it.
 		records := auditRecords(t, output.String())
 		require.Len(t, records, 1, output.String())
+		require.Equal(t, "success", records[0]["outcome"], "a tolerated compliance failure must not fail the request audit outcome")
+		require.NotContains(t, records[0], "reason_code", "a successful request must not carry a failure reason")
 		require.Equal(t, []any{map[string]any{
 			"source": "data_source", "operation": "export_compliance", "outcome": "failure",
 			"classification": "compliance_failure",
