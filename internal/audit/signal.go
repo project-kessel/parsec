@@ -13,7 +13,6 @@ type contextKey struct{}
 const (
 	MaxOperationLength      = 128
 	MaxClassificationLength = 128
-	MaxEventLength          = 128
 	MaxMetadataKeys         = 8
 	MaxMetadataValueLength  = 256
 
@@ -29,8 +28,8 @@ const (
 
 // Reason codes are the closed set of values an audit record or signal may
 // carry in reason_code. They describe what parsec itself can observe.
-// Deployment-specific detail belongs in a signal's classification, and a
-// deployment-specific event name in its event, not in a new reason code.
+// Deployment-specific detail belongs in a signal's classification, not in a
+// new reason code.
 const (
 	ReasonCredentialMissing    = "credential_missing"
 	ReasonCredentialMalformed  = "credential_malformed"
@@ -61,20 +60,22 @@ var reasonCodes = map[string]bool{
 
 // Signal is bounded, deployment-neutral audit metadata emitted by an extension.
 type Signal struct {
-	Source         string `json:"source"`
-	Operation      string `json:"operation"`
-	Outcome        string `json:"outcome"`
-	ReasonCode     string `json:"reason_code,omitempty"`
-	Classification string `json:"classification,omitempty"`
-	// Event, when set, asks the audit observer to emit this signal as its
-	// own event under that name (after the observer's event prefix), in
-	// addition to listing it in the request record.
-	Event    string            `json:"event,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Source         string            `json:"source"`
+	Operation      string            `json:"operation"`
+	Outcome        string            `json:"outcome"`
+	ReasonCode     string            `json:"reason_code,omitempty"`
+	Classification string            `json:"classification,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 // Reporter accepts validated audit signals for the current request.
-type Reporter interface{ Record(Signal) bool }
+type Reporter interface {
+	Record(Signal) bool
+	// Reject counts a signal an adapter discarded before it could build
+	// one (an unknown field, malformed metadata), so the discarded audit
+	// evidence still shows up in the request record.
+	Reject()
+}
 
 // NoOpReporter is safe to use when audit collection is disabled. It stores
 // nothing but still reports whether the signal is well formed, so a script
@@ -82,6 +83,7 @@ type Reporter interface{ Record(Signal) bool }
 type NoOpReporter struct{}
 
 func (NoOpReporter) Record(signal Signal) bool { return Valid(normalize(signal)) }
+func (NoOpReporter) Reject()                   {}
 
 // normalize prepares a signal for validation without discarding it.
 //
@@ -160,8 +162,18 @@ func (c *Collector) Record(signal Signal) bool {
 	return false
 }
 
+// Reject counts a signal that was discarded before it reached Record.
+func (c *Collector) Reject() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.rejected++
+	c.mu.Unlock()
+}
+
 // Rejected returns the number of signals refused because they failed
-// validation.
+// validation, here or in the adapter that received them.
 func (c *Collector) Rejected() int {
 	if c == nil {
 		return 0
@@ -237,8 +249,7 @@ func Valid(signal Signal) bool {
 	if !validEnum(signal.Source, SourceValidator, SourceDataSource, SourceMapper, SourcePolicy) ||
 		!validEnum(signal.Outcome, OutcomeSuccess, OutcomeDenied, OutcomeFailure) ||
 		!validText(signal.Operation, MaxOperationLength) ||
-		(signal.Classification != "" && !validText(signal.Classification, MaxClassificationLength)) ||
-		(signal.Event != "" && !validText(signal.Event, MaxEventLength)) {
+		(signal.Classification != "" && !validText(signal.Classification, MaxClassificationLength)) {
 		return false
 	}
 	if signal.ReasonCode != "" && !ValidReasonCode(signal.ReasonCode) {

@@ -14,8 +14,8 @@ func TestRegisterAuditServiceRecordsValidatedSignal(t *testing.T) {
 	defer L.Close()
 	reporter := auditctx.NewCollector(nil)
 	RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
-	require.NoError(t, L.DoString(`audit.record({source="validator", operation="user_enrichment", outcome="failure", reason_code="dependency_failure", event="enrichment_failure"})`))
-	require.Equal(t, []auditctx.Signal{{Source: "validator", Operation: "user_enrichment", Outcome: "failure", ReasonCode: "dependency_failure", Event: "enrichment_failure"}}, reporter.Signals())
+	require.NoError(t, L.DoString(`audit.record({source="validator", operation="user_enrichment", outcome="failure", reason_code="dependency_failure"})`))
+	require.Equal(t, []auditctx.Signal{{Source: "validator", Operation: "user_enrichment", Outcome: "failure", ReasonCode: "dependency_failure"}}, reporter.Signals())
 }
 
 // TestRegisterAuditServiceSanitizesOversizedMetadata guards against a
@@ -55,8 +55,11 @@ func TestRegisterAuditServiceRejectsUnsafeOrUnknownFields(t *testing.T) {
 	RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
 	require.NoError(t, L.DoString(`assert(audit.record({source="validator", operation="bad operation", outcome="failure"}) == false)`))
 	require.NoError(t, L.DoString(`assert(audit.record({source="validator", operation="ok", outcome="failure", secret="leak"}) == false)`))
+	require.NoError(t, L.DoString(`assert(audit.record({source="validator", operation="ok", outcome="failure", metadata="not-a-table"}) == false)`))
+	require.NoError(t, L.DoString(`assert(audit.record("not-a-table") == false)`))
 	require.Empty(t, reporter.Signals())
-	require.Equal(t, 1, reporter.Rejected(), "a structurally invalid signal must be counted by the collector")
+	require.Equal(t, 4, reporter.Rejected(),
+		"every discarded signal is counted, whether the collector or the Lua adapter refused it")
 }
 
 // A signal whose metadata only becomes valid once disallowed keys are

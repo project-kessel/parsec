@@ -80,7 +80,14 @@ func newAuditAPI(t *testing.T, scripts []string) *auditAPI {
 	t.Helper()
 	output := &auditOutput{}
 	// Exercise composite fan-out as used by deployed configurations.
-	auditObs, err := auditprobe.New(zerolog.New(output), auditprobe.Metadata{ServiceName: "parsec"})
+	// As in a deployment, the audit observer knows the token types that
+	// have a configured issuer: one per script.
+	issuable := []service.TokenType{service.TokenTypeTransactionToken, service.TokenTypeRHIdentity}
+	if len(scripts) < len(issuable) {
+		issuable = issuable[:len(scripts)]
+	}
+	auditObs, err := auditprobe.New(zerolog.New(output), auditprobe.Metadata{ServiceName: "parsec"},
+		auditprobe.WithTokenTypes(issuable))
 	require.NoError(t, err)
 	obs := observer.CompositeAll([]observer.Observer{
 		observer.NoOp(), auditObs,
@@ -224,8 +231,8 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 		{"partial denial", []string{`{"ok": true}`, `accessDenied("denied")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, []any{txn}},
 		{"partial failure", []string{`{"ok": true}`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, []any{txn}},
 		{"denial then failure", []string{`accessDenied("denied")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
-		{"classified denial then failure", []string{`accessDenied("denied", "tenant_policy", "tenant_policy_denial")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
-		{"first denial selects terminal reason", []string{`accessDenied("denied")`, `accessDenied("denied", "tenant_policy", "tenant_policy_denial")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, nil},
+		{"classified denial then failure", []string{`accessDenied("denied", "tenant_policy")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
+		{"first denial selects terminal reason", []string{`accessDenied("denied")`, `accessDenied("denied", "tenant_policy")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,7 +252,11 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 			}
 			resource := record["resource"].(map[string]any)
 			requested := []any{txn}
-			if len(tt.scripts) == 2 {
+			switch len(tt.scripts) {
+			case 0:
+				// No issuer is configured, so the type is not named.
+				requested = []any{auditprobe.UnrecognizedTokenType}
+			case 2:
 				requested = append(requested, identity)
 			}
 			require.Equal(t, requested, resource["requested_token_types"])
@@ -255,16 +266,14 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 				require.Equal(t, tt.issued, resource["token_types"])
 			}
 			if strings.Contains(strings.Join(tt.scripts, ""), "tenant_policy") {
-				var count int
-				for _, record := range api.output.records(t) {
-					if record["event"] == "parsec_tenant_policy_denial" {
-						count++
-						require.Equal(t, "denied", record["outcome"])
-						require.Equal(t, "token_issuance_denied", record["reason_code"])
-						require.Equal(t, "tenant_policy", record["classification"])
-					}
-				}
-				require.Equal(t, 1, count)
+				// The individual policy decision survives as a signal even when
+				// a later token type changes the terminal outcome.
+				signals := record["signals"].([]any)
+				require.Len(t, signals, 1)
+				require.Equal(t, map[string]any{
+					"source": "policy", "operation": "token_issuance", "outcome": "denied",
+					"reason_code": "token_issuance_denied", "classification": "tenant_policy",
+				}, signals[0])
 			}
 		})
 	}

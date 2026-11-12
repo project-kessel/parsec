@@ -60,14 +60,7 @@ type Observer struct {
 	eventPrefix         string
 	allowedMetadataKeys map[string]bool
 	principalClaims     map[string][]string
-	credentialEvents    CredentialEvents
-}
-
-// CredentialEvents names an extra event to emit when a principal presented a
-// given credential type, keyed by the credential type's string value.
-type CredentialEvents struct {
-	Subject map[string]string
-	Actor   map[string]string
+	tokenTypes          map[service.TokenType]bool
 }
 
 // Option configures an audit observer.
@@ -101,12 +94,16 @@ func WithPrincipalClaims(claims map[string][]string) Option {
 	}
 }
 
-// WithCredentialEvents emits an extra event, next to the request event, when
-// the subject or actor presented a listed credential type. By default no
-// such events are emitted.
-func WithCredentialEvents(events CredentialEvents) Option {
+// WithTokenTypes sets the token types the deployment can issue. Only these
+// are named in resource.token_types and resource.requested_token_types; any
+// other requested type is recorded as UnrecognizedTokenType, because on the
+// token exchange path it is a client-supplied string.
+func WithTokenTypes(tokenTypes []service.TokenType) Option {
 	return func(observer *Observer) {
-		observer.credentialEvents = events
+		observer.tokenTypes = make(map[service.TokenType]bool, len(tokenTypes))
+		for _, tokenType := range tokenTypes {
+			observer.tokenTypes[tokenType] = true
+		}
 	}
 }
 
@@ -138,30 +135,6 @@ func ValidEventPrefix(prefix string) bool {
 
 func (o *Observer) eventName(suffix string) string { return o.eventPrefix + suffix }
 
-// ReservedEvent reports whether name is an event the observer emits itself
-// with a fixed meaning. Extensions and configuration cannot name their own
-// events after these, so a request or lifecycle record always comes from
-// parsec.
-func ReservedEvent(name string) bool {
-	switch name {
-	case "request", "authorize", "process_status", "key_rotation", "dependency_failure":
-		return true
-	}
-	return false
-}
-
-// signalReporter is the request's Reporter. A signal that names a reserved
-// event keeps its place in the request record but loses the event, in the
-// same way a metadata key outside the allowlist is stripped.
-type signalReporter struct{ collector *auditctx.Collector }
-
-func (r signalReporter) Record(signal auditctx.Signal) bool {
-	if ReservedEvent(signal.Event) {
-		signal.Event = ""
-	}
-	return r.collector.Record(signal)
-}
-
 func (o *Observer) Shutdown(context.Context) error  { return nil }
 func (o *Observer) ConfigureHTTPMux(*http.ServeMux) {}
 
@@ -170,6 +143,14 @@ type principal struct {
 	TrustDomain    string            `json:"trust_domain,omitempty"`
 	CredentialType string            `json:"credential_type,omitempty"`
 	Attributes     map[string]string `json:"attributes,omitempty"`
+	// Validation is the result of validating this principal's credential.
+	// It is absent when the credential was never validated.
+	Validation *principalValidation `json:"validation,omitempty"`
+}
+
+type principalValidation struct {
+	Outcome    AuditOutcome `json:"outcome"`
+	ReasonCode string       `json:"reason_code,omitempty"`
 }
 
 type requestInfo struct {
@@ -190,19 +171,6 @@ type resourceInfo struct {
 	MetadataKeysStripped int                  `json:"metadata_keys_stripped,omitempty"`
 }
 
-// emitEnvelope holds pre-serialized JSON for the shared fields that are
-// identical across all events emitted during a single request. Built once
-// in End(), then passed by pointer to every emitRaw() call, replacing
-// per-call Interface() marshaling with zero-cost RawJSON() byte copies.
-type emitEnvelope struct {
-	service  json.RawMessage
-	request  json.RawMessage
-	subject  json.RawMessage
-	actor    json.RawMessage
-	resource json.RawMessage
-	signals  json.RawMessage // nil when no signals
-}
-
 type requestProbe struct {
 	service.NoOpAuthzCheckProbe
 	service.NoOpTokenExchangeProbe
@@ -213,7 +181,6 @@ type requestProbe struct {
 	request   requestInfo
 	subject   principal
 	actor     principal
-	authorize bool
 	state     *request.AuditState
 	collector *auditctx.Collector
 
@@ -241,10 +208,6 @@ type requestProbe struct {
 	invalidRequestErr         error
 	tokenTypes                []service.TokenType
 	requestedTokenTypes       []service.TokenType
-
-	// Derived at emit time
-	derivedOutcome    AuditOutcome
-	derivedReasonCode string
 }
 
 // Each audit observer keeps its own request probe, so nested issuance
@@ -266,14 +229,13 @@ func (o *Observer) TokenExchangeStarted(ctx context.Context, _, _, _, _ string) 
 func (o *Observer) startRequest(ctx context.Context, action string, info requestInfo) (context.Context, *requestProbe) {
 	ctx, state := request.WithAuditState(ctx)
 	collector := auditctx.NewCollector(o.allowedMetadataKeys)
-	ctx = auditctx.WithReporter(ctx, signalReporter{collector})
+	ctx = auditctx.WithReporter(ctx, collector)
 	p := &requestProbe{
 		observer:  o,
 		requestID: safeValue(request.ID(ctx), 128),
 		started:   time.Now(),
 		action:    action,
 		request:   info,
-		authorize: action == "authorize",
 		state:     state,
 		collector: collector,
 	}
@@ -312,20 +274,19 @@ func (p *issuanceProbe) IssuerNotFound(_ service.TokenType, err error) {
 
 func (p *issuanceProbe) TokenTypeIssuanceDenied(_ service.TokenType, denial *service.ExchangeError) {
 	p.request.TokenIssuanceDenied(denial)
-	if denial != nil && (denial.Classification != "" || denial.AuditEvent != "") {
+	if denial != nil && denial.Classification != "" {
 		// Preserve the individual policy decision even if another token type
 		// later fails and changes the terminal request outcome. A label that
 		// is not a core reason code is the deployment's own classification.
 		signal := auditctx.Signal{
 			Source: auditctx.SourcePolicy, Operation: "token_issuance",
 			Outcome: auditctx.OutcomeDenied, ReasonCode: denial.Classification,
-			Event: denial.AuditEvent,
 		}
 		if !ValidReasonCode(denial.Classification) {
 			signal.ReasonCode = auditctx.ReasonTokenIssuanceDenied
 			signal.Classification = denial.Classification
 		}
-		signalReporter{p.request.collector}.Record(signal)
+		p.request.collector.Record(signal)
 	}
 }
 
@@ -511,39 +472,25 @@ func credentialFailureReason(err error) string {
 	return auditctx.ReasonCredentialInvalid
 }
 
-// eventDetail is what varies between the events of one request.
-type eventDetail struct {
-	outcome        AuditOutcome
-	reasonCode     string
-	classification string
-	// principal is "subject" or "actor" on a credential event.
-	principal string
-	// signal is the one signal a dedicated signal event is about.
-	signal json.RawMessage
-}
-
-// emitCredentialEvent emits the event configured for the credential type a
-// principal presented, with that principal's own validation result. Nothing
-// is emitted when the credential was never validated: the request ended
-// first, and the request record says why.
-func (p *requestProbe) emitCredentialEvent(role, suffix string, validated bool, validationErr error, dependencyOutage bool, env *emitEnvelope) {
-	if suffix == "" {
-		return
-	}
-	detail := eventDetail{principal: role}
+// credentialValidation is a principal's own credential validation result.
+// It is nil when the principal presented no credential (an anonymous
+// principal is reported as validated, but nothing was checked), and when the
+// credential was never validated because the request ended first. An outage
+// observed during validation is a failed dependency, not a bad credential.
+func credentialValidation(credentialType string, validated bool, validationErr error, dependencyOutage bool) *principalValidation {
 	switch {
+	case credentialType == "":
+		return nil
 	case validationErr != nil:
-		detail.outcome, detail.reasonCode = AuditOutcomeDenied, credentialFailureReason(validationErr)
-		// Same rule as the request record: an outage is not a bad credential.
-		if dependencyOutage && detail.reasonCode == auditctx.ReasonCredentialInvalid {
-			detail.outcome, detail.reasonCode = AuditOutcomeFailure, auditctx.ReasonDependencyFailure
+		reason := credentialFailureReason(validationErr)
+		if dependencyOutage && reason == auditctx.ReasonCredentialInvalid {
+			return &principalValidation{Outcome: AuditOutcomeFailure, ReasonCode: auditctx.ReasonDependencyFailure}
 		}
+		return &principalValidation{Outcome: AuditOutcomeDenied, ReasonCode: reason}
 	case validated:
-		detail.outcome = AuditOutcomeSuccess
-	default:
-		return
+		return &principalValidation{Outcome: AuditOutcomeSuccess}
 	}
-	p.emitRaw(suffix, detail, env)
+	return nil
 }
 
 func (p *requestProbe) End() {
@@ -563,77 +510,20 @@ func (p *requestProbe) End() {
 		outcome = AuditOutcomeFailure
 		reasonCode = auditctx.ReasonDependencyFailure
 	}
-	p.derivedOutcome = outcome
-	p.derivedReasonCode = reasonCode
-	signals := p.collector.Signals()
 
-	env := emitEnvelope{
-		service: p.observer.metaJSON,
-	}
-	env.request, _ = json.Marshal(p.request)
-	env.subject, _ = json.Marshal(p.subject)
-	env.actor, _ = json.Marshal(p.actor)
-	env.resource, _ = json.Marshal(resourceInfo{
-		Type: resourceTypeForAction(p.action), TokenTypes: safeTokenTypes(p.tokenTypes),
-		RequestedTokenTypes: safeTokenTypes(p.requestedTokenTypes), CacheLayers: cacheLayers,
+	p.subject.Validation = credentialValidation(p.subject.CredentialType, p.subjectValidated, p.subjectValidationErr, p.subjectDependencyOutage)
+	p.actor.Validation = credentialValidation(p.actor.CredentialType, p.actorValidated, p.actorValidationErr, p.actorDependencyOutage)
+	requestJSON, _ := json.Marshal(p.request)
+	subjectJSON, _ := json.Marshal(p.subject)
+	actorJSON, _ := json.Marshal(p.actor)
+	resourceJSON, _ := json.Marshal(resourceInfo{
+		Type: resourceTypeForAction(p.action), TokenTypes: p.observer.safeTokenTypes(p.tokenTypes),
+		RequestedTokenTypes: p.observer.safeTokenTypes(p.requestedTokenTypes), CacheLayers: cacheLayers,
 		FailedComponent: failedComponent, SignalsDropped: p.collector.Dropped(),
 		SignalsRejected: p.collector.Rejected(), MetadataKeysStripped: p.collector.StrippedKeys(),
 	})
-	if len(signals) > 0 {
-		env.signals, _ = json.Marshal(signals)
-	}
 
-	final := eventDetail{outcome: outcome, reasonCode: reasonCode}
-	p.emitRaw("request", final, &env)
-
-	if p.authorize {
-		p.emitRaw("authorize", final, &env)
-	}
-	credentialEvents := p.observer.credentialEvents
-	p.emitCredentialEvent("subject", credentialEvents.Subject[p.subject.CredentialType],
-		p.subjectValidated, p.subjectValidationErr, p.subjectDependencyOutage, &env)
-	p.emitCredentialEvent("actor", credentialEvents.Actor[p.actor.CredentialType],
-		p.actorValidated, p.actorValidationErr, p.actorDependencyOutage, &env)
-
-	// Each signal that names an event, or whose reason maps to one, emits
-	// its own event with its own outcome. Two such signals emit two events.
-	signalCoveredSuffix := false
-	finalSuffix := reasonEventSuffix(reasonCode)
-	for _, signal := range signals {
-		// Only a signal's reason can stand in for the request's final
-		// reason event; an event the signal names itself never does.
-		reasonSuffix := reasonEventSuffix(signal.ReasonCode)
-		detail := eventDetail{
-			outcome:    signalOutcomeToAuditOutcome(signal.Outcome),
-			reasonCode: signal.ReasonCode, classification: signal.Classification,
-		}
-		detail.signal, _ = json.Marshal(signal)
-		switch {
-		case signal.Event != "":
-			p.emitRaw(signal.Event, detail, &env)
-		case reasonSuffix != "":
-			p.emitRaw(reasonSuffix, detail, &env)
-			if reasonSuffix == finalSuffix {
-				signalCoveredSuffix = true
-			}
-		}
-	}
-
-	// Emit the reason-specific event for the request's final reason only
-	// when no signal already carries the same reason.
-	if finalSuffix != "" && !signalCoveredSuffix {
-		p.emitRaw(finalSuffix, final, &env)
-	}
-}
-
-// emitRaw writes a single audit event record using pre-serialized envelope
-// fields. Only detail varies per event; the shared fields are serialized once
-// in End().
-func (p *requestProbe) emitRaw(suffix string, detail eventDetail, env *emitEnvelope) {
-	name := p.observer.eventName(suffix)
-	outcome := detail.outcome
-	reason := safeReasonCode(detail.reasonCode)
-
+	name := p.observer.eventName("request")
 	event := p.observer.event(outcome).
 		Str("event", name).
 		Str("schema_version", SchemaVersion).
@@ -641,40 +531,19 @@ func (p *requestProbe) emitRaw(suffix string, detail eventDetail, env *emitEnvel
 		Str("outcome", string(outcome)).
 		Str("request_id", p.requestID).
 		Int64("duration_ms", time.Since(p.started).Milliseconds()).
-		RawJSON("service", env.service).
-		RawJSON("request", env.request).
-		RawJSON("subject", env.subject).
-		RawJSON("actor", env.actor).
-		RawJSON("resource", env.resource)
-	if len(env.signals) > 0 {
-		event = event.RawJSON("signals", env.signals)
+		RawJSON("service", p.observer.metaJSON).
+		RawJSON("request", requestJSON).
+		RawJSON("subject", subjectJSON).
+		RawJSON("actor", actorJSON).
+		RawJSON("resource", resourceJSON)
+	if signals := p.collector.Signals(); len(signals) > 0 {
+		signalsJSON, _ := json.Marshal(signals)
+		event = event.RawJSON("signals", signalsJSON)
 	}
-	if reason != "" {
+	if reason := safeReasonCode(reasonCode); reason != "" {
 		event = event.Str("reason_code", reason)
 	}
-	if detail.classification != "" {
-		event = event.Str("classification", detail.classification)
-	}
-	if detail.principal != "" {
-		event = event.Str("principal", detail.principal)
-	}
-	if len(detail.signal) > 0 {
-		event = event.RawJSON("signal", detail.signal)
-	}
 	event.Msg(name)
-}
-
-func signalOutcomeToAuditOutcome(outcome string) AuditOutcome {
-	switch outcome {
-	case auditctx.OutcomeSuccess:
-		return AuditOutcomeSuccess
-	case auditctx.OutcomeDenied:
-		return AuditOutcomeDenied
-	case auditctx.OutcomeFailure:
-		return AuditOutcomeFailure
-	default:
-		return AuditOutcomeFailure
-	}
 }
 
 // resourceTypeForAction maps the probe action to the audit resource type.
@@ -687,15 +556,6 @@ func resourceTypeForAction(action string) string {
 	default:
 		return "authorization_request"
 	}
-}
-
-// reasonEventSuffix returns the event emitted for a core reason code that
-// has one. Deployment-specific events are named by the signal itself.
-func reasonEventSuffix(reason string) string {
-	if reason == auditctx.ReasonDependencyFailure {
-		return "dependency_failure"
-	}
-	return ""
 }
 
 func safeReasonCode(reason string) string {
@@ -713,21 +573,20 @@ func ValidReasonCode(reason string) bool {
 	return auditctx.ValidReasonCode(reason)
 }
 
-func safeTokenType(tokenType service.TokenType) string {
-	switch tokenType {
-	case service.TokenTypeTransactionToken, service.TokenTypeAccessToken,
-		service.TokenTypeJWT, service.TokenTypeRHIdentity:
-		return string(tokenType)
-	default:
-		return ""
-	}
-}
+// UnrecognizedTokenType stands in for a token type no configured issuer
+// handles. The type itself is not recorded: it can be arbitrary client input.
+const UnrecognizedTokenType = "unrecognized"
 
-func safeTokenTypes(tokenTypes []service.TokenType) []string {
+// safeTokenTypes names the configured token types and replaces any other
+// with UnrecognizedTokenType, so an unknown type is visible without being
+// copied into the record.
+func (o *Observer) safeTokenTypes(tokenTypes []service.TokenType) []string {
 	var safe []string
 	for _, tokenType := range tokenTypes {
-		if value := safeTokenType(tokenType); value != "" {
-			safe = append(safe, value)
+		if o.tokenTypes[tokenType] {
+			safe = append(safe, string(tokenType))
+		} else {
+			safe = append(safe, UnrecognizedTokenType)
 		}
 	}
 	return safe

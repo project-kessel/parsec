@@ -12,12 +12,19 @@ import (
 func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 	service := L.NewTable()
 	service.RawSetString("record", L.NewFunction(func(state *gopherlua.LState) int {
-		table, ok := state.Get(1).(*gopherlua.LTable)
-		if !ok {
+		reporter := auditctx.ReporterFrom(ctx)
+		// A signal discarded here never reaches the reporter's own
+		// validation, so it is counted as rejected explicitly.
+		reject := func() int {
+			reporter.Reject()
 			state.Push(gopherlua.LFalse)
 			return 1
 		}
-		validFields := map[string]bool{"source": true, "operation": true, "outcome": true, "reason_code": true, "classification": true, "event": true, "metadata": true}
+		table, ok := state.Get(1).(*gopherlua.LTable)
+		if !ok {
+			return reject()
+		}
+		validFields := map[string]bool{"source": true, "operation": true, "outcome": true, "reason_code": true, "classification": true, "metadata": true}
 		unknown := false
 		table.ForEach(func(key, _ gopherlua.LValue) {
 			if key.Type() != gopherlua.LTString || !validFields[key.String()] {
@@ -25,15 +32,13 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			}
 		})
 		if unknown {
-			state.Push(gopherlua.LFalse)
-			return 1
+			return reject()
 		}
 		metadata, metadataValid := luaStringMap(state.GetField(table, "metadata"))
 		if !metadataValid {
 			// Metadata is not a table, or has a non-string key or a value
 			// that is not a string, number or boolean; reject entire signal
-			state.Push(gopherlua.LFalse)
-			return 1
+			return reject()
 		}
 		signal := auditctx.Signal{
 			Source:         luaString(state.GetField(table, "source")),
@@ -41,13 +46,12 @@ func RegisterAuditService(L *gopherlua.LState, ctx context.Context) {
 			Outcome:        luaString(state.GetField(table, "outcome")),
 			ReasonCode:     luaString(state.GetField(table, "reason_code")),
 			Classification: luaString(state.GetField(table, "classification")),
-			Event:          luaString(state.GetField(table, "event")),
 			Metadata:       metadata,
 		}
 		// The reporter sanitizes, strips disallowed metadata keys and
 		// validates. Checking here first would reject signals that stripping
 		// makes valid, and would hide rejections from the request record.
-		if auditctx.ReporterFrom(ctx).Record(signal) {
+		if reporter.Record(signal) {
 			state.Push(gopherlua.LTrue)
 		} else {
 			state.Push(gopherlua.LFalse)

@@ -179,9 +179,6 @@ type ExchangeError struct {
 	// Classification describes the deployment policy decision for observers.
 	// It is not part of the OAuth/gRPC response.
 	Classification string `json:"-"`
-	// AuditEvent optionally names a dedicated audit event for this decision.
-	// It is not part of the OAuth/gRPC response.
-	AuditEvent string `json:"-"`
 }
 
 func (e *ExchangeError) Error() string {

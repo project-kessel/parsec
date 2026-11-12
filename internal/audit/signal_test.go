@@ -314,13 +314,3 @@ func TestCollectorKeepsSignalWithUnknownReasonCode(t *testing.T) {
 		"with no classification, the unknown reason is kept there")
 	require.Zero(t, collector.Rejected())
 }
-
-func TestSignalEventIsValidated(t *testing.T) {
-	signal := Signal{Source: SourceDataSource, Operation: "lookup", Outcome: OutcomeFailure, Event: "deployment_lookup_failure"}
-	require.True(t, Valid(signal))
-
-	for _, event := range []string{"bad event", "bad\nevent", strings.Repeat("a", MaxEventLength+1)} {
-		signal.Event = event
-		require.False(t, Valid(signal), "event %q", event)
-	}
-}

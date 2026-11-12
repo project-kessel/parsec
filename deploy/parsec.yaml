@@ -1,6 +1,6 @@
 # Application config is supplied by the external PARSEC_CONFIG_SECRET.
 # That config must enable the audit observer (alongside logging/metrics) and
-# set audit_metadata_keys, audit_principal_claims, and audit_credential_events.
+# set audit_metadata_keys and audit_principal_claims.
 # Copy the observability block documented in configs/README.md; without audit,
 # cross_account.lua, export_compliance.lua, and bop_user.lua signals are lost.
 apiVersion: template.openshift.io/v1

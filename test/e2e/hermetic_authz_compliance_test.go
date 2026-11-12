@@ -232,16 +232,11 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 			require.NoError(t, err)
 			assertComplianceDenied(t, resp)
 			records := auditRecords(t, output.String())
-			var complianceEvents int
-			for _, record := range records {
-				if record["event"] == "parsec_auth_compliance_failure" {
-					complianceEvents++
-					require.Equal(t, "denied", record["outcome"])
-					require.Equal(t, "token_issuance_denied", record["reason_code"])
-					require.Equal(t, "compliance_denied", record["classification"])
-				}
-			}
-			require.Equal(t, 1, complianceEvents, "cache %s: %s", cacheStatus, output.String())
+			require.Len(t, records, 1, "one record per request")
+			require.Equal(t, []any{map[string]any{
+				"source": "policy", "operation": "token_issuance", "outcome": "denied",
+				"reason_code": "token_issuance_denied", "classification": "compliance_denied",
+			}}, records[0]["signals"], "cache %s", cacheStatus)
 			require.Equal(t, "token_issuance_denied", records[0]["reason_code"])
 			resource := records[0]["resource"].(map[string]any)
 			layers := resource["cache_layers"].([]any)
@@ -292,16 +287,14 @@ func TestHermeticAuthzCompliance(t *testing.T) {
 			t.Fatalf("Check: %v", err)
 		}
 		assertOKResponse(t, resp) // fail-open
-		// The script names its own event; core has no knowledge of it.
-		var failureEvents int
-		for _, record := range auditRecords(t, output.String()) {
-			if record["event"] == "parsec_compliance_failure" {
-				failureEvents++
-				require.Equal(t, "failure", record["outcome"])
-				require.Equal(t, "compliance_failure", record["classification"])
-			}
-		}
-		require.Equal(t, 1, failureEvents, output.String())
+		// The script's failure reaches the request record as a plain signal;
+		// core has no knowledge of it.
+		records := auditRecords(t, output.String())
+		require.Len(t, records, 1, output.String())
+		require.Equal(t, []any{map[string]any{
+			"source": "data_source", "operation": "export_compliance", "outcome": "failure",
+			"classification": "compliance_failure",
+		}}, records[0]["signals"])
 	})
 
 	t.Run("service account: no compliance check (AC1)", func(t *testing.T) {

@@ -933,25 +933,9 @@ func TestCELMapper_LayerA(t *testing.T) {
 	}
 }
 
-func TestCELMapperAccessDeniedAuditEvent(t *testing.T) {
-	m, err := NewCELMapper(`accessDenied("policy denied", "tenant_policy", "tenant_policy_denial")`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := m.Map(context.Background(), &service.MapperInput{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Decision.Classification != "tenant_policy" || result.Decision.AuditEvent != "tenant_policy_denial" {
-		t.Errorf("Classification=%q AuditEvent=%q", result.Decision.Classification, result.Decision.AuditEvent)
-	}
-
-	m, err = NewCELMapper(`accessDenied("policy denied", "tenant_policy", "bad event")`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.Map(context.Background(), &service.MapperInput{}); err == nil {
-		t.Fatal("invalid event accepted")
+func TestCELMapperAccessDeniedThreeArgumentsRejected(t *testing.T) {
+	if _, err := NewCELMapper(`accessDenied("policy denied", "tenant_policy", "tenant_policy_denial")`); err == nil {
+		t.Fatal("three-argument accessDenied compiled; audit event names are not a CEL concern")
 	}
 }
 

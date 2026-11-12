@@ -209,23 +209,12 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 		opts = append(opts, audit.WithPrincipalClaims(claims))
 	}
 
-	events := cfg.CredentialEvents
-	if events == nil && p.config.Observability != nil {
-		events = p.config.Observability.CredentialEvents
+	// The audit record names only token types this deployment can issue.
+	tokenTypes := make([]service.TokenType, 0, len(p.config.Issuers))
+	for _, issuer := range p.config.Issuers {
+		tokenTypes = append(tokenTypes, service.TokenType(issuer.TokenType))
 	}
-	if events != nil {
-		for role, byType := range map[string]map[string]string{"subject": events.Subject, "actor": events.Actor} {
-			for credentialType, event := range byType {
-				if !knownCredentialTypes[trust.CredentialType(credentialType)] {
-					return nil, fmt.Errorf("audit_credential_events.%s: unknown credential type %q", role, credentialType)
-				}
-				if !validAuditName(event) || audit.ReservedEvent(event) {
-					return nil, fmt.Errorf("audit_credential_events.%s.%s: invalid event name %q", role, credentialType, event)
-				}
-			}
-		}
-		opts = append(opts, audit.WithCredentialEvents(audit.CredentialEvents{Subject: events.Subject, Actor: events.Actor}))
-	}
+	opts = append(opts, audit.WithTokenTypes(tokenTypes))
 
 	return audit.New(logger, audit.Metadata{
 		ServiceName: "parsec",
@@ -233,15 +222,8 @@ func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerConte
 	}, opts...)
 }
 
-var knownCredentialTypes = map[trust.CredentialType]bool{
-	trust.CredentialTypeBearer: true, trust.CredentialTypeJWT: true, trust.CredentialTypeOIDC: true,
-	trust.CredentialTypeMTLS: true, trust.CredentialTypeOAuth2: true, trust.CredentialTypeJSON: true,
-	trust.CredentialTypeBasicAuth: true, trust.CredentialTypeHeader: true,
-	trust.CredentialTypeForwardedClientCert: true,
-}
-
-// validAuditName reports whether name is a non-empty audit field or event
-// name made of letters, digits, underscore, hyphen, or dot.
+// validAuditName reports whether name is a non-empty audit field name made
+// of letters, digits, underscore, hyphen, or dot.
 func validAuditName(name string) bool {
 	return name != "" && len(name) <= 128 && audit.ValidEventPrefix(name)
 }

@@ -84,9 +84,8 @@ Parsec stores the ID in context for observability; it does not add or rewrite
 request-ID headers on authorization responses, client responses, or dependency
 requests. There is no `request_id_headers` configuration setting.
 
-Audit principal attributes (`observability.audit_principal_claims`) and
-per-credential events (`observability.audit_credential_events`) are off unless
-configured. To retain script audit signals, include `type: audit` in the
+Audit principal attributes (`observability.audit_principal_claims`) are off
+unless configured. To retain script audit signals, include `type: audit` in the
 observer list, for example:
 
 ```yaml
@@ -107,27 +106,41 @@ observability:
   audit_principal_claims:
     org_id: ["org_id", "rh-org-id", "organization.id"]
     account_number: ["account_number"]
-  # Extra events emitted when a principal presented a credential type.
-  audit_credential_events:
-    subject:
-      mtls: validate_ssl_cert
-      forwarded_client_cert: validate_ssl_cert
-    actor:
-      header: verify_psk
   observers:
     - type: audit
     - type: logging
 ```
 
-Credential events carry `principal: subject` or `principal: actor` and that
-principal's validation outcome, independently of the request outcome. No
-credential event is emitted for a principal whose credential was never
-validated. Subject and actor events are both emitted even when they share a
-name. Dedicated signal events include the triggering signal in `signal`;
-`signals` retains the full request list.
+The audit observer emits one `<prefix>request` record per request, plus the
+`process_status` and `key_rotation` lifecycle events. It emits no
+deployment-specific events. `subject.validation` and `actor.validation` carry
+each principal's own credential validation result (`outcome` and, when not a
+success, `reason_code`), independently of the request outcome; they are
+absent when the credential was never validated. Scripts and CEL policies
+describe what happened with signals, listed in `signals`.
+
+Deployment-specific event names are derived from the request record by the
+log pipeline. The events earlier builds emitted map to the record as follows:
+
+| Earlier event | Request record where |
+|---|---|
+| `authorize` | `action == "authorize"` |
+| `dependency_failure` | `reason_code == "dependency_failure"`, or a signal with that `reason_code`; `resource.failed_component` names the component |
+| `validate_ssl_cert` | `subject.credential_type` is `mtls` or `forwarded_client_cert`; result in `subject.validation` |
+| `verify_psk` | `actor.credential_type == "header"`; result in `actor.validation` |
+| `supplemental_user_data_failure` | a signal with `operation == "user_enrichment"` and `outcome == "failure"` |
+| `compliance_failure` | a signal with `operation == "export_compliance"` and `outcome == "failure"`; cause in `classification` |
+| `auth_compliance_failure` | a signal with `source == "policy"` and `classification == "compliance_denied"` |
+
+Signals recorded inside a data source's `fetch()` are not recorded again when
+the data source result comes from cache.
 
 Audit `resource.requested_token_types` contains the effective issuance request,
-including defaults. `resource.token_types` contains successfully minted types.
+including defaults. Token types are named when an issuer is configured for
+them; any other requested type appears as `unrecognized`, because on the token
+exchange path it is a client-supplied string. `resource.signals_rejected`
+counts signals that were discarded, including a script's `audit.record()` call
+with an unknown field or malformed metadata. `resource.token_types` contains successfully minted types.
 A type minted before another type fails can appear there even though the
 overall request is denied and no tokens are delivered.
 

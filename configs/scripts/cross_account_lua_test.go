@@ -1,4 +1,4 @@
-package datasource
+package scripts_test
 
 import (
 	"context"
@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	auditctx "github.com/project-kessel/parsec/internal/audit"
+	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
@@ -26,7 +26,7 @@ const rbacApprovedBody = `{"data":[{"status":"approved","target_org":"target-org
 
 func loadCrossAccountScript(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "..", "configs", "scripts", "cross_account.lua")
+	path := "cross_account.lua"
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read cross_account.lua: %v", err)
@@ -69,19 +69,19 @@ func internalEmployeeSubject() *service.DataSourceInput {
 	}
 }
 
-func newCrossAccountDS(t *testing.T, script string, client *http.Client, cfg map[string]any) *LuaDataSource {
+func newCrossAccountDS(t *testing.T, script string, client *http.Client, cfg map[string]any) *datasource.LuaDataSource {
 	t.Helper()
 	if cfg == nil {
 		cfg = defaultCrossAccountConfig()
 	}
-	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+	ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
 		Name:         "cross_account",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(cfg),
 		HTTP:         httpclient.LuaClient{Client: client, BaseURL: rbacBaseURL},
 	})
 	if err != nil {
-		t.Fatalf("NewLuaDataSource: %v", err)
+		t.Fatalf("datasource.NewLuaDataSource: %v", err)
 	}
 	return ds
 }

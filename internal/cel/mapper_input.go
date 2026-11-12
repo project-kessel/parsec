@@ -82,25 +82,15 @@ func (lib *mapperInputLib) CompileOptions() []cel.EnvOption {
 	opts = append(opts, cel.Function("accessDenied",
 		cel.Overload("accessDenied_string_string",
 			[]*cel.Type{cel.StringType, cel.StringType}, cel.DynType,
-			cel.BinaryBinding(func(message, classification ref.Val) ref.Val {
-				return classifiedAccessDenied(message, classification, nil)
-			}),
-		),
-		cel.Overload("accessDenied_string_string_string",
-			[]*cel.Type{cel.StringType, cel.StringType, cel.StringType}, cel.DynType,
-			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-				return classifiedAccessDenied(args[0], args[1], args[2])
-			}),
+			cel.BinaryBinding(classifiedAccessDenied),
 		),
 	))
 	return opts
 }
 
-// classifiedAccessDenied carries a bounded policy label, and optionally the
-// name of a dedicated audit event, to issuance observers without changing the
-// OAuth error, description, or transport status. event is nil for the
-// two-argument overload.
-func classifiedAccessDenied(message, classification, event ref.Val) ref.Val {
+// classifiedAccessDenied carries a bounded policy label to issuance observers
+// without changing the OAuth error, description, or transport status.
+func classifiedAccessDenied(message, classification ref.Val) ref.Val {
 	msg, ok := message.Value().(string)
 	if !ok {
 		return types.NewErr("accessDenied message must be a string")
@@ -111,13 +101,6 @@ func classifiedAccessDenied(message, classification, event ref.Val) ref.Val {
 	}
 	decision := service.DenyOAuth(service.OAuthAccessDenied, msg).Decision
 	decision.Classification = label
-	if event != nil {
-		name, ok := event.Value().(string)
-		if !ok || !validAuditLabel(name) {
-			return types.NewErr("accessDenied event must be 1-128 ASCII letters, digits, dots, underscores, or hyphens")
-		}
-		decision.AuditEvent = name
-	}
 	return types.WrapErr(&abortError{decision: decision})
 }
 

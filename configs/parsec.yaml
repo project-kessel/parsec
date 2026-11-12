@@ -29,17 +29,10 @@ observability:
   audit_principal_claims:
     org_id: ["org_id", "rh-org-id", "organization.id"]
     account_number: ["account_number"]
-  # Extra events emitted when a principal presented a credential type.
-  audit_credential_events:
-    subject:
-      mtls: validate_ssl_cert
-      forwarded_client_cert: validate_ssl_cert
-    actor:
-      header: verify_psk
   observers:
     - type: audit
-      # event_prefix defaults to "parsec_" (e.g. parsec_request,
-      # parsec_authorize). Override with event_prefix: "insights_" or
+      # event_prefix defaults to "parsec_" (e.g. parsec_request).
+      # Override with event_prefix: "insights_" or
       # via --observability-event-prefix for deployment-specific names.
     - type: logging
     - type: metrics

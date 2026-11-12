@@ -80,7 +80,7 @@ func TestRecordCacheLayerDropsInvalidStatus(t *testing.T) {
 func TestSetFailureReasonFirstWriterWins(t *testing.T) {
 	state := &AuditState{}
 	state.SetFailureReason("dependency_failure")
-	state.SetFailureReason("supplemental_user_data_failure")
+	state.SetFailureReason("internal_error")
 
 	_, failureReason, _, _ := state.Snapshot()
 	require.Equal(t, "dependency_failure", failureReason,
