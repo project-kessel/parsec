@@ -31,6 +31,8 @@ var (
 	inMemoryResultSourceFailed   = attribute.String("result", "source_failed")
 
 	distributedResultCacheKeyFailed = attribute.String("result", "cache_key_failed")
+	distributedResultHit            = attribute.String("result", "hit")
+	distributedResultMiss           = attribute.String("result", "miss")
 	distributedResultGetFailed      = attribute.String("result", "get_failed")
 	distributedResultExpired        = attribute.String("result", "result_expired")
 )
@@ -284,6 +286,8 @@ func (p *distributedValidateProbe) CacheKeyFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = distributedResultCacheKeyFailed
 }
+func (p *distributedValidateProbe) CacheHit()  { p.result = distributedResultHit }
+func (p *distributedValidateProbe) CacheMiss() { p.result = distributedResultMiss }
 func (p *distributedValidateProbe) GetFailed(_ error) {
 	p.status = errorStatusAttr
 	p.result = distributedResultGetFailed

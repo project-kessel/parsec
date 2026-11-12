@@ -94,6 +94,8 @@ type DistributedCachingValidatorObserver interface {
 // Implementations should embed NoOpDistributedValidateProbe for forward compatibility.
 type DistributedValidateProbe interface {
 	CacheKeyFailed(err error)
+	CacheHit()
+	CacheMiss()
 	GetFailed(err error)
 	ResultExpired()
 	End()
@@ -160,6 +162,8 @@ func (NoOpInMemoryValidateProbe) End()                 {}
 type NoOpDistributedValidateProbe struct{}
 
 func (NoOpDistributedValidateProbe) CacheKeyFailed(error) {}
+func (NoOpDistributedValidateProbe) CacheHit()            {}
+func (NoOpDistributedValidateProbe) CacheMiss()           {}
 func (NoOpDistributedValidateProbe) GetFailed(error)      {}
 func (NoOpDistributedValidateProbe) ResultExpired()       {}
 func (NoOpDistributedValidateProbe) End()                 {}

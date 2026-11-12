@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -927,6 +928,41 @@ func TestCELMapper_LayerA(t *testing.T) {
 			}
 			if result.Decision.Reason != "" {
 				t.Errorf("Layer A Reason should be empty, got %q", result.Decision.Reason)
+			}
+		})
+	}
+}
+
+func TestCELMapperAccessDeniedThreeArgumentsRejected(t *testing.T) {
+	if _, err := NewCELMapper(`accessDenied("policy denied", "tenant_policy", "tenant_policy_denial")`); err == nil {
+		t.Fatal("three-argument accessDenied compiled; audit event names are not a CEL concern")
+	}
+}
+
+func TestCELMapperClassifiedAccessDenied(t *testing.T) {
+	for _, classification := range []string{"policy_denied", "tenant.policy-1", "", "bad label", "bad\nlabel", "é", strings.Repeat("a", 129)} {
+		t.Run(classification, func(t *testing.T) {
+			encoded, err := json.Marshal(classification)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, err := NewCELMapper(`accessDenied("policy denied", ` + string(encoded) + `)`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := m.Map(context.Background(), &service.MapperInput{})
+			if classification != "policy_denied" && classification != "tenant.policy-1" {
+				if err == nil {
+					t.Fatal("invalid classification accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision := result.Decision
+			if decision.Action != service.MappingDeny || decision.OAuthError != service.OAuthAccessDenied || decision.Message != "policy denied" || decision.Reason != "" || decision.Classification != classification {
+				t.Fatalf("unexpected classified decision: %+v", decision.ExchangeError)
 			}
 		})
 	}

@@ -79,11 +79,38 @@ type TokenExchangeProbe interface {
 	// RequestContextParseFailed is called when request_context parsing fails.
 	RequestContextParseFailed(err error)
 
+	// SubjectCredentialExtracted is called before validating the subject token.
+	SubjectCredentialExtracted(cred trust.Credential, headersUsed []string)
+
 	// SubjectTokenValidationSucceeded is called when subject token validation succeeds.
 	SubjectTokenValidationSucceeded(subject *trust.Result)
 
 	// SubjectTokenValidationFailed is called when subject token validation fails.
 	SubjectTokenValidationFailed(err error)
+
+	// TokenIssuanceFailed is called when token issuance fails after all
+	// validations have passed (e.g. signing error, nil token).
+	// This is an unexpected system failure, not a policy denial.
+	TokenIssuanceFailed(err error)
+
+	// TokenIssuanceDenied is called when token issuance is refused for a
+	// known policy or protocol reason (e.g. OAuth error from the issuer).
+	// This is an expected denial, not a system failure.
+	TokenIssuanceDenied(err error)
+
+	// TokenIssued is called once, when the exchange is about to return the
+	// issued token to the caller.
+	TokenIssued()
+
+	// InvalidRequest is called when the caller sent a request the server
+	// refuses as malformed or unsupported (e.g. unsupported grant type,
+	// audience mismatch). This is a client error, not a system failure.
+	InvalidRequest(err error)
+
+	// RequestFailed signals that the exchange request failed on the server
+	// side for a reason not covered by a more specific callback (e.g. claims
+	// filter lookup or trust store filter failure).
+	RequestFailed(err error)
 
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
@@ -147,6 +174,16 @@ type AuthzCheckProbe interface {
 	// evaluate (as opposed to a deliberate denial).
 	PolicyEvaluationFailed(err error)
 
+	// TokenIssuanceFailed is called when token issuance fails after the
+	// policy decided to issue (e.g. signing error, nil token).
+	// This is an unexpected system failure, not a policy denial.
+	TokenIssuanceFailed(err error)
+
+	// TokenIssuanceDenied is called when token issuance is refused for a
+	// known policy or protocol reason (e.g. OAuth error from the issuer).
+	// This is an expected denial, not a system failure.
+	TokenIssuanceDenied(err error)
+
 	// End terminates the observation. Should be deferred to ensure cleanup.
 	End()
 }
@@ -177,6 +214,8 @@ func (NoOpTokenIssuanceProbe) End()                                             
 // Embed this in concrete probe types for forward compatibility.
 type NoOpTokenExchangeProbe struct{}
 
+func (NoOpTokenExchangeProbe) SubjectCredentialExtracted(trust.Credential, []string) {}
+
 func (NoOpTokenExchangeProbe) ActorCredentialExtracted(trust.Credential, []string) {}
 func (NoOpTokenExchangeProbe) ActorCredentialExtractionFailed(error)               {}
 func (NoOpTokenExchangeProbe) ActorValidationSucceeded(*trust.Result)              {}
@@ -185,6 +224,11 @@ func (NoOpTokenExchangeProbe) RequestContextParsed(*request.RequestAttributes)  
 func (NoOpTokenExchangeProbe) RequestContextParseFailed(error)                     {}
 func (NoOpTokenExchangeProbe) SubjectTokenValidationSucceeded(*trust.Result)       {}
 func (NoOpTokenExchangeProbe) SubjectTokenValidationFailed(error)                  {}
+func (NoOpTokenExchangeProbe) TokenIssuanceFailed(error)                           {}
+func (NoOpTokenExchangeProbe) TokenIssuanceDenied(error)                           {}
+func (NoOpTokenExchangeProbe) TokenIssued()                                        {}
+func (NoOpTokenExchangeProbe) InvalidRequest(error)                                {}
+func (NoOpTokenExchangeProbe) RequestFailed(error)                                 {}
 func (NoOpTokenExchangeProbe) End()                                                {}
 
 // NoOpAuthzCheckProbe is a no-op implementation of AuthzCheckProbe.
@@ -205,6 +249,8 @@ func (NoOpAuthzCheckProbe) PolicyDecisionIssue(int, string, string)             
 func (NoOpAuthzCheckProbe) PolicyDecisionAllowWithoutIssue(string)                {}
 func (NoOpAuthzCheckProbe) PolicyDecisionDeny(string)                             {}
 func (NoOpAuthzCheckProbe) PolicyEvaluationFailed(error)                          {}
+func (NoOpAuthzCheckProbe) TokenIssuanceFailed(error)                             {}
+func (NoOpAuthzCheckProbe) TokenIssuanceDenied(error)                             {}
 func (NoOpAuthzCheckProbe) End()                                                  {}
 
 // --- NoOp observer implementations ---

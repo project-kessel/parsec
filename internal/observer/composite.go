@@ -198,6 +198,12 @@ func (c *compositeAll) GRPCServeFailed(err error) {
 	}
 }
 
+func (c *compositeAll) ProcessReady(info server.ProcessInfo) {
+	for _, ch := range c.children {
+		ch.ProcessReady(info)
+	}
+}
+
 func (c *compositeAll) HTTPServeFailed(err error) {
 	for _, ch := range c.children {
 		ch.HTTPServeFailed(err)
@@ -381,9 +387,19 @@ func (m *compositeKeyCacheUpdateProbe) End() {
 
 type compositeKMSRotateProbe struct{ probes []keys.KMSRotateProbe }
 
+func (m *compositeKMSRotateProbe) KeyCreated() {
+	for _, p := range m.probes {
+		p.KeyCreated()
+	}
+}
 func (m *compositeKMSRotateProbe) CreateKeyFailed(err error) {
 	for _, p := range m.probes {
 		p.CreateKeyFailed(err)
+	}
+}
+func (m *compositeKMSRotateProbe) AliasChanged(created bool) {
+	for _, p := range m.probes {
+		p.AliasChanged(created)
 	}
 }
 func (m *compositeKMSRotateProbe) AliasCheckFailed(err error) {
@@ -394,6 +410,11 @@ func (m *compositeKMSRotateProbe) AliasCheckFailed(err error) {
 func (m *compositeKMSRotateProbe) AliasUpdateFailed(err error) {
 	for _, p := range m.probes {
 		p.AliasUpdateFailed(err)
+	}
+}
+func (m *compositeKMSRotateProbe) DeletionScheduled() {
+	for _, p := range m.probes {
+		p.DeletionScheduled()
 	}
 }
 func (m *compositeKMSRotateProbe) OldKeyDeletionFailed(keyID string, err error) {
@@ -589,6 +610,16 @@ func (m *compositeDistributedValidateProbe) CacheKeyFailed(err error) {
 		p.CacheKeyFailed(err)
 	}
 }
+func (m *compositeDistributedValidateProbe) CacheHit() {
+	for _, p := range m.probes {
+		p.CacheHit()
+	}
+}
+func (m *compositeDistributedValidateProbe) CacheMiss() {
+	for _, p := range m.probes {
+		p.CacheMiss()
+	}
+}
 func (m *compositeDistributedValidateProbe) GetFailed(err error) {
 	for _, p := range m.probes {
 		p.GetFailed(err)
@@ -637,6 +668,17 @@ func (m *compositeCacheRefreshProbe) End() {
 }
 
 type compositeStopProbe struct{ probes []server.StopProbe }
+
+func (m *compositeStopProbe) ShutdownCompleted() {
+	for _, p := range m.probes {
+		p.ShutdownCompleted()
+	}
+}
+func (m *compositeStopProbe) ShutdownFailed() {
+	for _, p := range m.probes {
+		p.ShutdownFailed()
+	}
+}
 
 func (m *compositeStopProbe) End() {
 	for _, p := range m.probes {
@@ -724,6 +766,12 @@ func (m *compositeTokenExchangeProbe) RequestContextParseFailed(err error) {
 	}
 }
 
+func (m *compositeTokenExchangeProbe) SubjectCredentialExtracted(cred trust.Credential, headersUsed []string) {
+	for _, p := range m.probes {
+		p.SubjectCredentialExtracted(cred, headersUsed)
+	}
+}
+
 func (m *compositeTokenExchangeProbe) SubjectTokenValidationSucceeded(subject *trust.Result) {
 	for _, p := range m.probes {
 		p.SubjectTokenValidationSucceeded(subject)
@@ -735,7 +783,31 @@ func (m *compositeTokenExchangeProbe) SubjectTokenValidationFailed(err error) {
 		p.SubjectTokenValidationFailed(err)
 	}
 }
-
+func (m *compositeTokenExchangeProbe) TokenIssuanceFailed(err error) {
+	for _, p := range m.probes {
+		p.TokenIssuanceFailed(err)
+	}
+}
+func (m *compositeTokenExchangeProbe) TokenIssuanceDenied(err error) {
+	for _, p := range m.probes {
+		p.TokenIssuanceDenied(err)
+	}
+}
+func (m *compositeTokenExchangeProbe) TokenIssued() {
+	for _, p := range m.probes {
+		p.TokenIssued()
+	}
+}
+func (m *compositeTokenExchangeProbe) InvalidRequest(err error) {
+	for _, p := range m.probes {
+		p.InvalidRequest(err)
+	}
+}
+func (m *compositeTokenExchangeProbe) RequestFailed(err error) {
+	for _, p := range m.probes {
+		p.RequestFailed(err)
+	}
+}
 func (m *compositeTokenExchangeProbe) End() {
 	for _, p := range m.probes {
 		p.End()
@@ -830,6 +902,16 @@ func (m *compositeAuthzCheckProbe) PolicyEvaluationFailed(err error) {
 	}
 }
 
+func (m *compositeAuthzCheckProbe) TokenIssuanceFailed(err error) {
+	for _, p := range m.probes {
+		p.TokenIssuanceFailed(err)
+	}
+}
+func (m *compositeAuthzCheckProbe) TokenIssuanceDenied(err error) {
+	for _, p := range m.probes {
+		p.TokenIssuanceDenied(err)
+	}
+}
 func (m *compositeAuthzCheckProbe) End() {
 	for _, p := range m.probes {
 		p.End()

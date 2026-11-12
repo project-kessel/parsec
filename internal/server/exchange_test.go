@@ -830,7 +830,33 @@ func TestExchangeServer_Exchange_Observability(t *testing.T) {
 		p.AssertProbeSequence(
 			"ActorValidationSucceeded",
 			"RequestContextParsed",
+			"SubjectCredentialExtracted",
 			"SubjectTokenValidationSucceeded",
+			"TokenIssued",
+			"End",
+		)
+	})
+
+	t.Run("failed subject validation still reports extracted credential", func(t *testing.T) {
+		fakeObs := service.NewFakeObserver(t)
+		store := trust.NewStubStore()
+		// An empty store rejects this JWT subject; the anonymous actor succeeds.
+		tokenService := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), service.NewSimpleRegistry(), nil)
+		exchangeServer := NewExchangeServer(store, tokenService, NewStubClaimsFilterRegistry(), DefaultCredentialSources(), fakeObs)
+		_, err := exchangeServer.Exchange(ctx, &parsecv1.ExchangeRequest{
+			GrantType:        "urn:ietf:params:oauth:grant-type:token-exchange",
+			SubjectToken:     "invalid-subject",
+			SubjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+		})
+		if err == nil {
+			t.Fatal("expected subject validation failure")
+		}
+		p := fakeObs.AssertSingleProbe("TokenExchangeStarted", nil)
+		p.AssertProbeSequence(
+			"ActorValidationSucceeded",
+			"RequestContextParsed",
+			"SubjectCredentialExtracted",
+			"SubjectTokenValidationFailed",
 			"End",
 		)
 	})

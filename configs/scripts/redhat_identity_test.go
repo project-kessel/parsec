@@ -265,6 +265,9 @@ func TestRedHatIdentityCEL_CrossAccountForbidden(t *testing.T) {
 	if result.Decision.Message != "Cross account access is forbidden." {
 		t.Errorf("Message=%q", result.Decision.Message)
 	}
+	if result.Decision.Classification != "policy_denied" {
+		t.Errorf("Classification=%q, want policy_denied", result.Decision.Classification)
+	}
 }
 
 func TestRedHatIdentityCEL_CrossAccountRBACDenied(t *testing.T) {
@@ -289,6 +292,9 @@ func TestRedHatIdentityCEL_CrossAccountRBACDenied(t *testing.T) {
 	}
 	if result.Decision.Message != "Access denied from RBAC on cross-access check." {
 		t.Errorf("Message=%q", result.Decision.Message)
+	}
+	if result.Decision.Classification != "policy_denied" {
+		t.Errorf("Classification=%q, want policy_denied", result.Decision.Classification)
 	}
 }
 

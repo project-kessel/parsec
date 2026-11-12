@@ -19,9 +19,25 @@ server:
   http_port: 8080
 
 observability:
-  type: logging
+  type: composite
   log_level: debug
   log_format: json
+  # Metadata keys audit.record() may emit. Keys not listed are stripped.
+  audit_metadata_keys:
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_status"
+  # Validated claims copied into subject.attributes / actor.attributes.
+  # The first claim holding a non-empty string wins; dots reach nested claims.
+  audit_principal_claims:
+    org_id: ["org_id", "rh-org-id", "organization.id", "account_id"]
+    account_number: ["account_number", "organization.account_number"]
+  observers:
+    - type: audit
+    - type: logging
 
 trust_domain: "parsec.example.com"
 

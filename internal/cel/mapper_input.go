@@ -79,7 +79,42 @@ func (lib *mapperInputLib) CompileOptions() []cel.EnvOption {
 		cel.Variable("request", cel.DynType),
 	}
 	opts = append(opts, oauthAbortFunctions()...)
+	opts = append(opts, cel.Function("accessDenied",
+		cel.Overload("accessDenied_string_string",
+			[]*cel.Type{cel.StringType, cel.StringType}, cel.DynType,
+			cel.BinaryBinding(classifiedAccessDenied),
+		),
+	))
 	return opts
+}
+
+// classifiedAccessDenied carries a bounded policy label to issuance observers
+// without changing the OAuth error, description, or transport status.
+func classifiedAccessDenied(message, classification ref.Val) ref.Val {
+	msg, ok := message.Value().(string)
+	if !ok {
+		return types.NewErr("accessDenied message must be a string")
+	}
+	label, ok := classification.Value().(string)
+	if !ok || !validAuditLabel(label) {
+		return types.NewErr("accessDenied classification must be 1-128 ASCII letters, digits, dots, underscores, or hyphens")
+	}
+	decision := service.DenyOAuth(service.OAuthAccessDenied, msg).Decision
+	decision.Classification = label
+	return types.WrapErr(&abortError{decision: decision})
+}
+
+func validAuditLabel(label string) bool {
+	if len(label) == 0 || len(label) > 128 {
+		return false
+	}
+	for _, r := range label {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (lib *mapperInputLib) ProgramOptions() []cel.ProgramOption {
@@ -104,8 +139,8 @@ func oauthAbortFunctions() []cel.EnvOption {
 		{"unsupportedGrantType", func(m string) service.MappingResult { return service.DenyOAuth(service.OAuthUnsupportedGrantType, m) }},
 		{"invalidScope", func(m string) service.MappingResult { return service.DenyOAuth(service.OAuthInvalidScope, m) }},
 		// accessDenied: policy-level denial (RFC 6749 §4.1.2.1) → HTTP 403 in
-		// ext_authz. Use for access-control policies (e.g. export compliance)
-		// that are not OAuth protocol errors.
+		// ext_authz. Use for access-control policies that are not OAuth
+		// protocol errors.
 		{"accessDenied", func(m string) service.MappingResult { return service.DenyOAuth(service.OAuthAccessDenied, m) }},
 		// Layer B — reason helpers (reason→code mapping lives in service)
 		{"invalidSubject", func(m string) service.MappingResult { return service.DenyReason(service.AbortReasonInvalidSubject, m) }},

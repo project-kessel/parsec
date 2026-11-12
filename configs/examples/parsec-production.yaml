@@ -10,6 +10,29 @@ server:
   grpc_port: 9090
   http_port: 8080
 
+observability:
+  type: composite
+  log_level: info
+  log_format: json
+  # Allowlist for audit.record() metadata keys. Keys that are not listed are
+  # stripped and the signal is kept. When omitted, all metadata keys are
+  # stripped (fail-closed). An explicit list is required for production use.
+  audit_metadata_keys:
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_status"
+  # Validated claims copied into subject.attributes / actor.attributes.
+  # The first claim holding a non-empty string wins; dots reach nested claims.
+  audit_principal_claims:
+    org_id: ["org_id", "rh-org-id", "organization.id", "account_id"]
+    account_number: ["account_number", "organization.account_number"]
+  observers:
+    - type: audit
+    - type: logging
+
 trust_domain: "parsec.prod.example.com"
 
 exchange_server:

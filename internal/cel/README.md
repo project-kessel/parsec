@@ -73,6 +73,17 @@ Also Deny decisions (`error == nil` from `Map`):
 
 ### MappingResult vs error
 
+`accessDenied(message, classification)` optionally attaches a policy label for
+issuance observers. A core audit reason code (for example `policy_denied`)
+becomes the request's `reason_code`; any other label is recorded as the
+decision's `classification`. The label must contain 1–128 ASCII letters,
+digits, dots, underscores, or hyphens. For example,
+`accessDenied("tenant is suspended", "tenant_suspended")` preserves the denial
+response and records a `policy` signal with classification `tenant_suspended`
+in the request's audit record. The label is internal metadata: it does not
+change OAuth fields, gRPC details, or HTTP status. Unlike recording inside a datasource fetch, this decision is
+observed even when the datasource result was cached.
+
 | Outcome | `Map` return |
 |---------|----------------|
 | Claims produced | `Allow` + claims, `err == nil` |

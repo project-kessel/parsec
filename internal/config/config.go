@@ -500,8 +500,8 @@ type FixtureResponse struct {
 // ObservabilityConfig configures application observability
 type ObservabilityConfig struct {
 	// Type selects the observer implementation
-	// Options: "logging", "noop", "metrics", "composite"
-	Type string `koanf:"type" usage:"observer type: logging, noop, metrics, composite"`
+	// Options: "audit", "logging", "noop", "metrics", "composite"
+	Type string `koanf:"type" usage:"observer type: audit, logging, noop, metrics, composite"`
 
 	// LogLevel sets the default log level for logging observer
 	// Options: "debug", "info", "warn", "error"
@@ -512,6 +512,23 @@ type ObservabilityConfig struct {
 	// Options: "json", "text"
 	// Default: "json"
 	LogFormat string `koanf:"log_format" usage:"log format: json, text"`
+
+	// EventPrefix is prepended to every audit event name. When omitted, audit
+	// events use "parsec_". Set it to an empty string to disable prefixing.
+	EventPrefix *string `koanf:"event_prefix" usage:"audit event-name prefix (default: parsec_)"`
+
+	// AllowedMetadataKeys is the allowlist of metadata keys that Lua scripts
+	// and other extensions may emit via audit.record(). When empty or unset,
+	// all metadata keys are stripped (fail-closed). When configured, keys
+	// that are not listed are stripped and the signal is kept (prevents
+	// secrets leakage).
+	AllowedMetadataKeys []string `koanf:"audit_metadata_keys" usage:"optional allowlist of audit.record() metadata keys"`
+
+	// PrincipalClaims selects the validated claims the audit observer copies
+	// into subject.attributes and actor.attributes: attribute name -> ordered
+	// claim paths (dots reach nested claims); the first non-empty string wins.
+	// When unset, no claims are copied.
+	PrincipalClaims map[string][]string `koanf:"audit_principal_claims"`
 
 	// Event-specific logging configuration
 	TokenIssuance   *EventLoggingConfig `koanf:"token_issuance"`

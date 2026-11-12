@@ -1,0 +1,84 @@
+# parsec Configuration - Audit Event Verification (RHCLOUD-50612)
+#
+# WARNING: This configuration uses stub_validator (accepts ANY bearer token)
+# and listens on all network interfaces. Run it only inside a network-isolated
+# VM, namespace, or container with no external ingress or published ports.
+# A container on the default network is not isolated. Never run this command
+# directly on a network-connected host or in production.
+#
+# Fully hermetic (no fixtures, no network) configuration used to demonstrate
+# and verify structured audit logging end-to-end for both the ext_authz
+# Check path and the TokenExchange path. Uses stub_validator (accepts any
+# bearer token) and stub issuers (no signing) so the full request lifecycle
+# can be exercised with plain curl/grpcurl and no external dependencies.
+#
+# Usage (first enter the isolated environment described above; run curl and
+# grpcurl inside that same environment so no listener is exposed remotely):
+#   go build -o bin/parsec ./cmd/parsec
+#   ./bin/parsec serve --config ./configs/examples/parsec-audit-verification.yaml
+#
+# See configs/README.md for the audit settings and event fields.
+# test/e2e/hermetic_audit_test.go verifies structured audit output.
+
+server:
+  grpc_port: 9090
+  http_port: 8080
+
+observability:
+  type: composite
+  log_level: debug
+  log_format: json
+  # x-request-id is used for local audit correlation only.
+  # Metadata keys audit.record() may emit. Keys not listed are stripped.
+  audit_metadata_keys:
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_status"
+  # Validated claims copied into subject.attributes / actor.attributes.
+  # The first claim holding a non-empty string wins; dots reach nested claims.
+  audit_principal_claims:
+    org_id: ["org_id", "rh-org-id", "organization.id", "account_id"]
+    account_number: ["account_number", "organization.account_number"]
+  observers:
+    - type: audit
+    - type: logging
+
+trust_domain: "parsec.demo.local"
+
+exchange_server:
+  claims_filter:
+    type: stub
+
+# Accepts any bearer or JWT as subject "test-subject" (see trust.NewStubValidator).
+# ext_authz uses the bearer credential source. Token exchange with
+# subject_token_type jwt needs the jwt credential type; stub_validator
+# defaults to bearer only when credential_types is omitted.
+# Sufficient to exercise the full authz/exchange/audit pipeline without JWKS.
+trust_store:
+  type: stub_store
+  validators:
+    - name: any-bearer
+      type: stub_validator
+      credential_types: ["bearer", "jwt"]
+
+# Stub issuers: no signing, deterministic token values, no external calls.
+issuers:
+  - token_type: "urn:ietf:params:oauth:token-type:txn_token"
+    type: stub
+    issuer_url: "https://parsec.demo.local"
+    ttl: 5m
+  - token_type: "urn:redhat:params:oauth:token-type:rh-identity"
+    type: stub
+    issuer_url: "https://parsec.demo.local"
+    ttl: 5m
+
+credential_sources:
+  - name: authorization-bearer
+    type: authorization_bearer_opaque
+
+# authz_server.policy is omitted: defaults to StaticAuthenticatedPolicy issuing
+# a transaction token via the "Transaction-Token" header for authenticated
+# subjects, and denying anonymous subjects (credential_missing).
