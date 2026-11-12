@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/project-kessel/parsec/internal/httpclient"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 )
+
+var distributedGroupSeq atomic.Uint64
 
 func TestNewLuaValidator(t *testing.T) {
 	tests := []struct {
@@ -810,7 +813,7 @@ func TestDistributedCachingValidator(t *testing.T) {
 		expiresAt: time.Now().Add(time.Hour),
 	}
 	cached := NewDistributedCachingValidator("test-distributed", source, NoOpTrustObserver{}, DistributedValidatorCachingConfig{
-		GroupName:      "test-validator-distributed-cache",
+		GroupName:      fmt.Sprintf("test-validator-distributed-cache-%d", distributedGroupSeq.Add(1)),
 		CacheSizeBytes: 1 << 20,
 		CacheTTL:       time.Hour,
 	})
@@ -862,7 +865,7 @@ func TestDistributedCachingValidator_CacheOutcomesDistinguishHitFromMiss(t *test
 	}
 	obs := &recordingDistributedValidateObserver{}
 	cached := NewDistributedCachingValidator("test-distributed-outcomes", source, obs, DistributedValidatorCachingConfig{
-		GroupName:      "test-validator-distributed-outcomes-cache",
+		GroupName:      fmt.Sprintf("test-validator-distributed-outcomes-cache-%d", distributedGroupSeq.Add(1)),
 		CacheSizeBytes: 1 << 20,
 		CacheTTL:       time.Hour,
 	})
@@ -923,7 +926,7 @@ func TestDistributedCachingValidator_SourceRejectionIsNotACacheFailure(t *testin
 		t.Run(tt.name, func(t *testing.T) {
 			obs := &recordingDistributedValidateObserver{}
 			cached := NewDistributedCachingValidator("test-distributed-rejection", tt.source, obs, DistributedValidatorCachingConfig{
-				GroupName:      fmt.Sprintf("test-validator-distributed-rejection-cache-%d", i),
+				GroupName:      fmt.Sprintf("test-validator-distributed-rejection-cache-%d-%d", distributedGroupSeq.Add(1), i),
 				CacheSizeBytes: 1 << 20,
 				CacheTTL:       time.Hour,
 			})
@@ -952,7 +955,7 @@ func TestDistributedCachingValidator_NilResultIsAFailure(t *testing.T) {
 	obs := &recordingDistributedValidateObserver{}
 	source := &countingCacheableValidator{nilResult: true}
 	cached := NewDistributedCachingValidator("test-distributed-nil", source, obs, DistributedValidatorCachingConfig{
-		GroupName:      "test-validator-distributed-nil-cache",
+		GroupName:      fmt.Sprintf("test-validator-distributed-nil-cache-%d", distributedGroupSeq.Add(1)),
 		CacheSizeBytes: 1 << 20,
 		CacheTTL:       time.Hour,
 	})

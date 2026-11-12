@@ -773,13 +773,15 @@ func TestShippedConfigAuditRecord(t *testing.T) {
 			probe.End()
 
 			events := map[string]map[string]any{}
+			recordCount := 0
 			for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
 				var record map[string]any
 				if json.Unmarshal([]byte(line), &record) == nil && record["schema_version"] != nil {
+					recordCount++
 					events[record["event"].(string)] = record
 				}
 			}
-			require.Len(t, events, 1, "one record per request")
+			require.Equal(t, 1, recordCount, "one record per request")
 			signals := events["parsec_request"]["signals"].([]any)
 			require.Len(t, signals, 1)
 			assert.Equal(t, "target-1", signals[0].(map[string]any)["metadata"].(map[string]any)["target_org_id"])
