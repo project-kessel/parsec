@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -651,9 +652,93 @@ observability:
 	assert.Equal(t, map[string][]string{"org_id": {"org_id", "organization.id"}}, cfg.Observability.PrincipalClaims)
 }
 
-// TestShippedConfigAuditRecord checks that shipped application configs emit
-// one request record carrying what a log pipeline needs to derive deployment
-// events: signals, principal attributes, credential types and validation.
+// TestShippedAuditClaimFallbacks exercises every shipped principal mapping,
+// including the config embedded in the ephemeral deployment template.
+func TestShippedAuditClaimFallbacks(t *testing.T) {
+	for _, path := range []string{
+		"../../configs/parsec.yaml",
+		"../../deploy/parsec-ephem.yaml",
+		"../../configs/examples/parsec-audit-verification.yaml",
+		"../../configs/examples/parsec-bop-unsigned-json-hermetic.yaml",
+		"../../configs/examples/parsec-cert-auth-hermetic.yaml",
+		"../../configs/examples/parsec-cert-auth.yaml",
+		"../../configs/examples/parsec-cross-account-local.yaml",
+		"../../configs/examples/parsec-production.yaml",
+		"../../configs/examples/parsec-registry-auth-hermetic.yaml",
+		"../../configs/examples/parsec-registry-auth.yaml",
+	} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			configPath := path
+			if filepath.Base(path) == "parsec-ephem.yaml" {
+				data, err := os.ReadFile(path)
+				require.NoError(t, err)
+				var template struct {
+					Objects []struct {
+						Kind string            `yaml:"kind"`
+						Data map[string]string `yaml:"data"`
+					} `yaml:"objects"`
+				}
+				require.NoError(t, yaml.Unmarshal(data, &template))
+				var embedded string
+				for _, object := range template.Objects {
+					if object.Kind == "ConfigMap" && object.Data["parsec.yaml"] != "" {
+						embedded = object.Data["parsec.yaml"]
+						break
+					}
+				}
+				require.NotEmpty(t, embedded)
+				configPath = filepath.Join(t.TempDir(), "parsec.yaml")
+				require.NoError(t, os.WriteFile(configPath, []byte(embedded), 0o600))
+			}
+			loader, err := NewLoader(configPath)
+			require.NoError(t, err)
+			cfg, err := loader.Get()
+			require.NoError(t, err)
+			require.NotNil(t, cfg.Observability)
+			require.NotNil(t, cfg.Observability.PrincipalClaims)
+			require.Equal(t, []string{"org_id", "rh-org-id", "organization.id", "account_id"}, cfg.Observability.PrincipalClaims["org_id"])
+			require.Equal(t, []string{"account_number", "organization.account_number"}, cfg.Observability.PrincipalClaims["account_number"])
+			for _, tc := range []struct {
+				name   string
+				claims map[string]any
+				want   map[string]any
+			}{
+				{"console", map[string]any{"organization": map[string]any{"id": "org-nested", "account_number": "acct-nested"}}, map[string]any{"org_id": "org-nested", "account_number": "acct-nested"}},
+				{"rhsm", map[string]any{"account_id": "org-rhsm", "account_number": "acct-rhsm"}, map[string]any{"org_id": "org-rhsm", "account_number": "acct-rhsm"}},
+				{"precedence", map[string]any{"org_id": "primary", "rh-org-id": "secondary", "organization": map[string]any{"id": "nested", "account_number": "nested"}, "account_id": "fallback", "account_number": "primary"}, map[string]any{"org_id": "primary", "account_number": "primary"}},
+				{"rh claim precedence", map[string]any{"rh-org-id": "secondary", "organization": map[string]any{"id": "nested"}, "account_id": "fallback"}, map[string]any{"org_id": "secondary"}},
+				{"nested claim precedence", map[string]any{"organization": map[string]any{"id": "nested"}, "account_id": "fallback"}, map[string]any{"org_id": "nested"}},
+				{"blank and numeric primaries", map[string]any{"org_id": "  ", "rh-org-id": 42, "organization": map[string]any{"id": "", "account_number": "nested"}, "account_id": "fallback", "account_number": 42}, map[string]any{"org_id": "fallback", "account_number": "nested"}},
+				{"missing", map[string]any{}, nil},
+				{"blank fallbacks", map[string]any{"account_id": " ", "organization": map[string]any{"account_number": ""}}, nil},
+				{"numeric fallbacks", map[string]any{"account_id": 42, "organization": map[string]any{"account_number": 42}}, nil},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					var buf bytes.Buffer
+					p := NewProvider(cfg)
+					obs, err := p.newAuditObserver(cfg.Observability, jsonLogCtx(&buf))
+					require.NoError(t, err)
+					_, probe := obs.AuthzCheckStarted(context.Background())
+					probe.ActorValidationSucceeded(&trust.Result{Subject: "actor", Claims: tc.claims})
+					probe.SubjectValidationSucceeded(&trust.Result{Subject: "subject", Claims: tc.claims})
+					probe.PolicyDecisionAllowWithoutIssue("allowed")
+					probe.End()
+					var record map[string]any
+					require.NoError(t, json.Unmarshal(buf.Bytes(), &record))
+					for _, principal := range []string{"subject", "actor"} {
+						if tc.want == nil {
+							require.NotContains(t, record[principal], "attributes")
+						} else {
+							require.Equal(t, tc.want, record[principal].(map[string]any)["attributes"])
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestShippedConfigAuditRecord checks the request evidence used by downstream rules.
 func TestShippedConfigAuditRecord(t *testing.T) {
 	for _, path := range []string{
 		"../../configs/parsec.yaml",

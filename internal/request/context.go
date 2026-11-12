@@ -34,13 +34,11 @@ const maxLayerNameLength = 128
 // attribute cache behavior to specific layers (e.g. "validator_memory",
 // "validator_distributed", "datasource:backoffice").
 //
-// failureReason is the classified failure reason from the first nested probe
-// failure (first-writer-wins). Subsequent failures do not overwrite it,
-// ensuring the audit record reflects the root-cause failure.
+// failedComponent identifies the first observed component failure. That
+// failure may have recovered and need not cause the terminal request outcome.
 type AuditState struct {
 	mu                sync.RWMutex
 	cacheLayers       []CacheLayer
-	failureReason     string
 	failedComponent   string
 	dependencyOutages uint64
 }
@@ -118,23 +116,9 @@ func (s *AuditState) RecordCacheLayer(layer, status string) {
 	s.mu.Unlock()
 }
 
-// SetFailureReason records a classified failure reason using first-writer-wins
-// semantics. Once set, subsequent calls are no-ops, ensuring the audit record
-// reflects the root-cause failure rather than the last one.
-func (s *AuditState) SetFailureReason(reason string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.failureReason == "" {
-		s.failureReason = reason
-	}
-	s.mu.Unlock()
-}
-
 // SetFailedComponent records the identity of the first component that failed
-// (first-writer-wins). The name is sanitized the same way cache layer names
-// are to prevent malformed configuration values from reaching the audit schema.
+// (first-writer-wins), even if it later recovered. The name is sanitized like
+// cache layer names to keep malformed configuration out of the audit schema.
 func (s *AuditState) SetFailedComponent(component string) {
 	if s == nil {
 		return
@@ -174,13 +158,13 @@ func (s *AuditState) DependencyOutages() uint64 {
 
 // Snapshot returns a consistent point-in-time copy of the audit
 // classifications. The returned cacheLayers slice is a copy.
-func (s *AuditState) Snapshot() (cacheLayers []CacheLayer, failureReason string, failedComponent string, dependencyOutage bool) {
+func (s *AuditState) Snapshot() (cacheLayers []CacheLayer, failedComponent string, dependencyOutage bool) {
 	if s == nil {
-		return nil, "", "", false
+		return nil, "", false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	layers := make([]CacheLayer, len(s.cacheLayers))
 	copy(layers, s.cacheLayers)
-	return layers, s.failureReason, s.failedComponent, s.dependencyOutages > 0
+	return layers, s.failedComponent, s.dependencyOutages > 0
 }

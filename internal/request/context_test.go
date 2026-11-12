@@ -18,7 +18,7 @@ func TestMaxCacheLayersSaturation(t *testing.T) {
 		state.RecordCacheLayer("layer", status)
 	}
 
-	layers, _, _, _ := state.Snapshot()
+	layers, _, _ := state.Snapshot()
 	require.Len(t, layers, maxCacheLayers,
 		"cacheLayers must not grow past maxCacheLayers even though RecordCacheLayer was called more times")
 }
@@ -36,15 +36,16 @@ func TestRecordCacheLayerConcurrent(t *testing.T) {
 		}(i)
 		go func(i int) {
 			defer wg.Done()
-			state.SetFailureReason("dependency_failure")
+			state.SetDependencyOutage()
 		}(i)
 	}
 	wg.Wait()
 
-	layers, failureReason, _, _ := state.Snapshot()
+	layers, _, outage := state.Snapshot()
 	require.LessOrEqual(t, len(layers), maxCacheLayers,
 		"cacheLayers must never exceed maxCacheLayers under concurrent access")
-	require.Equal(t, "dependency_failure", failureReason)
+	require.True(t, outage)
+	require.Equal(t, uint64(goroutines), state.DependencyOutages())
 }
 
 func TestLayerNameSanitized(t *testing.T) {
@@ -63,7 +64,7 @@ func TestLayerNameSanitized(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			state := &AuditState{}
 			state.RecordCacheLayer(tt.layer, "hit")
-			layers, _, _, _ := state.Snapshot()
+			layers, _, _ := state.Snapshot()
 			require.Len(t, layers, 1)
 			require.Equal(t, tt.want, layers[0].Layer)
 		})
@@ -73,18 +74,8 @@ func TestLayerNameSanitized(t *testing.T) {
 func TestRecordCacheLayerDropsInvalidStatus(t *testing.T) {
 	state := &AuditState{}
 	state.RecordCacheLayer("layer", "bogus")
-	layers, _, _, _ := state.Snapshot()
+	layers, _, _ := state.Snapshot()
 	require.Empty(t, layers)
-}
-
-func TestSetFailureReasonFirstWriterWins(t *testing.T) {
-	state := &AuditState{}
-	state.SetFailureReason("dependency_failure")
-	state.SetFailureReason("internal_error")
-
-	_, failureReason, _, _ := state.Snapshot()
-	require.Equal(t, "dependency_failure", failureReason,
-		"the first failure reason must win; subsequent calls must be no-ops")
 }
 
 func TestSetFailedComponentFirstWriterWins(t *testing.T) {
@@ -92,7 +83,7 @@ func TestSetFailedComponentFirstWriterWins(t *testing.T) {
 	state.SetFailedComponent("backoffice-proxy")
 	state.SetFailedComponent("enrichment")
 
-	_, _, failedComponent, _ := state.Snapshot()
+	_, failedComponent, _ := state.Snapshot()
 	require.Equal(t, "backoffice-proxy", failedComponent,
 		"the first failed component must win; subsequent calls must be no-ops")
 }
@@ -101,7 +92,7 @@ func TestSetFailedComponentSanitized(t *testing.T) {
 	state := &AuditState{}
 	state.SetFailedComponent("back\noffice")
 
-	_, _, failedComponent, _ := state.Snapshot()
+	_, failedComponent, _ := state.Snapshot()
 	require.Equal(t, "unknown", failedComponent,
 		"component names with control characters must be sanitized")
 }
@@ -109,18 +100,17 @@ func TestSetFailedComponentSanitized(t *testing.T) {
 func TestSetFailedComponentNilSafe(t *testing.T) {
 	var state *AuditState
 	state.SetFailedComponent("backoffice")
-	_, _, failedComponent, _ := state.Snapshot()
+	_, failedComponent, _ := state.Snapshot()
 	require.Empty(t, failedComponent)
 }
 
 func TestSnapshotOnNilState(t *testing.T) {
 	var state *AuditState
-	layers, failureReason, _, _ := state.Snapshot()
+	layers, _, outage := state.Snapshot()
 	require.Empty(t, layers)
-	require.Empty(t, failureReason)
+	require.False(t, outage)
 
-	// RecordCacheLayer, SetFailureReason, and SetDependencyOutage must also tolerate a nil receiver.
+	// RecordCacheLayer and SetDependencyOutage must also tolerate a nil receiver.
 	state.RecordCacheLayer("layer", "hit")
-	state.SetFailureReason("dependency_failure")
 	state.SetDependencyOutage()
 }

@@ -36,6 +36,7 @@ const (
 const (
 	SchemaVersion      = "1.1"
 	DefaultEventPrefix = "parsec_"
+	maxTokenTypeLength = 256
 )
 
 // Metadata is safe service metadata included in every audit record.
@@ -76,7 +77,8 @@ func WithEventPrefix(prefix string) Option {
 // WithAllowedMetadataKeys sets the allowlist of metadata keys that
 // audit.record() may emit. Keys that are not listed are stripped and the
 // signal is kept. A non-nil empty map strips all metadata keys (fail-closed
-// default). A nil map means allow-all (text/length validation only).
+// default). Explicitly passing a nil map opts into allow-all (text/length
+// validation only).
 func WithAllowedMetadataKeys(keys map[string]bool) Option {
 	return func(observer *Observer) {
 		observer.allowedMetadataKeys = keys
@@ -95,20 +97,28 @@ func WithPrincipalClaims(claims map[string][]string) Option {
 }
 
 // WithTokenTypes sets the token types the deployment can issue. Only these
-// are named in resource.token_types and resource.requested_token_types; any
-// other requested type is recorded as UnrecognizedTokenType, because on the
-// token exchange path it is a client-supplied string.
+// are named in resource.token_types and resource.requested_token_types, provided
+// they are nonempty UTF-8 text of at most 256 bytes with no control characters
+// or surrounding whitespace. All other types are recorded as
+// UnrecognizedTokenType, because on the token exchange path a type is a
+// client-supplied string.
 func WithTokenTypes(tokenTypes []service.TokenType) Option {
 	return func(observer *Observer) {
 		observer.tokenTypes = make(map[service.TokenType]bool, len(tokenTypes))
 		for _, tokenType := range tokenTypes {
-			observer.tokenTypes[tokenType] = true
+			// Keep names exact: trimming or truncating could make distinct
+			// configured types indistinguishable in the audit record.
+			name := string(tokenType)
+			if name != "" && len(name) <= maxTokenTypeLength && utf8.ValidString(name) && safeValue(name, maxTokenTypeLength) == name {
+				observer.tokenTypes[tokenType] = true
+			}
 		}
 	}
 }
 
+// New strips all signal metadata by default; options may explicitly allow it.
 func New(logger zerolog.Logger, meta Metadata, options ...Option) (*Observer, error) {
-	observer := &Observer{logger: logger, meta: meta, eventPrefix: DefaultEventPrefix}
+	observer := &Observer{logger: logger, meta: meta, eventPrefix: DefaultEventPrefix, allowedMetadataKeys: map[string]bool{}}
 	for _, option := range options {
 		option(observer)
 	}
@@ -223,6 +233,9 @@ func (o *Observer) AuthzCheckStarted(ctx context.Context) (context.Context, serv
 }
 
 func (o *Observer) TokenExchangeStarted(ctx context.Context, _, _, _, _ string) (context.Context, service.TokenExchangeProbe) {
+	// RequestContextParsed intentionally remains a no-op. Its filtered,
+	// client-reported attributes do not identify the exchange transport peer
+	// and must not replace this endpoint's method/path or populate source_ip.
 	return o.startRequest(ctx, "token_exchange", requestInfo{Protocol: "grpc", Method: http.MethodPost, Path: "/v1/token"})
 }
 
@@ -432,12 +445,23 @@ func (p *requestProbe) deriveCompletion() (outcome AuditOutcome, reasonCode stri
 		return AuditOutcomeDenied, auditctx.ReasonCredentialMalformed
 	}
 
-	// Validation failures
+	// Validation failures: a real infrastructure outage (JWKS down,
+	// distributed cache failure) overrides credential_invalid to
+	// failure/dependency_failure so bad signatures during an outage are
+	// attributed to the outage, not the credential.
 	if p.subjectValidationErr != nil {
-		return AuditOutcomeDenied, credentialFailureReason(p.subjectValidationErr)
+		reason := credentialFailureReason(p.subjectValidationErr)
+		if p.subjectDependencyOutage && reason == auditctx.ReasonCredentialInvalid {
+			return AuditOutcomeFailure, auditctx.ReasonDependencyFailure
+		}
+		return AuditOutcomeDenied, reason
 	}
 	if p.actorValidationErr != nil {
-		return AuditOutcomeDenied, credentialFailureReason(p.actorValidationErr)
+		reason := credentialFailureReason(p.actorValidationErr)
+		if p.actorDependencyOutage && reason == auditctx.ReasonCredentialInvalid {
+			return AuditOutcomeFailure, auditctx.ReasonDependencyFailure
+		}
+		return AuditOutcomeDenied, reason
 	}
 
 	// Client errors on the token exchange path: the caller sent something
@@ -496,20 +520,9 @@ func credentialValidation(credentialType string, validated bool, validationErr e
 func (p *requestProbe) End() {
 	outcome, reasonCode := p.deriveCompletion()
 
-	cacheLayers, failureReason, failedComponent, _ := p.state.Snapshot()
-	// token_issuance_failed is not replaced: a dependency may have failed
-	// earlier and been tolerated, so it cannot be assumed to be the cause.
-	// failed_component still names it.
-	if outcome == AuditOutcomeFailure && (reasonCode == "" || reasonCode == auditctx.ReasonInternalError) && failureReason != "" {
-		reasonCode = failureReason
-	}
-	// A real infrastructure outage (JWKS down, distributed cache failure)
-	// overrides credential_invalid to failure/dependency_failure so that
-	// bad signatures are not reported as outages.
-	if (p.subjectDependencyOutage || p.actorDependencyOutage) && outcome == AuditOutcomeDenied && reasonCode == auditctx.ReasonCredentialInvalid {
-		outcome = AuditOutcomeFailure
-		reasonCode = auditctx.ReasonDependencyFailure
-	}
+	// Earlier component failures are diagnostics, not necessarily the cause
+	// of this outcome: validation may have recovered through another validator.
+	cacheLayers, failedComponent, _ := p.state.Snapshot()
 
 	p.subject.Validation = credentialValidation(p.subject.CredentialType, p.subjectValidated, p.subjectValidationErr, p.subjectDependencyOutage)
 	p.actor.Validation = credentialValidation(p.actor.CredentialType, p.actorValidated, p.actorValidationErr, p.actorDependencyOutage)
@@ -628,7 +641,6 @@ func (p *auditDistributedCacheProbe) CacheMiss() {
 }
 func (p *auditDistributedCacheProbe) GetFailed(error) {
 	p.state.RecordCacheLayer("validator_distributed", "failure")
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent("validator_distributed")
 	p.state.SetDependencyOutage()
 }
@@ -654,9 +666,8 @@ func (p *auditDataSourceCacheProbe) CacheExpired() { p.state.RecordCacheLayer(p.
 
 // FetchFailed follows the CacheMiss or CacheExpired already recorded for this
 // lookup, so it adds no cache layer: the cache itself worked. The failure is
-// carried by the reason and failed_component.
+// recorded in failed_component without inferring the terminal request reason.
 func (p *auditDataSourceCacheProbe) FetchFailed(error) {
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.layer)
 }
 
@@ -670,19 +681,15 @@ func (o *Observer) LuaFetchStarted(ctx context.Context, name string) (context.Co
 	return ctx, &auditLuaFetchProbe{state: request.AuditStateFrom(ctx), name: name}
 }
 func (p *auditLuaFetchProbe) ScriptLoadFailed(error) {
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 func (p *auditLuaFetchProbe) ScriptExecutionFailed(error) {
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 func (p *auditLuaFetchProbe) InvalidReturnType(string) {
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 func (p *auditLuaFetchProbe) ResultConversionFailed(error) {
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 }
 
@@ -701,7 +708,6 @@ func (o *Observer) LuaValidateStarted(ctx context.Context, name string) (context
 }
 
 func (p *auditLuaValidateProbe) fault() {
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent(p.name)
 	p.state.SetDependencyOutage()
 }
@@ -719,7 +725,6 @@ func (o *Observer) JWTValidateStarted(ctx context.Context, _ string) (context.Co
 	return ctx, &auditJWTProbe{state: request.AuditStateFrom(ctx)}
 }
 func (p *auditJWTProbe) JWKSLookupFailed(error) {
-	p.state.SetFailureReason(auditctx.ReasonDependencyFailure)
 	p.state.SetFailedComponent("jwks")
 	p.state.SetDependencyOutage()
 }

@@ -62,6 +62,27 @@ func TestRegisterAuditServiceRejectsUnsafeOrUnknownFields(t *testing.T) {
 		"every discarded signal is counted, whether the collector or the Lua adapter refused it")
 }
 
+func TestRegisterAuditServiceCountsMigrationAndMetadataRejections(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		signal string
+	}{
+		{"removed event field", `{source="validator", operation="ok", outcome="failure", event="old_event"}`},
+		{"metadata non-string key", `{source="validator", operation="ok", outcome="failure", metadata={[1]="value"}}`},
+		{"metadata unsupported value", `{source="validator", operation="ok", outcome="failure", metadata={key={}}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			L := lua.NewState()
+			defer L.Close()
+			reporter := auditctx.NewCollector(nil)
+			RegisterAuditService(L, auditctx.WithReporter(context.Background(), reporter))
+			require.NoError(t, L.DoString(`assert(audit.record(`+tt.signal+`) == false)`))
+			require.Empty(t, reporter.Signals())
+			require.Equal(t, 1, reporter.Rejected(), "each discarded signal must be counted exactly once")
+		})
+	}
+}
+
 // A signal whose metadata only becomes valid once disallowed keys are
 // stripped must be kept, not rejected at the Lua boundary.
 func TestRegisterAuditServiceStripsBeforeValidating(t *testing.T) {

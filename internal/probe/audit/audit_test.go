@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -43,8 +44,9 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	})
 
 	probe.RequestAttributesParsed(&request.RequestAttributes{
-		Method: "GET",
-		Path:   "/api/widgets?access_token=secret-query",
+		Method:    "GET",
+		Path:      "/api/widgets?access_token=secret-query",
+		IPAddress: "192.0.2.10",
 		Headers: map[string]string{
 			"authorization": "Bearer secret-token",
 			"cookie":        "session_hint=target-org; session=secret-cookie",
@@ -70,6 +72,7 @@ func TestAuthzAuditUsesDefaultParsecPrefixAndSafeContract(t *testing.T) {
 	require.Equal(t, "request-123", records[0]["request_id"])
 	require.Equal(t, "success", records[0]["outcome"])
 	require.Equal(t, "info", records[0]["level"])
+	require.Equal(t, "192.0.2.10", records[0]["request"].(map[string]any)["source_ip"])
 	resource := records[0]["resource"].(map[string]any)
 	require.Equal(t, "authorization_request", resource["type"],
 		"ext_authz must emit resource type 'authorization_request'")
@@ -368,14 +371,14 @@ func TestDistributedGetFailedEmitsCacheLayer(t *testing.T) {
 	require.Equal(t, "validator_distributed", layer0["layer"])
 	require.Equal(t, "failure", layer0["status"])
 
-	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"],
-		"GetFailed must classify as dependency_failure")
+	require.Equal(t, auditctx.ReasonInternalError, records[0]["reason_code"],
+		"a cache failure must not relabel an unrelated evaluation error")
 	require.Equal(t, "validator_distributed", resource["failed_component"],
 		"GetFailed must identify the distributed validator as the failed component")
 	require.NotContains(t, output.String(), "groupcache peer unreachable")
 }
 
-func TestFirstFailureReasonWins(t *testing.T) {
+func TestFirstFailedComponentRemainsDiagnostic(t *testing.T) {
 	var output bytes.Buffer
 	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "first-wins"))
@@ -390,8 +393,8 @@ func TestFirstFailureReasonWins(t *testing.T) {
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
-	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"],
-		"first failure reason (dependency_failure from JWKS) must win")
+	require.Equal(t, auditctx.ReasonInternalError, records[0]["reason_code"],
+		"earlier component failures do not determine the terminal reason")
 
 	resource := records[0]["resource"].(map[string]any)
 	require.Equal(t, "jwks", resource["failed_component"],
@@ -628,7 +631,7 @@ func eventNames(records []map[string]any) []string {
 }
 
 func BenchmarkRequestProbeEnd(b *testing.B) {
-	obs, err := New(zerolog.New(io.Discard), Metadata{ServiceName: "parsec"})
+	obs, err := New(zerolog.New(io.Discard), Metadata{ServiceName: "parsec"}, WithAllowedMetadataKeys(nil))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -666,7 +669,6 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 			name: "credential_invalid_plus_JWKSLookupFailed_gives_failure_dependency_failure",
 			setup: func(ctx context.Context, p service.AuthzCheckProbe) {
 				state := request.AuditStateFrom(ctx)
-				state.SetFailureReason(auditctx.ReasonDependencyFailure)
 				state.SetDependencyOutage()
 				p.SubjectValidationFailed(errors.New("token invalid"))
 			},
@@ -676,7 +678,6 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 			name: "credential_invalid_plus_distributed_GetFailed_gives_failure_dependency_failure",
 			setup: func(ctx context.Context, p service.AuthzCheckProbe) {
 				state := request.AuditStateFrom(ctx)
-				state.SetFailureReason(auditctx.ReasonDependencyFailure)
 				state.SetDependencyOutage()
 				p.SubjectValidationFailed(errors.New("token invalid"))
 			},
@@ -693,7 +694,6 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 			name: "credential_expired_plus_JWKS_failure_stays_denied_credential_expired",
 			setup: func(ctx context.Context, p service.AuthzCheckProbe) {
 				state := request.AuditStateFrom(ctx)
-				state.SetFailureReason(auditctx.ReasonDependencyFailure)
 				state.SetDependencyOutage()
 				p.SubjectValidationFailed(trust.ErrExpiredToken)
 			},
@@ -708,6 +708,11 @@ func TestDeriveCompletionDependencyOutage(t *testing.T) {
 			ctx := request.WithID(context.Background(), "test")
 			ctx, probe := obs.AuthzCheckStarted(ctx)
 			tt.setup(ctx, probe)
+			requestProbe, ok := probe.(*requestProbe)
+			require.True(t, ok)
+			outcome, reason := requestProbe.deriveCompletion()
+			require.Equal(t, tt.wantResult, string(outcome)+"/"+reason,
+				"deriveCompletion must determine the terminal outcome before serialization")
 			probe.End()
 
 			records := decodeRecords(t, output.Bytes())
@@ -739,7 +744,7 @@ func stringOrEmpty(v any) string {
 	return v.(string)
 }
 
-func TestDependencyFailureIsTheRequestReason(t *testing.T) {
+func TestDependencySignalsDoNotOverrideRequestReason(t *testing.T) {
 	var output bytes.Buffer
 	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
 	ctx, probe := obs.AuthzCheckStarted(request.WithID(context.Background(), "dependency-1"))
@@ -749,7 +754,6 @@ func TestDependencyFailureIsTheRequestReason(t *testing.T) {
 			Outcome: auditctx.OutcomeFailure, ReasonCode: auditctx.ReasonDependencyFailure,
 		})
 	}
-	request.AuditStateFrom(ctx).SetFailureReason(auditctx.ReasonDependencyFailure)
 	probe.PolicyEvaluationFailed(errors.New("lookup failed"))
 	probe.End()
 
@@ -757,8 +761,38 @@ func TestDependencyFailureIsTheRequestReason(t *testing.T) {
 	require.Len(t, records, 1, "no separate dependency_failure event")
 	require.Equal(t, "parsec_request", records[0]["event"])
 	require.Equal(t, "failure", records[0]["outcome"])
-	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"])
+	require.Equal(t, auditctx.ReasonInternalError, records[0]["reason_code"])
 	require.Len(t, records[0]["signals"].([]any), 2)
+}
+
+func TestRecoveredActorOutageDoesNotOverrideTerminalError(t *testing.T) {
+	for _, exchange := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exchange=%t", exchange), func(t *testing.T) {
+			var output bytes.Buffer
+			obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
+			ctx, probe := obs.startRequest(context.Background(), "authorize", requestInfo{})
+			probe.ActorCredentialExtracted(&trust.BearerCredential{}, nil)
+			_, validation := obs.JWTValidateStarted(ctx, "actor-validator")
+			validation.JWKSLookupFailed(errors.New("private dependency details"))
+			validation.End()
+			probe.ActorValidationSucceeded(&trust.Result{Subject: "actor"})
+			if exchange {
+				probe.RequestFailed(errors.New("unrelated filter error"))
+			} else {
+				probe.PolicyEvaluationFailed(errors.New("unrelated policy error"))
+			}
+			probe.End()
+
+			records := decodeRecords(t, output.Bytes())
+			require.Len(t, records, 1)
+			record := records[0]
+			require.Equal(t, "failure", record["outcome"])
+			require.Equal(t, auditctx.ReasonInternalError, record["reason_code"])
+			require.Equal(t, map[string]any{"outcome": "success"}, record["actor"].(map[string]any)["validation"])
+			require.Equal(t, "jwks", record["resource"].(map[string]any)["failed_component"])
+			require.NotContains(t, output.String(), "private dependency details")
+		})
+	}
 }
 
 func TestSignalsDroppedCounting(t *testing.T) {
@@ -812,8 +846,8 @@ func TestSignalsDroppedCounting(t *testing.T) {
 	})
 }
 
-// A failed source fetch behind a data source cache is a cache miss followed
-// by a dependency failure, not a failure of the cache layer itself.
+// A failed source fetch behind a data source cache is a cache miss. The
+// terminal reason is internal_error; the failed datasource is diagnostic context.
 func TestDataSourceFetchFailureIsACacheMiss(t *testing.T) {
 	var output bytes.Buffer
 	obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"})
@@ -827,7 +861,7 @@ func TestDataSourceFetchFailureIsACacheMiss(t *testing.T) {
 	probe.End()
 
 	records := decodeRecords(t, output.Bytes())
-	require.Equal(t, auditctx.ReasonDependencyFailure, records[0]["reason_code"])
+	require.Equal(t, auditctx.ReasonInternalError, records[0]["reason_code"])
 	resource := records[0]["resource"].(map[string]any)
 	require.Equal(t, "datasource:enrichment", resource["failed_component"])
 	layers := resource["cache_layers"].([]any)
@@ -1084,4 +1118,80 @@ func TestAuditNamesOnlyConfiguredTokenTypes(t *testing.T) {
 		"a configured type is named without a core change; an unknown one is visible but not copied")
 	require.Equal(t, []any{string(custom)}, resource["token_types"])
 	require.NotContains(t, output.String(), "secret-client-supplied-type")
+}
+
+func TestAuditConstructorMetadataDefaults(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		options  []Option
+		want     map[string]any
+		stripped int
+	}{
+		{name: "default strips all", stripped: 2},
+		{name: "explicit empty strips all", options: []Option{WithAllowedMetadataKeys(map[string]bool{})}, stripped: 2},
+		{name: "allowlist retains approved key", options: []Option{WithAllowedMetadataKeys(map[string]bool{"approved": true})}, want: map[string]any{"approved": "value"}, stripped: 1},
+		{name: "explicit nil allows all", options: []Option{WithAllowedMetadataKeys(nil)}, want: map[string]any{"approved": "value", "unapproved": "private-value"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"}, tt.options...)
+			ctx, probe := obs.AuthzCheckStarted(context.Background())
+			require.True(t, auditctx.ReporterFrom(ctx).Record(auditctx.Signal{
+				Source: auditctx.SourceDataSource, Operation: "lookup", Outcome: auditctx.OutcomeSuccess,
+				Metadata: map[string]string{"approved": "value", "unapproved": "private-value"},
+			}))
+			probe.PolicyDecisionAllowWithoutIssue("allowed")
+			probe.End()
+			records := decodeRecords(t, output.Bytes())
+			require.Len(t, records, 1)
+			signals := records[0]["signals"].([]any)
+			require.Len(t, signals, 1)
+			if tt.want == nil {
+				require.NotContains(t, signals[0], "metadata")
+			} else {
+				require.Equal(t, tt.want, signals[0].(map[string]any)["metadata"])
+			}
+			resource := records[0]["resource"].(map[string]any)
+			if tt.stripped == 0 {
+				require.NotContains(t, resource, "metadata_keys_stripped")
+			} else {
+				require.EqualValues(t, tt.stripped, resource["metadata_keys_stripped"])
+				require.NotContains(t, output.String(), "private-value")
+			}
+			require.NotContains(t, resource, "signals_rejected")
+		})
+	}
+}
+
+func TestAuditBoundsConfiguredTokenTypeNames(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		tokenType string
+		want      string
+	}{
+		{"length limit", strings.Repeat("a", 256), strings.Repeat("a", 256)},
+		{"too long", strings.Repeat("a", 257), UnrecognizedTokenType},
+		{"empty", "", UnrecognizedTokenType},
+		{"padded", " urn:example:custom ", UnrecognizedTokenType},
+		{"control", "urn:example:\ncustom", UnrecognizedTokenType},
+		{"invalid UTF-8", "urn:example:\xff", UnrecognizedTokenType},
+		{"UTF-8 text", "urn:example:例", "urn:example:例"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			tokenType := service.TokenType(tt.tokenType)
+			obs := mustNew(t, zerolog.New(&output), Metadata{ServiceName: "parsec"}, WithTokenTypes([]service.TokenType{tokenType}))
+			ctx, probe := obs.TokenExchangeStarted(context.Background(), "", "", "", "")
+			_, issuance := obs.TokenIssuanceStarted(ctx, nil, nil, "", []service.TokenType{tokenType})
+			issuance.TokenTypeIssuanceSucceeded(tokenType, &service.Token{})
+			issuance.End()
+			probe.TokenIssued()
+			probe.End()
+			records := decodeRecords(t, output.Bytes())
+			require.Len(t, records, 1)
+			resource := records[0]["resource"].(map[string]any)
+			require.Equal(t, []any{tt.want}, resource["requested_token_types"])
+			require.Equal(t, []any{tt.want}, resource["token_types"])
+		})
+	}
 }

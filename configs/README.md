@@ -84,6 +84,13 @@ Parsec stores the ID in context for observability; it does not add or rewrite
 request-ID headers on authorization responses, client responses, or dependency
 requests. There is no `request_id_headers` configuration setting.
 
+Token exchanges intentionally omit `request.source_ip`: the filtered
+`request_context.ip_address` is client-supplied context, not the exchange
+caller's network address. Context values do not replace the exchange endpoint
+fields (`protocol: grpc`, `method: POST`, `path: /v1/token`), including when
+the HTTP gateway handles the exchange. Authorization checks retain their
+checked-request source IP.
+
 Audit principal attributes (`observability.audit_principal_claims`) are off
 unless configured. To retain script audit signals, include `type: audit` in the
 observer list, for example:
@@ -104,12 +111,24 @@ observability:
   # Validated claims copied into subject.attributes / actor.attributes.
   # The first claim holding a non-empty string wins; dots reach nested claims.
   audit_principal_claims:
-    org_id: ["org_id", "rh-org-id", "organization.id"]
-    account_number: ["account_number"]
+    org_id: ["org_id", "rh-org-id", "organization.id", "account_id"]
+    account_number: ["account_number", "organization.account_number"]
   observers:
     - type: audit
     - type: logging
 ```
+
+Claim paths are tried in order. The Console nested account number and RHSM
+string account ID are fallbacks; existing paths keep precedence. Missing,
+blank and non-string values are skipped, without numeric conversion.
+
+The Go `audit.New()` constructor also strips all signal metadata by default,
+retaining the signal and counting stripped keys in
+`resource.metadata_keys_stripped`. An explicit empty allowlist has the same
+effect; a populated allowlist retains only its keys. Direct Go callers can
+explicitly opt into unrestricted keys with `WithAllowedMetadataKeys(nil)`;
+text and length validation still apply. The underlying `Collector` retains
+its existing nil-allowlist semantics. YAML omission does not opt into allow-all.
 
 The audit observer emits one `<prefix>request` record per request, plus the
 `process_status` and `key_rotation` lifecycle events. It emits no
@@ -133,12 +152,23 @@ log pipeline. The events earlier builds emitted map to the record as follows:
 | `auth_compliance_failure` | a signal with `source == "policy"` and `classification == "compliance_denied"` |
 
 Signals recorded inside a data source's `fetch()` are not recorded again when
-the data source result comes from cache.
+the data source result comes from cache. Decision evidence belongs where that
+result is consumed; compliance denial records a policy signal on both cache
+miss and hit.
+
+`resource.failed_component` identifies the first observed component failure,
+which may have recovered and need not cause the terminal request outcome.
+Earlier dependency failures do not replace `internal_error` for an unrelated
+policy or filter error. Principal validation results and extension signals
+carry their own outcomes independently.
 
 Audit `resource.requested_token_types` contains the effective issuance request,
 including defaults. Token types are named when an issuer is configured for
-them; any other requested type appears as `unrecognized`, because on the token
-exchange path it is a client-supplied string. `resource.signals_rejected`
+them and their names are nonempty UTF-8 text of at most 256 bytes, with no
+control characters or surrounding whitespace. Other types appear as
+`unrecognized`, because on the token exchange path a type is a client-supplied
+string. This audit validation does not change issuance behavior.
+`resource.signals_rejected`
 counts signals that were discarded, including a script's `audit.record()` call
 with an unknown field or malformed metadata. `resource.token_types` contains successfully minted types.
 A type minted before another type fails can appear there even though the

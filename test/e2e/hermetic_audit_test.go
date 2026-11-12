@@ -78,6 +78,11 @@ func (o *auditOutput) records(t *testing.T) []map[string]any {
 
 func newAuditAPI(t *testing.T, scripts []string) *auditAPI {
 	t.Helper()
+	return newAuditAPIWithStore(t, scripts, nil)
+}
+
+func newAuditAPIWithStore(t *testing.T, scripts []string, buildStore func(observer.Observer) trust.Store) *auditAPI {
+	t.Helper()
 	output := &auditOutput{}
 	// Exercise composite fan-out as used by deployed configurations.
 	// As in a deployment, the audit observer knows the token types that
@@ -107,7 +112,12 @@ func newAuditAPI(t *testing.T, scripts []string) *auditAPI {
 		specs = append(specs, server.TokenTypeSpec{Type: tokenType, HeaderName: []string{"Transaction-Token", "x-rh-identity"}[i]})
 	}
 	tokens := service.NewTokenService("parsec.test", service.NewDataSourceRegistry(), registry, obs)
-	store := trust.NewStubStore().AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer, trust.CredentialTypeJWT).WithClock(clk))
+	var store trust.Store
+	if buildStore == nil {
+		store = trust.NewStubStore().AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer, trust.CredentialTypeJWT).WithClock(clk))
+	} else {
+		store = buildStore(obs)
+	}
 	grpcListener, httpListener := bufconn.Listen(1<<20), bufconn.Listen(1<<20)
 	dial := func(ctx context.Context, _ string) (net.Conn, error) { return grpcListener.DialContext(ctx) }
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,6 +147,57 @@ func auditExchangeRequest() *parsecv1.ExchangeRequest {
 	return &parsecv1.ExchangeRequest{
 		GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 		SubjectToken: "opaque-token", SubjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+	}
+}
+
+func TestHermeticAuditRecoveredOutageThenFilterFailure(t *testing.T) {
+	for _, exchange := range []bool{false, true} {
+		name := "authorize"
+		if exchange {
+			name = "token_exchange"
+		}
+		t.Run(name, func(t *testing.T) {
+			api := newAuditAPIWithStore(t, []string{`{"ok": true}`}, func(obs observer.Observer) trust.Store {
+				failing, err := trust.NewLuaValidator("unavailable",
+					`function validate(input) error("private dependency details") end`,
+					[]trust.CredentialType{trust.CredentialTypeBearer}, trust.WithLuaValidatorObserver(obs))
+				require.NoError(t, err)
+				fallback, err := trust.NewLuaValidator("fallback",
+					`function validate(input) return {subject="actor", claims={}} end`,
+					[]trust.CredentialType{trust.CredentialTypeBearer}, trust.WithLuaValidatorObserver(obs))
+				require.NoError(t, err)
+				// Actor validation succeeds through fallback. The missing claim
+				// then causes a separate runtime error while filtering for the subject.
+				store, err := trust.NewFilteredStore(trust.WithObserver(obs), trust.WithCELFilter(`actor.claims.missing == "allowed"`))
+				require.NoError(t, err)
+				return store.AddValidator("unavailable", failing).AddValidator("fallback", fallback)
+			})
+			ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer actor-token"))
+			if exchange {
+				_, err := api.exchange.Exchange(ctx, auditExchangeRequest())
+				require.Equal(t, codes.Unknown, status.Code(err))
+				require.Contains(t, status.Convert(err).Message(), "failed to filter trust store")
+			} else {
+				resp, err := api.authz.Check(ctx, checkRequestWithBearer("subject-token"))
+				require.NoError(t, err)
+				require.Equal(t, int32(codes.PermissionDenied), resp.Status.Code)
+				require.Contains(t, resp.Status.Message, "failed to filter trust store")
+			}
+			var requests []map[string]any
+			for _, record := range api.output.records(t) {
+				if record["event"] == "parsec_request" {
+					requests = append(requests, record)
+				}
+			}
+			require.Len(t, requests, 1)
+			record := requests[0]
+			require.Equal(t, name, record["action"])
+			require.Equal(t, "failure", record["outcome"])
+			require.Equal(t, "internal_error", record["reason_code"])
+			require.Equal(t, map[string]any{"outcome": "success"}, record["actor"].(map[string]any)["validation"])
+			require.NotContains(t, record["subject"], "validation")
+			require.Equal(t, "validator:unavailable", record["resource"].(map[string]any)["failed_component"])
+		})
 	}
 }
 
@@ -275,6 +336,34 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 					"reason_code": "token_issuance_denied", "classification": "tenant_policy",
 				}, signals[0])
 			}
+		})
+	}
+}
+
+func TestHermeticAuditExchangeDoesNotTrustContextIP(t *testing.T) {
+	for _, transport := range []string{"grpc", "http"} {
+		t.Run(transport, func(t *testing.T) {
+			// Requiring these attributes in the mapper proves the request context
+			// survived filtering even though it must not rewrite audit transport fields.
+			api := newAuditAPI(t, []string{`request.ip_address == "192.0.2.123" && request.method == "DELETE" && request.path == "/reported-path" ? {"ok": true} : fail("missing context")`})
+			req := auditExchangeRequest()
+			req.RequestContext = `{"ip_address":"192.0.2.123","method":"DELETE","path":"/reported-path"}`
+			if transport == "grpc" {
+				_, err := api.exchange.Exchange(context.Background(), req)
+				require.NoError(t, err)
+			} else {
+				body, err := json.Marshal(map[string]string{"grant_type": req.GrantType, "subject_token": req.SubjectToken, "subject_token_type": req.SubjectTokenType, "request_context": req.RequestContext})
+				require.NoError(t, err)
+				resp, err := api.http.Post("http://parsec.test/v1/token", "application/json", bytes.NewReader(body))
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, resp.Body.Close()) })
+				response, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, resp.StatusCode, string(response))
+			}
+			record := api.output.lastRequest(t)
+			require.Equal(t, "success", record["outcome"])
+			require.Equal(t, map[string]any{"protocol": "grpc", "method": "POST", "path": "/v1/token"}, record["request"])
 		})
 	}
 }
