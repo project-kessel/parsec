@@ -308,6 +308,11 @@ objects:
                     key: token
                     optional: true
             volumeMounts:
+              # All config files and scripts, mounted as files under /etc/parsec/config/
+              - name: config-dir
+                mountPath: "/etc/parsec/config"
+                readOnly: true
+              # Legacy per-file mounts; remove once configs reference /etc/parsec/config/ paths
               - name: config-volume
                 mountPath: "/etc/parsec/parsec.yaml"
                 subPath: parsec.yaml
@@ -321,6 +326,14 @@ objects:
                 mountPath: "/etc/parsec/secrets/it-ca-bundle"
                 readOnly: true
             volumes:
+              - name: config-dir
+                projected:
+                  sources:
+                    - configMap:
+                        name: parsec-config
+                    - secret:
+                        name: ${FORWARDED_CLIENT_CERT_AUTH_SECRET}
+                        optional: true
               - name: config-volume
                 configMap:
                   name: parsec-config

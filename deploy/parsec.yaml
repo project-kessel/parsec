@@ -66,6 +66,11 @@ objects:
                     key: token
                     optional: true
             volumeMounts:
+              # All keys of the config secret, mounted as files under /etc/parsec/config/
+              - name: config-volume
+                mountPath: "/etc/parsec/config"
+                readOnly: true
+              # Legacy per-file mounts; remove once configs reference /etc/parsec/config/ paths
               - name: config-volume
                 mountPath: "/etc/parsec/parsec.yaml"
                 subPath: parsec.yaml
