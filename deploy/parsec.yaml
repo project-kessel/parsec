@@ -12,6 +12,12 @@ objects:
       deployments:
         - name: api
           replicas: ${{REPLICAS}}
+          metadata:
+            annotations:
+              ignore-check.kube-linter.io/run-as-non-root: "ClowdApp cannot set securityContext; restricted-v2 SCC enforces runAsNonRoot=true with a non-zero UID at admission and the image runs as USER 1001. Exception tracked in RHCLOUD-51988."
+              ignore-check.kube-linter.io/dnsconfig-options: "ClowdApp cannot set dnsConfig; cluster default DNS settings are used. Exception tracked in RHCLOUD-51988."
+              ignore-check.kube-linter.io/no-node-affinity: "ClowdApp cannot set affinity (Clowder enforces zone/host podAntiAffinity); no node-targeting requirement. Exception tracked in RHCLOUD-51988."
+              ignore-check.kube-linter.io/non-existent-service-account: "DVO false positive: SA parsec-api is created by Clowder (labels app=parsec only) and DVO lints label groups separately, so the SA and Deployment never share a lint context. Exception tracked in RHCLOUD-51988."
           podSpec:
             image: ${PARSEC_IMAGE}:${IMAGE_TAG}
             command: ["parsec"]
@@ -125,6 +131,7 @@ objects:
       name: parsec${DEPLOYMENT_SUFFIX}-api-pdb
     spec:
       minAvailable: 1
+      unhealthyPodEvictionPolicy: AlwaysAllow
       selector:
         matchLabels:
           app: parsec${DEPLOYMENT_SUFFIX}
