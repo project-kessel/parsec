@@ -118,7 +118,7 @@ results; ext_authz treats any type's `ExchangeError` as a full request denial.
 | Decision / error | Exchange (HTTP) | ext_authz (gRPC) |
 |------------------|-----------------|------------------|
 | `ExchangeError` (`invalid_request` / `invalid_target` / …) | 400 + `{error, error_description}` | `InvalidArgument` (any-type denial = full deny) |
-| `MappingFailure` (`fail`) / unexpected `error` | 500 (default gRPC error JSON) | `Internal` |
+| `MappingFailure` (`fail`) / unexpected `error` | 500 (default gRPC error JSON) | `Internal` gRPC error (not a `CheckResponse`; Envoy applies `status_on_error`) |
 
 ## Example CEL Expressions
 
