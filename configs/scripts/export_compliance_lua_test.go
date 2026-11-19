@@ -1,4 +1,4 @@
-package datasource
+package scripts_test
 
 import (
 	"context"
@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/project-kessel/parsec/internal/datasource"
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
@@ -22,7 +22,7 @@ const complianceAPIURL = "https://export-compliance.example.internal/v1/complian
 
 func loadExportComplianceScript(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "..", "configs", "scripts", "export_compliance.lua")
+	path := "export_compliance.lua"
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read export_compliance.lua: %v", err)
@@ -45,9 +45,9 @@ func consoleSubjectForCompliance() *service.DataSourceInput {
 	}
 }
 
-func newComplianceDS(t *testing.T, script string, client *http.Client) *LuaDataSource {
+func newComplianceDS(t *testing.T, script string, client *http.Client) *datasource.LuaDataSource {
 	t.Helper()
-	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+	ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
 		Name:   "export_compliance",
 		Script: script,
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
@@ -56,14 +56,14 @@ func newComplianceDS(t *testing.T, script string, client *http.Client) *LuaDataS
 		HTTP: httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
-		t.Fatalf("NewLuaDataSource: %v", err)
+		t.Fatalf("datasource.NewLuaDataSource: %v", err)
 	}
 	return ds
 }
 
-func newCacheableComplianceDS(t *testing.T, script string, client *http.Client) *CacheableLuaDataSource {
+func newCacheableComplianceDS(t *testing.T, script string, client *http.Client) *datasource.CacheableLuaDataSource {
 	t.Helper()
-	ds, err := NewCacheableLuaDataSource(CacheableLuaDataSourceConfig{
+	ds, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourceConfig{
 		Name:   "export_compliance",
 		Script: script,
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
@@ -72,7 +72,7 @@ func newCacheableComplianceDS(t *testing.T, script string, client *http.Client) 
 		HTTP: httpclient.LuaClient{Client: client},
 	})
 	if err != nil {
-		t.Fatalf("NewCacheableLuaDataSource: %v", err)
+		t.Fatalf("datasource.NewCacheableLuaDataSource: %v", err)
 	}
 	return ds
 }
@@ -162,7 +162,7 @@ func TestExportComplianceLua_Fetch_PathWithBaseURL(t *testing.T) {
 		}),
 	}
 
-	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+	ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
 		Name:   "export_compliance",
 		Script: script,
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
@@ -171,7 +171,7 @@ func TestExportComplianceLua_Fetch_PathWithBaseURL(t *testing.T) {
 		HTTP: httpclient.LuaClient{Client: client, BaseURL: "https://export-compliance.example.internal"},
 	})
 	if err != nil {
-		t.Fatalf("NewLuaDataSource: %v", err)
+		t.Fatalf("datasource.NewLuaDataSource: %v", err)
 	}
 
 	result, err := ds.Fetch(context.Background(), consoleSubjectForCompliance())
@@ -458,14 +458,14 @@ func TestExportComplianceLua_DifferentUsers(t *testing.T) {
 // TestExportComplianceLua_MissingConfig verifies that absent compliance_api → fail-open
 func TestExportComplianceLua_MissingConfig(t *testing.T) {
 	script := loadExportComplianceScript(t)
-	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+	ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
 		Name:         "export_compliance",
 		Script:       script,
 		ConfigSource: luaservices.NewMapConfigSource(nil),
 		HTTP:         httpclient.LuaClient{Client: http.DefaultClient},
 	})
 	if err != nil {
-		t.Fatalf("NewLuaDataSource: %v", err)
+		t.Fatalf("datasource.NewLuaDataSource: %v", err)
 	}
 
 	result, err := ds.Fetch(context.Background(), consoleSubjectForCompliance())
@@ -492,7 +492,7 @@ func TestExportComplianceLua_Fetch_FullComplianceAPIOverridesPath(t *testing.T) 
 		}),
 	}
 
-	ds, err := NewLuaDataSource(LuaDataSourceConfig{
+	ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
 		Name:   "export_compliance",
 		Script: script,
 		ConfigSource: luaservices.NewMapConfigSource(map[string]any{
@@ -501,7 +501,7 @@ func TestExportComplianceLua_Fetch_FullComplianceAPIOverridesPath(t *testing.T) 
 		HTTP: httpclient.LuaClient{Client: client, BaseURL: "https://unused.example"},
 	})
 	if err != nil {
-		t.Fatalf("NewLuaDataSource: %v", err)
+		t.Fatalf("datasource.NewLuaDataSource: %v", err)
 	}
 
 	result, err := ds.Fetch(context.Background(), consoleSubjectForCompliance())
@@ -671,7 +671,7 @@ func TestExportComplianceLua_Cached_SyntheticNotStored(t *testing.T) {
 		}),
 	}
 	inner := newCacheableComplianceDS(t, script, client)
-	cached := NewInMemoryCachingDataSource(inner, NoOpDataSourceObserver{}, WithCacheTTL(24*time.Hour))
+	cached := datasource.NewInMemoryCachingDataSource(inner, datasource.NoOpDataSourceObserver{}, datasource.WithCacheTTL(24*time.Hour))
 
 	first, err := cached.Fetch(context.Background(), consoleSubjectForCompliance())
 	assertFailOpenNil(t, first, err)
@@ -716,7 +716,7 @@ func TestExportComplianceLua_Cached_BypassSkipsReadAndWrite(t *testing.T) {
 		}),
 	}
 	inner := newCacheableComplianceDS(t, script, client)
-	cached := NewInMemoryCachingDataSource(inner, NoOpDataSourceObserver{}, WithCacheTTL(24*time.Hour))
+	cached := datasource.NewInMemoryCachingDataSource(inner, datasource.NoOpDataSourceObserver{}, datasource.WithCacheTTL(24*time.Hour))
 
 	resultCode = ""
 	if _, err := cached.Fetch(context.Background(), consoleSubjectForCompliance()); err != nil {

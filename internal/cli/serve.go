@@ -170,6 +170,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 7. Log startup information
 	grpcAddr := grpcListener.Addr().String()
 	httpAddr := httpListener.Addr().String()
+	obs.ProcessReady(server.ProcessInfo{
+		TrustDomain: provider.TrustDomain(),
+		GRPCAddress: grpcAddr,
+		HTTPAddress: httpAddr,
+	})
 	logEvent := bootstrapLog.Info().
 		Str("grpc_addr", grpcAddr).
 		Str("http_addr", httpAddr).

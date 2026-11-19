@@ -169,11 +169,11 @@ isServiceAccountToken(subject.claims) ? {
     !(has(request.additional.context_extensions) && "export_compliance" in request.additional.context_extensions && request.additional.context_extensions.export_compliance == "false")
     && datasource("export_compliance") != null
     && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
-      ? accessDenied("export compliance check failed")
+      ? accessDenied("export compliance check failed", "compliance_denied")
     : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "forbidden"
-      ? accessDenied("Cross account access is forbidden.")
+      ? accessDenied("Cross account access is forbidden.", "policy_denied")
     : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "rbac_denied"
-      ? accessDenied("Access denied from RBAC on cross-access check.")
+      ? accessDenied("Access denied from RBAC on cross-access check.", "policy_denied")
     : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "infra"
       ? fail("cross_account_check_failed")
     : datasource("cross_account") != null && datasource("cross_account").active == true
@@ -243,11 +243,11 @@ isServiceAccountToken(subject.claims) ? {
       !(has(request.additional.context_extensions) && "export_compliance" in request.additional.context_extensions && request.additional.context_extensions.export_compliance == "false")
       && datasource("export_compliance") != null
       && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
-        ? accessDenied("export compliance check failed")
+        ? accessDenied("export compliance check failed", "compliance_denied")
       : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "forbidden"
-        ? accessDenied("Cross account access is forbidden.")
+        ? accessDenied("Cross account access is forbidden.", "policy_denied")
       : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "rbac_denied"
-        ? accessDenied("Access denied from RBAC on cross-access check.")
+        ? accessDenied("Access denied from RBAC on cross-access check.", "policy_denied")
       : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "infra"
         ? fail("cross_account_check_failed")
       : datasource("cross_account") != null && datasource("cross_account").active == true
@@ -322,11 +322,11 @@ isServiceAccountToken(subject.claims) ? {
         !(has(request.additional.context_extensions) && "export_compliance" in request.additional.context_extensions && request.additional.context_extensions.export_compliance == "false")
         && datasource("export_compliance") != null
         && datasource("export_compliance").result_code in ["ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"]
-          ? accessDenied("export compliance check failed")
+          ? accessDenied("export compliance check failed", "compliance_denied")
         : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "forbidden"
-          ? accessDenied("Cross account access is forbidden.")
+          ? accessDenied("Cross account access is forbidden.", "policy_denied")
         : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "rbac_denied"
-          ? accessDenied("Access denied from RBAC on cross-access check.")
+          ? accessDenied("Access denied from RBAC on cross-access check.", "policy_denied")
         : datasource("cross_account") != null && has(datasource("cross_account").error) && datasource("cross_account").error == "infra"
           ? fail("cross_account_check_failed")
         : datasource("cross_account") != null && datasource("cross_account").active == true

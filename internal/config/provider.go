@@ -9,6 +9,7 @@ import (
 	"github.com/project-kessel/parsec/internal/httpclient"
 	"github.com/project-kessel/parsec/internal/httpfixture"
 	"github.com/project-kessel/parsec/internal/observer"
+	"github.com/project-kessel/parsec/internal/probe/audit"
 	"github.com/project-kessel/parsec/internal/probe/otel"
 	"github.com/project-kessel/parsec/internal/server"
 	"github.com/project-kessel/parsec/internal/service"
@@ -81,6 +82,13 @@ func (p *Provider) Observer() (observer.Observer, error) {
 	}
 	p.obsBuilt = true
 
+	// Audit observers share request-scoped context state, so nested cache,
+	// dependency and script signals would all reach the last one started.
+	if n := countAuditObservers(p.config.Observability); n > 1 {
+		p.obsErr = fmt.Errorf("failed to create observer: %d audit observers configured; at most one is supported", n)
+		return nil, p.obsErr
+	}
+
 	obs, err := p.buildObserver(p.config.Observability, nil)
 	if err != nil {
 		p.obsErr = fmt.Errorf("failed to create observer: %w", err)
@@ -89,6 +97,24 @@ func (p *Provider) Observer() (observer.Observer, error) {
 
 	p.obs = obs
 	return obs, nil
+}
+
+// countAuditObservers returns the number of `type: audit` entries in cfg,
+// including composite children at any depth.
+func countAuditObservers(cfg *ObservabilityConfig) int {
+	if cfg == nil {
+		return 0
+	}
+	n := 0
+	if cfg.Type == "audit" {
+		n++
+	}
+	if cfg.Type == "composite" {
+		for i := range cfg.Observers {
+			n += countAuditObservers(&cfg.Observers[i])
+		}
+	}
+	return n
 }
 
 // BootstrapFields returns key-value pairs contributed during the
@@ -107,6 +133,13 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 	}
 
 	switch cfg.Type {
+	case "audit":
+		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
+		if err != nil {
+			return nil, err
+		}
+		return p.newAuditObserver(cfg, lc)
+
 	case "logging":
 		lc, err := p.resolveLogCtx(cfg, parentLogCtx)
 		if err != nil {
@@ -133,8 +166,109 @@ func (p *Provider) buildObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerC
 		return p.buildCompositeObserver(cfg, parentLogCtx)
 
 	default:
-		return nil, fmt.Errorf("unknown observability type: %s (supported: logging, noop, metrics, composite)", cfg.Type)
+		return nil, fmt.Errorf("unknown observability type: %s (supported: audit, logging, noop, metrics, composite)", cfg.Type)
 	}
+}
+
+func (p *Provider) newAuditObserver(cfg *ObservabilityConfig, logCtx LoggerContext) (observer.Observer, error) {
+	// Audit records are always structured JSON at production-visible levels.
+	// Writer is the raw sink, so parent console formatting and restrictive
+	// diagnostic levels cannot suppress or reshape security events.
+	logger := zerolog.New(logCtx.Writer).Level(zerolog.InfoLevel)
+	prefix := audit.DefaultEventPrefix
+	if effective := effectiveEventPrefix(cfg, p.config.Observability); effective != nil {
+		prefix = *effective
+	}
+	if !audit.ValidEventPrefix(prefix) {
+		return nil, fmt.Errorf("invalid audit event prefix %q: use only letters, digits, underscore, hyphen, or dot", prefix)
+	}
+
+	opts := []audit.Option{audit.WithEventPrefix(prefix)}
+
+	keys := p.allowedMetadataKeys(cfg)
+	if len(keys) == 0 {
+		startupLog := zerolog.New(logCtx.Writer).With().Timestamp().Logger()
+		startupLog.Warn().Msg("audit_metadata_keys not configured; all metadata keys will be stripped from audit signals. " +
+			"Configure an explicit allowlist under observability.audit_metadata_keys for production use.")
+	}
+	opts = append(opts, audit.WithAllowedMetadataKeys(keys))
+
+	claims := cfg.PrincipalClaims
+	if claims == nil && p.config.Observability != nil {
+		claims = p.config.Observability.PrincipalClaims
+	}
+	for name, paths := range claims {
+		if !validAuditName(name) {
+			return nil, fmt.Errorf("invalid audit_principal_claims attribute %q: use only letters, digits, underscore, hyphen, or dot", name)
+		}
+		if len(paths) == 0 {
+			return nil, fmt.Errorf("audit_principal_claims attribute %q lists no claims", name)
+		}
+	}
+	if len(claims) > 0 {
+		opts = append(opts, audit.WithPrincipalClaims(claims))
+	}
+
+	// The audit record names only token types this deployment can issue.
+	tokenTypes := make([]service.TokenType, 0, len(p.config.Issuers))
+	for _, issuer := range p.config.Issuers {
+		tokenTypes = append(tokenTypes, service.TokenType(issuer.TokenType))
+	}
+	opts = append(opts, audit.WithTokenTypes(tokenTypes))
+
+	return audit.New(logger, audit.Metadata{
+		ServiceName: "parsec",
+		TrustDomain: p.config.TrustDomain,
+	}, opts...)
+}
+
+// validAuditName reports whether name is a non-empty audit field name made
+// of letters, digits, underscore, hyphen, or dot.
+func validAuditName(name string) bool {
+	return name != "" && len(name) <= 128 && audit.ValidEventPrefix(name)
+}
+
+// effectiveEventPrefix prefers the prefix configured on the audit observer
+// entry itself (cfg), falling back to the top-level Observability config.
+// The two differ when the audit observer is a child of a `type: composite`
+// entry: cfg is the child, top is the composite parent that documents/
+// receives the --observability-event-prefix flag.
+func effectiveEventPrefix(cfg, top *ObservabilityConfig) *string {
+	if cfg != nil && cfg.EventPrefix != nil {
+		return cfg.EventPrefix
+	}
+	if top != nil && top.EventPrefix != nil {
+		return top.EventPrefix
+	}
+	return nil
+}
+
+// allowedMetadataKeys builds the audit metadata key allowlist, preferring
+// the allowlist configured on the audit observer entry itself (cfg),
+// falling back to the top-level Observability config. This mirrors
+// effectiveEventPrefix: for a `type: composite` observer, cfg is the child
+// `- type: audit` entry and p.config.Observability is the composite parent.
+//
+// When no allowlist is configured at either level, returns an empty non-nil
+// map (reject all metadata keys). This fail-closed default prevents
+// credentials or tokens from leaking into audit logs when a deployment
+// omits the audit_metadata_keys configuration. The caller is responsible
+// for logging a warning when the returned map is empty.
+func (p *Provider) allowedMetadataKeys(cfg *ObservabilityConfig) map[string]bool {
+	src := cfg.AllowedMetadataKeys
+	if src == nil && p.config.Observability != nil {
+		src = p.config.Observability.AllowedMetadataKeys
+	}
+	if len(src) == 0 {
+		return map[string]bool{}
+	}
+	keys := make(map[string]bool, len(src))
+	for _, key := range src {
+		if key != "" {
+			keys[key] = true
+		}
+	}
+	return keys
 }
 
 func (p *Provider) buildCompositeObserver(cfg *ObservabilityConfig, parentLogCtx *LoggerContext) (observer.Observer, error) {

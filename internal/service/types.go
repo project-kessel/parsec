@@ -1,6 +1,13 @@
 package service
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrUnsupportedGrantType is returned when the grant_type parameter is not
+// a recognized value. Used by the audit probe to classify the failure.
+var ErrUnsupportedGrantType = errors.New("unsupported grant_type")
 
 // TokenType identifies the type of token being issued
 type TokenType string

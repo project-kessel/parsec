@@ -3,9 +3,11 @@ package trust
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/project-kessel/parsec/internal/httpclient"
 	luaservices "github.com/project-kessel/parsec/internal/lua"
 )
+
+var distributedGroupSeq atomic.Uint64
 
 func TestNewLuaValidator(t *testing.T) {
 	tests := []struct {
@@ -657,6 +661,8 @@ func TestNewLuaValidatorConfig_NilOverrides(t *testing.T) {
 type countingCacheableValidator struct {
 	count     int
 	expiresAt time.Time
+	err       error
+	nilResult bool
 }
 
 func (v *countingCacheableValidator) CredentialTypes() []CredentialType {
@@ -665,6 +671,12 @@ func (v *countingCacheableValidator) CredentialTypes() []CredentialType {
 
 func (v *countingCacheableValidator) Validate(_ context.Context, credential Credential) (*Result, error) {
 	v.count++
+	if v.err != nil {
+		return nil, v.err
+	}
+	if v.nilResult {
+		return nil, nil
+	}
 	bearer, ok := credential.(*BearerCredential)
 	if !ok {
 		return nil, ErrInvalidToken
@@ -801,7 +813,7 @@ func TestDistributedCachingValidator(t *testing.T) {
 		expiresAt: time.Now().Add(time.Hour),
 	}
 	cached := NewDistributedCachingValidator("test-distributed", source, NoOpTrustObserver{}, DistributedValidatorCachingConfig{
-		GroupName:      "test-validator-distributed-cache",
+		GroupName:      fmt.Sprintf("test-validator-distributed-cache-%d", distributedGroupSeq.Add(1)),
 		CacheSizeBytes: 1 << 20,
 		CacheTTL:       time.Hour,
 	})
@@ -817,5 +829,142 @@ func TestDistributedCachingValidator(t *testing.T) {
 	}
 	if source.count != 1 {
 		t.Fatalf("count=%d, want 1", source.count)
+	}
+}
+
+// recordingDistributedValidateProbe captures which cache-outcome method was called.
+type recordingDistributedValidateProbe struct {
+	NoOpDistributedValidateProbe
+	hitCalled       bool
+	missCalled      bool
+	expiredCalled   bool
+	getFailedCalled bool
+}
+
+func (p *recordingDistributedValidateProbe) GetFailed(error) { p.getFailedCalled = true }
+
+func (p *recordingDistributedValidateProbe) CacheHit()      { p.hitCalled = true }
+func (p *recordingDistributedValidateProbe) CacheMiss()     { p.missCalled = true }
+func (p *recordingDistributedValidateProbe) ResultExpired() { p.expiredCalled = true }
+
+// recordingDistributedValidateObserver collects a probe per Validate call.
+type recordingDistributedValidateObserver struct {
+	NoOpTrustObserver
+	probes []*recordingDistributedValidateProbe
+}
+
+func (o *recordingDistributedValidateObserver) DistributedValidateStarted(ctx context.Context, _ string) (context.Context, DistributedValidateProbe) {
+	p := &recordingDistributedValidateProbe{}
+	o.probes = append(o.probes, p)
+	return ctx, p
+}
+
+func TestDistributedCachingValidator_CacheOutcomesDistinguishHitFromMiss(t *testing.T) {
+	source := &countingCacheableValidator{
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	obs := &recordingDistributedValidateObserver{}
+	cached := NewDistributedCachingValidator("test-distributed-outcomes", source, obs, DistributedValidatorCachingConfig{
+		GroupName:      fmt.Sprintf("test-validator-distributed-outcomes-cache-%d", distributedGroupSeq.Add(1)),
+		CacheSizeBytes: 1 << 20,
+		CacheTTL:       time.Hour,
+	})
+	cred := &BearerCredential{Token: "abc"}
+
+	// Call 0: cold miss — fetch runs locally via the getter.
+	if _, err := cached.Validate(context.Background(), cred); err != nil {
+		t.Fatalf("cold miss: %v", err)
+	}
+	p := obs.probes[0]
+	if !p.missCalled {
+		t.Fatal("cold miss: expected CacheMiss (fetch ran locally)")
+	}
+	if p.hitCalled {
+		t.Fatal("cold miss: CacheHit must not be called when the getter ran locally")
+	}
+
+	// Call 1: cache hit — value served from local cache, no fetch.
+	if _, err := cached.Validate(context.Background(), cred); err != nil {
+		t.Fatalf("cache hit: %v", err)
+	}
+	p = obs.probes[1]
+	if !p.hitCalled {
+		t.Fatal("cache hit: expected CacheHit")
+	}
+	if p.missCalled {
+		t.Fatal("cache hit: CacheMiss must not be called when value was served from cache")
+	}
+	if source.count != 1 {
+		t.Fatalf("count=%d, want 1 (second call must be served from cache)", source.count)
+	}
+}
+
+// A credential the source rejects is reported to observers as a cache miss,
+// not a cache failure: GetFailed would make a forged or expired token look
+// like an infrastructure outage. The error returned to the caller keeps its
+// existing wrapping and text.
+func TestDistributedCachingValidator_SourceRejectionIsNotACacheFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   *countingCacheableValidator
+		wantErr  error
+		wantText string
+	}{
+		{
+			name:     "source rejects the credential",
+			source:   &countingCacheableValidator{err: ErrInvalidToken},
+			wantErr:  ErrInvalidToken,
+			wantText: "groupcache validator get failed: cache: fetch failed: validator failed: ",
+		},
+		{
+			name:     "source returns an already expired result",
+			source:   &countingCacheableValidator{expiresAt: time.Now().Add(-time.Hour)},
+			wantText: "groupcache validator get failed: cache: fetch failed: validator result is already expired",
+		},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obs := &recordingDistributedValidateObserver{}
+			cached := NewDistributedCachingValidator("test-distributed-rejection", tt.source, obs, DistributedValidatorCachingConfig{
+				GroupName:      fmt.Sprintf("test-validator-distributed-rejection-cache-%d-%d", distributedGroupSeq.Add(1), i),
+				CacheSizeBytes: 1 << 20,
+				CacheTTL:       time.Hour,
+			})
+
+			_, err := cached.Validate(context.Background(), &BearerCredential{Token: "forged"})
+			if err == nil || !strings.HasPrefix(err.Error(), tt.wantText) {
+				t.Fatalf("err=%v, want text starting %q", err, tt.wantText)
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err=%v, want %v", err, tt.wantErr)
+			}
+			p := obs.probes[0]
+			if p.getFailedCalled {
+				t.Fatal("GetFailed must not be called when the source rejected the credential")
+			}
+			if !p.missCalled {
+				t.Fatal("expected CacheMiss: the load ran and the source rejected the credential")
+			}
+		})
+	}
+}
+
+// A validator that returns neither a result nor an error is a server-side
+// fault. It must not be reported as an expired or rejected credential.
+func TestDistributedCachingValidator_NilResultIsAFailure(t *testing.T) {
+	obs := &recordingDistributedValidateObserver{}
+	source := &countingCacheableValidator{nilResult: true}
+	cached := NewDistributedCachingValidator("test-distributed-nil", source, obs, DistributedValidatorCachingConfig{
+		GroupName:      fmt.Sprintf("test-validator-distributed-nil-cache-%d", distributedGroupSeq.Add(1)),
+		CacheSizeBytes: 1 << 20,
+		CacheTTL:       time.Hour,
+	})
+
+	_, err := cached.Validate(context.Background(), &BearerCredential{Token: "abc"})
+	if err == nil || errors.Is(err, ErrExpiredToken) || errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err=%v, want a failure that is not a credential verdict", err)
+	}
+	if !obs.probes[0].getFailedCalled {
+		t.Fatal("expected GetFailed for a validator that returned no result")
 	}
 }

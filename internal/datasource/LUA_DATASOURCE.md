@@ -209,6 +209,8 @@ This function:
 - Determines what gets cached and the cache key
 - Must include all data needed for `fetch` to work
 - Return `nil` to skip the cache for that request (no read, no write)
+- Audit signals a script records with `audit.record()` inside `fetch()` are
+  not recorded again on a cache hit, because `fetch()` does not run
 
 ## Available Services
 

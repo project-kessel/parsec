@@ -44,6 +44,9 @@ Override specific configuration values via command-line flags (highest precedenc
 # Override observability settings
 ./bin/parsec serve --observability-type=logging --observability-log-level=debug
 
+# Use a deployment-specific audit event prefix instead of the default parsec_
+./bin/parsec serve --observability-type=audit --observability-event-prefix=insights_
+
 # Override trust store type
 ./bin/parsec serve --trust-store-type=filtered_store
 ```
@@ -63,13 +66,113 @@ The conversion rule: replace dots (`.`) and underscores (`_`) with hyphens (`-`)
 - `--server-http-port` - HTTP server port (overrides `server.http_port`)
 - `--trust-domain` - Trust domain for issued tokens (overrides `trust_domain`)
 - `--trust-store-type` - Trust store type (overrides `trust_store.type`)
-- `--observability-type` - Observability type: logging, noop, composite
+- `--observability-type` - Observability type: audit, logging, noop, metrics, composite
 - `--observability-log-level` - Log level: debug, info, warn, error
+- `--observability-event-prefix` - Prefix for all audit event names (default: `parsec_`)
 
 View all available flags:
 ```bash
 ./bin/parsec serve --help
 ```
+
+### Audit logging
+
+Audit correlation reads the standard `x-request-id` from the checked HTTP
+request or incoming gRPC metadata. The HTTP token endpoint carries that header
+through its internal gateway hop. Missing or invalid IDs receive a local UUID.
+Parsec stores the ID in context for observability; it does not add or rewrite
+request-ID headers on authorization responses, client responses, or dependency
+requests. There is no `request_id_headers` configuration setting.
+
+Token exchanges intentionally omit `request.source_ip`: the filtered
+`request_context.ip_address` is client-supplied context, not the exchange
+caller's network address. Context values do not replace the exchange endpoint
+fields (`protocol: grpc`, `method: POST`, `path: /v1/token`), including when
+the HTTP gateway handles the exchange. Authorization checks retain their
+checked-request source IP.
+
+Audit principal attributes (`observability.audit_principal_claims`) are off
+unless configured. To retain script audit signals, include `type: audit` in the
+observer list, for example:
+
+```yaml
+observability:
+  type: composite
+  # Allowlist for audit.record() metadata keys. Keys that are not listed are
+  # stripped and the signal is kept. When omitted, all metadata keys are
+  # stripped (fail-closed). An explicit list is required for production use.
+  audit_metadata_keys:
+    - "target_account_number"
+    - "target_org_id"
+    - "employee_user_id"
+    - "employee_account_number"
+    - "employee_org_id"
+    - "dependency_status"
+  # Validated claims copied into subject.attributes / actor.attributes.
+  # The first claim holding a non-empty string wins; dots reach nested claims.
+  audit_principal_claims:
+    org_id: ["org_id", "rh-org-id", "organization.id", "account_id"]
+    account_number: ["account_number", "organization.account_number"]
+  observers:
+    - type: audit
+    - type: logging
+```
+
+Claim paths are tried in order. The Console nested account number and RHSM
+string account ID are fallbacks; existing paths keep precedence. Missing,
+blank and non-string values are skipped, without numeric conversion.
+
+The Go `audit.New()` constructor also strips all signal metadata by default,
+retaining the signal and counting stripped keys in
+`resource.metadata_keys_stripped`. An explicit empty allowlist has the same
+effect; a populated allowlist retains only its keys. Direct Go callers can
+explicitly opt into unrestricted keys with `WithAllowedMetadataKeys(nil)`;
+text and length validation still apply. The underlying `Collector` retains
+its existing nil-allowlist semantics. YAML omission does not opt into allow-all.
+
+The audit observer emits one `<prefix>request` record per request, plus the
+`process_status` and `key_rotation` lifecycle events. It emits no
+deployment-specific events. `subject.validation` and `actor.validation` carry
+each principal's own credential validation result (`outcome` and, when not a
+success, `reason_code`), independently of the request outcome; they are
+absent when the credential was never validated. Scripts and CEL policies
+describe what happened with signals, listed in `signals`.
+
+Deployment-specific event names are derived from the request record by the
+log pipeline. The events earlier builds emitted map to the record as follows:
+
+| Earlier event | Request record where |
+|---|---|
+| `authorize` | `action == "authorize"` |
+| `dependency_failure` | `reason_code == "dependency_failure"`, or a signal with that `reason_code`; `resource.failed_component` names the component |
+| `validate_ssl_cert` | `subject.credential_type` is `mtls` or `forwarded_client_cert`; result in `subject.validation` |
+| `verify_psk` | `actor.credential_type == "header"`; result in `actor.validation` |
+| `supplemental_user_data_failure` | a signal with `operation == "user_enrichment"` and `outcome == "failure"` |
+| `compliance_failure` | a signal with `operation == "export_compliance"` and `outcome == "failure"`; cause in `classification` |
+| `auth_compliance_failure` | a signal with `source == "policy"` and `classification == "compliance_denied"` |
+
+Signals recorded inside a data source's `fetch()` are not recorded again when
+the data source result comes from cache. Decision evidence belongs where that
+result is consumed; compliance denial records a policy signal on both cache
+miss and hit.
+
+`resource.failed_component` identifies the first observed component failure,
+which may have recovered and need not cause the terminal request outcome.
+Earlier dependency failures do not replace `internal_error` for an unrelated
+policy or filter error. Principal validation results and extension signals
+carry their own outcomes independently.
+
+Audit `resource.requested_token_types` contains the effective issuance request,
+including defaults. Token types are named when an issuer is configured for
+them and their names are nonempty UTF-8 text of at most 256 bytes, with no
+control characters or surrounding whitespace. Other types appear as
+`unrecognized`, because on the token exchange path a type is a client-supplied
+string. This audit validation does not change issuance behavior.
+`resource.signals_rejected`
+counts signals that were discarded, including a script's `audit.record()` call
+with an unknown field or malformed metadata. `resource.token_types` contains successfully minted types.
+A type minted before another type fails can appear there even though the
+overall request is denied and no tokens are delivered.
 
 ### Configuration File
 
@@ -667,6 +770,12 @@ oc create secret generic parsec-config \
   --from-file=parsec.yaml=path/to/production-parsec.yaml \
   --from-file=scripts/redhat_identity.cel=configs/scripts/redhat_identity.cel
 ```
+
+The production `parsec.yaml` must also include the [audit observer and audit
+settings](#audit-logging) shown above. This applies to the external
+Secret selected by `PARSEC_CONFIG_SECRET` in `deploy/parsec.yaml`; changing the
+template alone does not update that Secret. Keep any existing metrics observer
+when adding audit to the observer list.
 
 The production `parsec.yaml` should include:
 ```yaml

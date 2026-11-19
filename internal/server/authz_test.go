@@ -873,6 +873,7 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			"SubjectCredentialExtracted",
 			"SubjectValidationSucceeded", // Still succeeds even for invalid token with StubValidator
 			"PolicyDecisionIssue",
+			"TokenIssuanceFailed", // Empty issuer registry → IssueTokens fails
 			"End",
 		)
 	})
