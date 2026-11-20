@@ -15,7 +15,8 @@
 // Cross-account access (RHCLOUD-47320): on User jwt-auth branches (console,
 // rhsm, portal), after export_compliance, call datasource("cross_account").
 // Missing DS → skip (fail-safe). Deny strings are fixed per JIRA AC2/AC3.
-// RBAC/transport failure → fail() → HTTP 500 (AC5).
+// RBAC/transport failure → fail() → gRPC Internal error to Envoy (ext_authz
+// "error", gateway status_on_error; counts against the availability SLO).
 //
 // Compliance error codes (AC10):
 //   "ERROR_T5", "ERROR_EXPORT_CONTROL", "ERROR_OFAC"
@@ -23,6 +24,7 @@
 // Policy guards (3scale parity) use Layer B CEL aborts:
 //   - impersonated tokens → invalidSubject() → OAuth invalid_request
 //   - console API tokens missing idp → invalidSubject() → OAuth invalid_request
+//   - service account tokens missing client_id → invalidSubject()
 // Unrecognized tokens call unsupportedTokenType() (also invalid_request).
 // Reserve fail() for true mapping/system failures (Internal), not policy.
 //
@@ -148,7 +150,7 @@ isServiceAccountToken(subject.claims) ? {
     "service_account": {
       "username": has(subject.claims.preferred_username) ? subject.claims.preferred_username : "",
       "client_id": has(subject.claims.client_id) && subject.claims.client_id != "" ? subject.claims.client_id :
-                   (has(subject.claims.clientId) && subject.claims.clientId != "" ? subject.claims.clientId : fail("missing_client_id")),
+                   (has(subject.claims.clientId) && subject.claims.clientId != "" ? subject.claims.clientId : invalidSubject("missing_client_id")),
       "user_id": has(subject.claims.sub) ? subject.claims.sub : "",
       "scope": has(subject.claims.scope) ? subject.claims.scope : ""
     },

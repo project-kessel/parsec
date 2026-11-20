@@ -118,7 +118,10 @@ CEL Layer A/B abort helper
   → logs/metrics: mapping.oauth_error, mapping.abort_reason
 
 CEL fail() / unexpected failure
-  → *MappingFailure (not an abortError) → Internal / 500
+  → *MappingFailure (not an abortError)
+  → Exchange: gRPC Internal → HTTP 500
+  → ext_authz: gRPC Internal *error* (no CheckResponse) → Envoy counts it as
+    ext_authz `error` and returns its `status_on_error` (503 on CAPS gateways)
 ```
 
 ## Transport mapping (exchange + ext_authz)
@@ -130,12 +133,20 @@ CEL fail() / unexpected failure
 | OAuth `access_denied` (`accessDenied()`) | `PermissionDenied` | **403** |
 | Credential / subject validation failed | `Unauthenticated` | **401** |
 | `AuthzCheckDeny` / trust-store filter failure | `PermissionDenied` | **403** |
-| Unexpected `error` / `fail()` / nil token | `Internal` | **500** |
+| Unexpected `error` / `fail()` / nil token / policy evaluation failure | `Internal` (ext_authz: returned as a gRPC error, not a `CheckResponse`) | exchange **500**; ext_authz: Envoy `status_on_error` (**503** on CAPS gateways) |
 
 **Envoy pitfall**: if `DeniedHttpResponse.Status` is unset, Envoy defaults the
 downstream client status to **403** even when the gRPC code is
-`Unauthenticated` or `Internal`. Parsec always sets an explicit HTTP status on
-denials so gateway policies see the intended code.
+`Unauthenticated`. Parsec always sets an explicit HTTP status on denials so
+gateway policies see the intended code.
+
+**Internal failures in ext_authz**: Envoy counts any `CheckResponse` with a
+non-OK status as `denied`, and only counts a failed `Check` call (unreachable,
+timeout, gRPC error) as `error`. Parsec's gateway-side availability SLO is
+computed from these counters, so parsec's own failures are returned as a gRPC
+`Internal` error rather than a denied response. Envoy then applies the filter's
+`status_on_error` and the client sees no parsec message body; the detail is in
+parsec's logs.
 
 OAuth mapper denials use **400** except `access_denied` (**403**): they are
 protocol / request-validity outcomes, same class as the exchange path, with

@@ -11,6 +11,7 @@ import (
 	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/project-kessel/parsec/internal/request"
 	"github.com/project-kessel/parsec/internal/service"
@@ -107,7 +108,14 @@ func normalizeDropCookies(cookies []string) []string {
 	return normalized
 }
 
-// Check implements the ext_authz check endpoint
+// Check implements the ext_authz check endpoint.
+//
+// Authorization outcomes (allow, and 400/401/403 denials) are returned as a
+// CheckResponse. Parsec's own internal failures (policy evaluation, token
+// issuance, missing tokens) are returned as a gRPC Internal error instead, so
+// Envoy counts them as ext_authz "error" rather than "denied" and applies its
+// configured status_on_error. This keeps them visible in the gateway-side
+// availability SLO.
 func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	// Create request-scoped probe
 	ctx, p := s.observer.AuthzCheckStarted(ctx)
@@ -180,8 +188,7 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 	})
 	if err != nil {
 		p.PolicyEvaluationFailed(err)
-		return s.denyResponse(codes.Internal,
-			fmt.Sprintf("policy evaluation failed: %v", err)), nil
+		return nil, grpcstatus.Errorf(codes.Internal, "policy evaluation failed: %v", err)
 	}
 
 	// 5. Handle policy decision
@@ -210,9 +217,9 @@ func (s *AuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*aut
 		return s.issueResponse(ctx, p, decision, subjectPrin, actorPrin, reqAttrs, rewrite, remove)
 
 	default:
-		p.PolicyEvaluationFailed(fmt.Errorf("unknown policy action: %s", decision.Action))
-		return s.denyResponse(codes.Internal,
-			fmt.Sprintf("unknown policy action: %s", decision.Action)), nil
+		err := fmt.Errorf("unknown policy action: %s", decision.Action)
+		p.PolicyEvaluationFailed(err)
+		return nil, grpcstatus.Error(codes.Internal, err.Error())
 	}
 }
 
@@ -241,9 +248,7 @@ func (s *AuthzServer) issueResponse(
 	})
 	if err != nil {
 		p.TokenIssuanceFailed(err)
-		return s.denyResponseWithHTTPStatus(codes.Internal,
-			typev3.StatusCode_InternalServerError,
-			fmt.Sprintf("failed to issue tokens: %v", err)), nil
+		return nil, grpcstatus.Errorf(codes.Internal, "failed to issue tokens: %v", err)
 	}
 
 	// Any token-type denial denies the entire ext_authz request.
@@ -263,10 +268,9 @@ func (s *AuthzServer) issueResponse(
 		if !ok || r.Token == nil {
 			// Fail closed: never return OK without every requested token.
 			// A missing/nil token with no ExchangeErr is a programmer error.
-			p.TokenIssuanceFailed(fmt.Errorf("token service returned no token for type %s", spec.Type))
-			return s.denyResponseWithHTTPStatus(codes.Internal,
-				typev3.StatusCode_InternalServerError,
-				fmt.Sprintf("token service returned no token for type %s", spec.Type)), nil
+			err := fmt.Errorf("token service returned no token for type %s", spec.Type)
+			p.TokenIssuanceFailed(err)
+			return nil, grpcstatus.Error(codes.Internal, err.Error())
 		}
 		headers = append(headers, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
@@ -514,8 +518,6 @@ func httpStatusForCode(code codes.Code) typev3.StatusCode {
 		return typev3.StatusCode_Forbidden
 	case codes.InvalidArgument:
 		return typev3.StatusCode_BadRequest
-	case codes.Internal:
-		return typev3.StatusCode_InternalServerError
 	default:
 		return typev3.StatusCode_Forbidden
 	}

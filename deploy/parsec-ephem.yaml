@@ -142,7 +142,7 @@ objects:
             "service_account": {
               "username": has(subject.claims.preferred_username) ? subject.claims.preferred_username : "",
               "client_id": has(subject.claims.client_id) && subject.claims.client_id != "" ? subject.claims.client_id :
-                           (has(subject.claims.clientId) && subject.claims.clientId != "" ? subject.claims.clientId : fail("missing_client_id")),
+                           (has(subject.claims.clientId) && subject.claims.clientId != "" ? subject.claims.clientId : invalidSubject("missing_client_id")),
               "user_id": has(subject.claims.sub) ? subject.claims.sub : "",
               "scope": has(subject.claims.scope) ? subject.claims.scope : ""
             },

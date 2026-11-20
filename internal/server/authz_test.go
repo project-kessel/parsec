@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/project-kessel/parsec/internal/issuer"
 	"github.com/project-kessel/parsec/internal/mapper"
@@ -860,9 +862,11 @@ func TestAuthzServer_Check_Observability(t *testing.T) {
 			},
 		}
 
-		_, err := authzServer.Check(ctx, req)
-		if err != nil {
-			t.Fatalf("Check failed: %v", err)
+		// No issuer is registered, so token issuance fails: an internal
+		// failure reported to Envoy as a gRPC error.
+		resp, err := authzServer.Check(ctx, req)
+		if status.Code(err) != codes.Internal {
+			t.Fatalf("expected gRPC Internal error, got resp=%v err=%v", resp, err)
 		}
 
 		// Verify observer saw probe with failure (StubValidator accepts any token)
@@ -1335,10 +1339,82 @@ func TestBuildRequestAttributes_NilHttp(t *testing.T) {
 // stubPolicy is a simple AuthzCheckPolicy that returns a fixed decision.
 type stubPolicy struct {
 	decision AuthzCheckDecision
+	err      error
 }
 
 func (p *stubPolicy) Decide(_ context.Context, _ AuthzCheckPolicyInput) (AuthzCheckDecision, error) {
-	return p.decision, nil
+	return p.decision, p.err
+}
+
+// TestAuthzServer_Check_PolicyInternalFailures verifies that policy failures
+// internal to parsec are returned to Envoy as gRPC errors (counted as ext_authz
+// "error") rather than as a denied CheckResponse (counted as "denied").
+func TestAuthzServer_Check_PolicyInternalFailures(t *testing.T) {
+	ctx := context.Background()
+
+	checkReq := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Method: "GET",
+					Path:   "/api/resource",
+					Headers: map[string]string{
+						"authorization": "Bearer test-token",
+					},
+				},
+			},
+		},
+	}
+
+	newServer := func(t *testing.T, policy AuthzCheckPolicy) (*AuthzServer, *service.FakeObserver) {
+		t.Helper()
+		trustStore := trust.NewStubStore()
+		trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
+		fakeObs := service.NewFakeObserver(t)
+		return NewAuthzServer(trustStore, nil, policy, DefaultCredentialSources(), nil, nil, fakeObs), fakeObs
+	}
+
+	t.Run("policy_evaluation_failed", func(t *testing.T) {
+		srv, fakeObs := newServer(t, &stubPolicy{err: errors.New("rego panic")})
+
+		resp, err := srv.Check(ctx, checkReq)
+		if resp != nil {
+			t.Fatalf("expected no CheckResponse, got %v", resp)
+		}
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.Internal {
+			t.Fatalf("expected gRPC Internal error, got %v", err)
+		}
+		if !strings.Contains(st.Message(), "policy evaluation failed: rego panic") {
+			t.Errorf("message: got %q", st.Message())
+		}
+
+		p := fakeObs.AssertSingleProbe("AuthzCheckStarted", nil)
+		p.AssertProbeSequence(
+			"RequestAttributesParsed",
+			"ActorValidationSucceeded",
+			"SubjectCredentialExtracted",
+			"SubjectValidationSucceeded",
+			"PolicyEvaluationFailed",
+			"End",
+		)
+	})
+
+	t.Run("unknown_policy_action", func(t *testing.T) {
+		srv, _ := newServer(t, &stubPolicy{decision: AuthzCheckDecision{Action: AuthzCheckAction("bogus")}})
+
+		resp, err := srv.Check(ctx, checkReq)
+		if resp != nil {
+			t.Fatalf("expected no CheckResponse, got %v", resp)
+		}
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.Internal {
+			t.Fatalf("expected gRPC Internal error, got %v", err)
+		}
+		if !strings.Contains(st.Message(), "unknown policy action: bogus") {
+			t.Errorf("message: got %q", st.Message())
+		}
+	})
 }
 
 func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
@@ -1397,25 +1473,22 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		}
 	})
 
-	t.Run("fail_is_internal", func(t *testing.T) {
+	t.Run("fail_is_grpc_internal_error", func(t *testing.T) {
 		srv := newAuthzWithMapper(t, `fail("mapping exploded")`)
 		resp, err := srv.Check(ctx, checkReq)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if resp != nil {
+			t.Fatalf("expected no CheckResponse, got %v", resp)
 		}
-		if resp.Status.Code != int32(codes.Internal) {
-			t.Errorf("code: got %d, want Internal (%d)", resp.Status.Code, codes.Internal)
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.Internal {
+			t.Fatalf("expected gRPC Internal error, got %v", err)
 		}
-		denied := resp.GetDeniedResponse()
-		if denied == nil {
-			t.Fatal("expected DeniedHttpResponse")
-		}
-		if denied.GetStatus().GetCode() != typev3.StatusCode_InternalServerError {
-			t.Errorf("HTTP status: got %d, want InternalServerError (%d)", denied.GetStatus().GetCode(), typev3.StatusCode_InternalServerError)
+		if !strings.Contains(st.Message(), "mapping exploded") {
+			t.Errorf("message: got %q", st.Message())
 		}
 	})
 
-	t.Run("nil_token_is_internal", func(t *testing.T) {
+	t.Run("nil_token_is_grpc_internal_error", func(t *testing.T) {
 		trustStore := trust.NewStubStore()
 		trustStore.AddValidator(trust.NewStubValidator(trust.CredentialTypeBearer))
 		registry := service.NewSimpleRegistry()
@@ -1424,24 +1497,15 @@ func TestAuthz_IssueResponse_MapperAbort(t *testing.T) {
 		srv := NewAuthzServer(trustStore, tokenService, nil, DefaultCredentialSources(), nil, nil, nil)
 
 		resp, err := srv.Check(ctx, checkReq)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if resp != nil {
+			t.Fatalf("nil token must not return a CheckResponse, got %v", resp)
 		}
-		if resp.Status.Code != int32(codes.Internal) {
-			t.Errorf("code: got %d, want Internal (%d)", resp.Status.Code, codes.Internal)
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.Internal {
+			t.Fatalf("expected gRPC Internal error, got %v", err)
 		}
-		if resp.Status.Code == int32(codes.OK) {
-			t.Fatal("nil token must not return OK")
-		}
-		denied := resp.GetDeniedResponse()
-		if denied == nil {
-			t.Fatal("expected DeniedHttpResponse")
-		}
-		if denied.GetStatus().GetCode() != typev3.StatusCode_InternalServerError {
-			t.Errorf("HTTP status: got %d, want InternalServerError (%d)", denied.GetStatus().GetCode(), typev3.StatusCode_InternalServerError)
-		}
-		if !strings.Contains(resp.Status.Message, "no token") {
-			t.Errorf("message: got %q", resp.Status.Message)
+		if !strings.Contains(st.Message(), "no token") {
+			t.Errorf("message: got %q", st.Message())
 		}
 	})
 }
