@@ -81,11 +81,12 @@ func newLuaDataSource(cfg DataSourceConfig, httpRegistry *httpclient.Registry, o
 
 	if cachingEnabled(cfg.Caching) {
 		cacheable, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourceConfig{
-			Name:         cfg.Name,
-			Script:       script,
-			ConfigSource: configSource,
-			HTTP:         luaHTTP,
-			Observer:     obs,
+			Name:             cfg.Name,
+			Script:           script,
+			ConfigSource:     configSource,
+			HTTP:             luaHTTP,
+			MaxResponseBytes: cfg.MaxResponseBytes,
+			Observer:         obs,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cacheable lua data source: %w", err)
@@ -93,11 +94,12 @@ func newLuaDataSource(cfg DataSourceConfig, httpRegistry *httpclient.Registry, o
 		baseDS = cacheable
 	} else {
 		luaDSConfig := datasource.LuaDataSourceConfig{
-			Name:         cfg.Name,
-			Script:       script,
-			ConfigSource: configSource,
-			HTTP:         luaHTTP,
-			Observer:     obs,
+			Name:             cfg.Name,
+			Script:           script,
+			ConfigSource:     configSource,
+			HTTP:             luaHTTP,
+			MaxResponseBytes: cfg.MaxResponseBytes,
+			Observer:         obs,
 		}
 
 		var err error

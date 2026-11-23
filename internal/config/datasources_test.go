@@ -160,3 +160,38 @@ end
 		t.Fatalf("expected 'unknown caching type' error, got: %v", err)
 	}
 }
+
+func TestNewDataSourceRegistry_LuaMaxResponseBytes(t *testing.T) {
+	t.Parallel()
+
+	const luaScript = `function fetch(input) return nil end`
+
+	tests := []struct {
+		name    string
+		max     int64
+		wantErr bool
+	}{
+		{"unset uses default", 0, false},
+		{"positive accepted", 4096, false},
+		{"negative rejected", -1, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewDataSourceRegistry([]DataSourceConfig{
+				{
+					Name:             "limited",
+					Type:             "lua",
+					Script:           luaScript,
+					MaxResponseBytes: tt.max,
+				},
+			}, testHTTPRegistry(t), observer.NoOp())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), "max_response_bytes") {
+				t.Errorf("err = %v, want mention of max_response_bytes", err)
+			}
+		})
+	}
+}

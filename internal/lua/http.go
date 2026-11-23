@@ -3,10 +3,13 @@ package lua
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"strings"
 
 	lua "github.com/yuin/gopher-lua"
 
@@ -17,10 +20,20 @@ import (
 // This can be used to add authentication headers, modify URLs, etc.
 type RequestOptions func(*http.Request) error
 
+// DefaultMaxResponseBytes is the response body cap applied when no explicit
+// limit is configured. It bounds the memory a single upstream response can
+// consume, so a misbehaving or hostile upstream cannot OOM the process.
+const DefaultMaxResponseBytes int64 = 1 << 20 // 1 MiB
+
+// ErrResponseTooLarge is returned to Lua (as the error string) when an upstream
+// response body exceeds the configured maximum size.
+var ErrResponseTooLarge = errors.New("response body exceeds max_response_bytes")
+
 // httpServiceConfig collects option values during construction.
 type httpServiceConfig struct {
-	requestOptions RequestOptions
-	baseURL        string
+	requestOptions   RequestOptions
+	baseURL          string
+	maxResponseBytes int64
 }
 
 // HTTPServiceOption configures optional settings for NewHTTPService.
@@ -38,13 +51,22 @@ func WithBaseURL(base string) HTTPServiceOption {
 	return func(c *httpServiceConfig) { c.baseURL = base }
 }
 
+// WithMaxResponseBytes caps how many bytes of a response body are read.
+// Zero (or omitting the option) uses [DefaultMaxResponseBytes]. Negative
+// values are rejected by [NewHTTPService]. A response larger than the cap is
+// not returned to Lua; the call returns (nil, error) instead.
+func WithMaxResponseBytes(n int64) HTTPServiceOption {
+	return func(c *httpServiceConfig) { c.maxResponseBytes = n }
+}
+
 // HTTPService provides HTTP client functionality to Lua scripts.
 type HTTPService struct {
-	ctx            context.Context
-	client         *http.Client
-	requestOptions RequestOptions
-	baseURL        string // empty = absolute Lua URLs only; stored origin string
-	requireHTTPS   bool   // true when transport or RequestOptions inject credentials
+	ctx              context.Context
+	client           *http.Client
+	requestOptions   RequestOptions
+	baseURL          string // empty = absolute Lua URLs only; stored origin string
+	requireHTTPS     bool   // true when transport or RequestOptions inject credentials
+	maxResponseBytes int64  // always > 0 after construction
 }
 
 // NewHTTPService creates a new HTTP service. ctx is required and propagated
@@ -67,13 +89,32 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		return nil, err
 	}
 
+	maxResponseBytes, err := ResolveMaxResponseBytes(cfg.maxResponseBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	return &HTTPService{
-		ctx:            ctx,
-		client:         client,
-		requestOptions: cfg.requestOptions,
-		baseURL:        cfg.baseURL,
-		requireHTTPS:   requireHTTPS,
+		ctx:              ctx,
+		client:           client,
+		requestOptions:   cfg.requestOptions,
+		baseURL:          cfg.baseURL,
+		requireHTTPS:     requireHTTPS,
+		maxResponseBytes: maxResponseBytes,
 	}, nil
+}
+
+// ResolveMaxResponseBytes applies the default to a configured response size
+// limit. Zero means [DefaultMaxResponseBytes]; negative values are an error.
+func ResolveMaxResponseBytes(n int64) (int64, error) {
+	switch {
+	case n < 0:
+		return 0, fmt.Errorf("max_response_bytes must not be negative, got %d", n)
+	case n == 0:
+		return DefaultMaxResponseBytes, nil
+	default:
+		return n, nil
+	}
 }
 
 // resolveRequestURL returns an absolute URL for http.NewRequest. Lua URLs
@@ -84,7 +125,12 @@ func (s *HTTPService) resolveRequestURL(raw string) (string, error) {
 		return "", fmt.Errorf("invalid url %q: %w", raw, err)
 	}
 	if parsed.Scheme != "" {
-		return raw, nil
+		switch strings.ToLower(parsed.Scheme) {
+		case "http", "https":
+			return raw, nil
+		default:
+			return "", fmt.Errorf("url %q: scheme %q is not allowed (must be http or https)", raw, parsed.Scheme)
+		}
 	}
 	if parsed.Host != "" {
 		return "", fmt.Errorf("relative url %q with host but no scheme is not allowed", raw)
@@ -123,44 +169,7 @@ func (s *HTTPService) Register(L *lua.LState) {
 func (s *HTTPService) luaHTTPGet(L *lua.LState) int {
 	rawURL := L.CheckString(1)
 	headers := s.parseHeaders(L, 2)
-
-	resolved, err := s.resolveRequestURL(rawURL)
-	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(err.Error()))
-		return 2
-	}
-
-	req, err := http.NewRequestWithContext(s.ctx, "GET", resolved, nil)
-	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
-		return 2
-	}
-
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	// Apply request options if configured
-	if s.requestOptions != nil {
-		if err := s.requestOptions(req); err != nil {
-			L.Push(lua.LNil)
-			L.Push(lua.LString(fmt.Sprintf("request options failed: %v", err)))
-			return 2
-		}
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(fmt.Sprintf("request failed: %v", err)))
-		return 2
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	L.Push(s.responseToLua(L, resp))
-	return 1
+	return s.do(L, http.MethodGet, rawURL, nil, headers)
 }
 
 // luaHTTPPost implements HTTP POST
@@ -170,44 +179,7 @@ func (s *HTTPService) luaHTTPPost(L *lua.LState) int {
 	rawURL := L.CheckString(1)
 	body := L.CheckString(2)
 	headers := s.parseHeaders(L, 3)
-
-	resolved, err := s.resolveRequestURL(rawURL)
-	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(err.Error()))
-		return 2
-	}
-
-	req, err := http.NewRequestWithContext(s.ctx, "POST", resolved, bytes.NewBufferString(body))
-	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
-		return 2
-	}
-
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	// Apply request options if configured
-	if s.requestOptions != nil {
-		if err := s.requestOptions(req); err != nil {
-			L.Push(lua.LNil)
-			L.Push(lua.LString(fmt.Sprintf("request options failed: %v", err)))
-			return 2
-		}
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(fmt.Sprintf("request failed: %v", err)))
-		return 2
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	L.Push(s.responseToLua(L, resp))
-	return 1
+	return s.do(L, http.MethodPost, rawURL, bytes.NewBufferString(body), headers)
 }
 
 // luaHTTPRequest implements a generic HTTP request
@@ -218,50 +190,57 @@ func (s *HTTPService) luaHTTPRequest(L *lua.LState) int {
 	rawURL := L.CheckString(2)
 
 	var body io.Reader
-	bodyStr := L.OptString(3, "")
-	if bodyStr != "" {
+	if bodyStr := L.OptString(3, ""); bodyStr != "" {
 		body = bytes.NewBufferString(bodyStr)
 	}
 
 	headers := s.parseHeaders(L, 4)
+	return s.do(L, method, rawURL, body, headers)
+}
 
+// do resolves the URL, builds and sends the request, and pushes either the
+// response table or (nil, error) onto the Lua stack. All Lua HTTP entry points
+// go through here so URL validation and the response size limit apply equally.
+func (s *HTTPService) do(L *lua.LState, method, rawURL string, body io.Reader, headers map[string]string) int {
 	resolved, err := s.resolveRequestURL(rawURL)
 	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(err.Error()))
-		return 2
+		return pushError(L, err.Error())
 	}
 
 	req, err := http.NewRequestWithContext(s.ctx, method, resolved, body)
 	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(fmt.Sprintf("failed to create request: %v", err)))
-		return 2
+		return pushError(L, fmt.Sprintf("failed to create request: %v", err))
 	}
 
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
 
-	// Apply request options if configured
 	if s.requestOptions != nil {
 		if err := s.requestOptions(req); err != nil {
-			L.Push(lua.LNil)
-			L.Push(lua.LString(fmt.Sprintf("request options failed: %v", err)))
-			return 2
+			return pushError(L, fmt.Sprintf("request options failed: %v", err))
 		}
 	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(fmt.Sprintf("request failed: %v", err)))
-		return 2
+		return pushError(L, fmt.Sprintf("request failed: %v", err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	L.Push(s.responseToLua(L, resp))
+	tbl, err := s.responseToLua(L, resp)
+	if err != nil {
+		return pushError(L, err.Error())
+	}
+	L.Push(tbl)
 	return 1
+}
+
+// pushError pushes the Lua (nil, message) error convention and returns 2.
+func pushError(L *lua.LState, msg string) int {
+	L.Push(lua.LNil)
+	L.Push(lua.LString(msg))
+	return 2
 }
 
 // parseHeaders converts a Lua table to Go map of headers
@@ -287,19 +266,34 @@ func (s *HTTPService) parseHeaders(L *lua.LState, arg int) map[string]string {
 	return headers
 }
 
-// responseToLua converts an HTTP response to a Lua table
-func (s *HTTPService) responseToLua(L *lua.LState, resp *http.Response) *lua.LTable {
+// responseToLua converts an HTTP response to a Lua table. It returns an error
+// wrapping [ErrResponseTooLarge] when the body exceeds maxResponseBytes, so a
+// script never sees a silently truncated body.
+func (s *HTTPService) responseToLua(L *lua.LState, resp *http.Response) (*lua.LTable, error) {
+	if resp.ContentLength > s.maxResponseBytes {
+		return nil, fmt.Errorf("%w (limit %d bytes, Content-Length %d)",
+			ErrResponseTooLarge, s.maxResponseBytes, resp.ContentLength)
+	}
+
 	tbl := L.NewTable()
 
 	// Status code
 	L.SetField(tbl, "status", lua.LNumber(resp.StatusCode))
 
-	// Body
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
+	// Body: read at most one byte past the limit to detect oversized bodies
+	// whose length was not advertised up front (e.g. chunked encoding).
+	readLimit := s.maxResponseBytes
+	if readLimit < math.MaxInt64 {
+		readLimit++
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, readLimit))
+	switch {
+	case err != nil:
 		L.SetField(tbl, "body", lua.LString(""))
 		L.SetField(tbl, "error", lua.LString(fmt.Sprintf("failed to read body: %v", err)))
-	} else {
+	case int64(len(bodyBytes)) > s.maxResponseBytes:
+		return nil, fmt.Errorf("%w (limit %d bytes)", ErrResponseTooLarge, s.maxResponseBytes)
+	default:
 		L.SetField(tbl, "body", lua.LString(string(bodyBytes)))
 	}
 
@@ -312,5 +306,5 @@ func (s *HTTPService) responseToLua(L *lua.LState, resp *http.Response) *lua.LTa
 	}
 	L.SetField(tbl, "headers", headersTbl)
 
-	return tbl
+	return tbl, nil
 }

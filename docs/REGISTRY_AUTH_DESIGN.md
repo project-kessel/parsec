@@ -200,7 +200,9 @@ trust_store:
 - **Credential removal**: The `Authorization` header is stripped from requests forwarded to backends.
 - **Cache key derivation**: Cache keys are derived from the JSON serialization of `validate_cache_key()` output (credential type, username, password). The caching wrappers handle key hashing.
 - **mTLS**: Client certificate authentication to the registry service is configured via the named HTTP client.
-- **Lua sandbox**: The validation script runs in a restricted Lua environment with no filesystem or OS access — only `config`, `json`, and `http` modules are available.
+- **Lua sandbox**: The validation script runs in a restricted Lua environment with no filesystem, OS, or debug access. Only the parsec services (`config`, `json`, `http`, `base64`, `url`, `audit`) and the `base`, `table`, `string`, and `math` standard libraries are available. See the [Lua security model](../internal/datasource/LUA_DATASOURCE.md#security-model).
+- **Response size limit**: HTTP responses from the registry service are capped at 1 MiB. A larger body returns an error to the script, which raises and fails validation.
+- **URL schemes**: `registry_url` must use `http` or `https` (use `https` in production). Other schemes are rejected.
 
 ## Testing
 

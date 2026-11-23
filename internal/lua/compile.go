@@ -26,7 +26,7 @@ func CompileScript(source string, name string) (*lua.FunctionProto, error) {
 // ValidateFunction loads a pre-compiled script into a temporary LState
 // and verifies that executing it defines a global function with the given name.
 func ValidateFunction(proto *lua.FunctionProto, functionName string) error {
-	L := lua.NewState()
+	L := NewSandboxedState()
 	defer L.Close()
 
 	if err := LoadProto(L, proto); err != nil {

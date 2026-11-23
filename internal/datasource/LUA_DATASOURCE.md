@@ -12,6 +12,11 @@ A LuaDataSource executes a Lua script that has access to:
 - **HTTP client** - Make HTTP requests to external APIs
 - **JSON encoder/decoder** - Parse and generate JSON
 - **Configuration** - Access configuration values
+- **URL helpers** - Escape untrusted values before putting them in a URL
+- **Base64 and audit** - Encode values and record audit signals
+
+Scripts run in a sandbox. Only the `base`, `table`, `string`, and `math`
+standard libraries are loaded. See [Security Model](#security-model).
 
 ## Creating a LuaDataSource
 
@@ -22,15 +27,16 @@ import (
     "net/http"
     "time"
     "github.com/project-kessel/parsec/internal/datasource"
+    "github.com/project-kessel/parsec/internal/httpclient"
     "github.com/project-kessel/parsec/internal/lua"
 )
 
 script := `
 function fetch(input)
-  local subject = input.subject.subject
-  local response = http.get("https://api.example.com/user/" .. subject)
+  local path = "/user/" .. url.path_escape(input.subject.subject)
+  local response = http.get(path)
   
-  if response.status == 200 then
+  if response ~= nil and response.status == 200 then
     return {
       data = response.body,
       content_type = "application/json"
@@ -50,8 +56,12 @@ ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
     Name:         "user-data",
     Script:       script,
     ConfigSource: configSource,
-    HTTPTimeout:  30 * time.Second,
-    HTTPRequestOptions: func(req *http.Request) error {
+    HTTP: httpclient.LuaClient{
+        Client:  &http.Client{Timeout: 30 * time.Second},
+        BaseURL: "https://api.example.com", // fixes the host; Lua passes paths
+    },
+    MaxResponseBytes: 64 << 10, // optional; default 1 MiB
+    RequestOptions: func(req *http.Request) error {
         // Automatically add API key to all requests
         apiKey, _ := configSource.Get("api_key")
         req.Header.Set("Authorization", "Bearer " + apiKey.(string))
@@ -65,10 +75,10 @@ ds, err := datasource.NewLuaDataSource(datasource.LuaDataSourceConfig{
 ```go
 script := `
 function fetch(input)
-  local subject = input.subject.subject
-  local response = http.get("https://api.example.com/user/" .. subject)
+  local path = "/user/" .. url.path_escape(input.subject.subject)
+  local response = http.get(path)
   
-  if response.status == 200 then
+  if response ~= nil and response.status == 200 then
     return {
       data = response.body,
       content_type = "application/json"
@@ -97,8 +107,11 @@ ds, err := datasource.NewCacheableLuaDataSource(datasource.CacheableLuaDataSourc
     Name:         "user-data",
     Script:       script,
     ConfigSource: configSource,
-    HTTPTimeout:  30 * time.Second,
-    HTTPRequestOptions: func(req *http.Request) error {
+    HTTP: httpclient.LuaClient{
+        Client:  &http.Client{Timeout: 30 * time.Second},
+        BaseURL: "https://api.example.com",
+    },
+    RequestOptions: func(req *http.Request) error {
         apiKey, _ := configSource.Get("api_key")
         req.Header.Set("Authorization", "Bearer " + apiKey.(string))
         return nil
@@ -120,9 +133,10 @@ cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
 | `Name` | `string` | Yes | Unique name for this data source |
 | `Script` | `string` | Yes | Lua script with `fetch` function |
 | `ConfigSource` | `lua.ConfigSource` | No | Configuration source for the script |
-| `HTTP` | `httpclient.LuaClient` | No | HTTP client and optional base URL for relative Lua URLs |
-| `HTTPTimeout` | `time.Duration` | No | HTTP request timeout (default: 30s) |
-| `HTTPRequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests |
+| `HTTP` | `httpclient.LuaClient` | No | HTTP client (timeout, auth, TLS) and optional base URL for relative Lua URLs. Zero value uses `http.DefaultClient` |
+| `RequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests before sending |
+| `MaxResponseBytes` | `int64` | No | Maximum HTTP response body size per request. `0` means 1 MiB; negative is rejected |
+| `Observer` | `datasource.LuaObserver` | No | Lua execution events. Defaults to a no-op observer |
 
 ### CacheableLuaDataSourceConfig (With Caching)
 
@@ -131,9 +145,26 @@ cachedDS := datasource.NewInMemoryCachingDataSource(ds, obs,
 | `Name` | `string` | Yes | Unique name for this data source |
 | `Script` | `string` | Yes | Lua script with `fetch` and cache key functions |
 | `ConfigSource` | `lua.ConfigSource` | No | Configuration source for the script |
-| `HTTP` | `httpclient.LuaClient` | No | HTTP client and optional base URL for relative Lua URLs |
-| `HTTPTimeout` | `time.Duration` | No | HTTP request timeout (default: 30s) |
-| `HTTPRequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests |
+| `HTTP` | `httpclient.LuaClient` | No | HTTP client (timeout, auth, TLS) and optional base URL for relative Lua URLs. Zero value uses `http.DefaultClient` |
+| `RequestOptions` | `lua.RequestOptions` | No | Function to modify HTTP requests before sending |
+| `MaxResponseBytes` | `int64` | No | Maximum HTTP response body size per request. `0` means 1 MiB; negative is rejected |
+| `Observer` | `datasource.LuaObserver` | No | Lua execution events. Defaults to a no-op observer |
+
+### YAML configuration
+
+```yaml
+data_sources:
+  - name: user_data
+    type: lua
+    script_file: ./scripts/user_data.lua
+    http:
+      timeout: 5s
+      base_url: "https://api.example.com"   # fixed host for relative Lua URLs
+      http_auth:
+        type: bearer
+        token: "${USER_API_TOKEN}"
+    max_response_bytes: 65536               # optional, default 1048576 (1 MiB)
+```
 
 ## Script Requirements
 
@@ -242,6 +273,26 @@ response = {
 }
 ```
 
+Each call returns `(nil, error)` instead of a response when:
+- the URL is invalid, uses a scheme other than `http` or `https`, or is
+  relative without a configured `base_url`
+- the request fails (connection error, timeout, cancelled context)
+- the response body is larger than `max_response_bytes`. The error string
+  starts with `response body exceeds max_response_bytes`. The partial body
+  is never returned.
+
+### URL Service
+
+```lua
+-- Escape an untrusted value for use as ONE path segment.
+-- Encodes "/", "?", "#", spaces, and the dot segments "." and "..".
+local path = "/users/" .. url.path_escape(input.subject.subject)
+
+-- url.encode is the older helper. It applies Go's url.PathEscape but does
+-- not encode "." or "..". Prefer url.path_escape for untrusted input.
+local dn = url.encode("/C=US/ST=North Carolina")
+```
+
 ### JSON Service
 
 ```lua
@@ -282,9 +333,10 @@ function fetch(input)
   local apiKey = config.get("api_key")
   
   local headers = {["Authorization"] = "Bearer " .. apiKey}
-  local response = http.get("https://api.example.com/user/" .. subject, headers)
+  -- Relative path: the host comes from the HTTP client's base_url
+  local response = http.get("/user/" .. url.path_escape(subject), headers)
   
-  if response.status == 200 then
+  if response ~= nil and response.status == 200 then
     return {
       data = response.body,
       content_type = "application/json"
@@ -305,7 +357,6 @@ function fetch(input)
     local data = json.decode(response.body)
     
     -- Transform data
-    data.fetched_at = os.time()
     data.source = "lua-datasource"
     data.subject = input.subject.subject
     
@@ -358,10 +409,10 @@ function fetch(input)
   local subject = input.subject.subject
   local region = input.request_attributes.headers["X-Region"]
   
-  local url = string.format("https://api.example.com/user/%s?region=%s", subject, region)
-  local response = http.get(url)
+  local path = string.format("/user/%s/%s", url.path_escape(region or "default"), url.path_escape(subject))
+  local response = http.get(path)
   
-  if response.status == 200 then
+  if response ~= nil and response.status == 200 then
     return {
       data = response.body,
       content_type = "application/json"
@@ -421,8 +472,15 @@ end
 4. **Validation**: Validate input data before making external calls
 5. **Logging**: Use print() for debugging (output goes to stdout)
 6. **Performance**: Minimize the number of HTTP calls per fetch
-7. **Security**: Store sensitive values (API keys) in config, not in scripts
-8. **Testing**: Test your Lua scripts thoroughly before deployment
+7. **Security**: Store sensitive values (API keys) in config, not in scripts.
+   Prefer `http_auth` on the HTTP client over building headers in Lua
+8. **Fixed hosts**: Set `base_url` on the HTTP client and pass only relative
+   paths from Lua. Never build the scheme or host from token or request data
+9. **Escape input**: Wrap every token claim, header, or request value placed in
+   a URL path with `url.path_escape()`
+10. **Size limits**: Set `max_response_bytes` close to the largest expected
+    response
+11. **Testing**: Test your Lua scripts thoroughly before deployment
 
 ## Shipped scripts
 
@@ -474,13 +532,85 @@ Each call to `Fetch()` creates a new Lua state, making the LuaDataSource fully t
 4. **Script Complexity**: Keep scripts simple; complex logic may impact performance
 5. **Caching**: Use caching for data that doesn't change frequently
 
+## Security Model
+
+Lua scripts are supplied through configuration (for example the
+`parsec-config` Secret). They run inside the parsec process, which holds
+signing keys and upstream credentials. The sandbox limits what a script can
+reach if that configuration is modified, and limits what untrusted token and
+request data can influence.
+
+### Standard library sandbox
+
+Every Lua state is created with `lua.Options{SkipOpenLibs: true}` through
+`luaservices.NewSandboxedState()`. Only these standard libraries are opened:
+
+| Library | Available |
+|---------|-----------|
+| base (`pairs`, `ipairs`, `pcall`, `error`, `tostring`, `type`, `setmetatable`, `print`, `loadstring`, ...) | Yes |
+| `table`, `string`, `math` | Yes |
+| `os`, `io`, `debug`, `package`, `coroutine`, `channel` | No |
+| `dofile`, `loadfile`, `require`, `module` | No (removed from base) |
+
+Calling `os.execute()`, `io.open()`, `debug.getinfo()`, or `require()`
+raises a Lua error. Scripts that used `os.time()` must drop it or receive
+the value through `config` or the input table.
+
+The sandbox applies everywhere a script is loaded: `fetch`,
+`fetch_cache_key`, the start-up check that `fetch` exists, and Lua trust
+validators. The start-up check matters because loading a script runs its
+top-level code.
+
+### Outbound HTTP
+
+- **Schemes.** Only `http` and `https` URLs are accepted. Any other scheme,
+  such as `file`, `ftp`, or `gopher`, returns `(nil, error)` before a
+  request is built.
+- **Fixed host with `base_url`.** When the HTTP client has a `base_url`,
+  relative Lua paths resolve against it. `base_url` must be origin-form
+  (scheme and host only). It must use `https` when `http_auth` or request
+  options inject credentials. Protocol-relative URLs such as `//evil.example`
+  are rejected, so a path cannot switch hosts.
+- **Escaping.** `url.path_escape()` keeps an untrusted value inside one path
+  segment, so a `sub` claim like `../admin` or `x?role=admin` cannot change
+  the path or add a query.
+- **Response size.** Bodies are read through `io.LimitReader`, capped by
+  `max_response_bytes` (default 1 MiB). A larger body returns
+  `(nil, "response body exceeds max_response_bytes ...")`. When the upstream
+  sends `Content-Length`, an oversized response is rejected before any of the
+  body is read.
+
+### Why there is no per-data-source host allowlist
+
+The security audit (RHCLOUD-50304, FIND-003) proposed an `allowed_hosts`
+list. It was reviewed against the current code and not added, for these
+reasons:
+
+1. **Same trust boundary.** An `allowed_hosts` list would live in the same
+   configuration as the script. Anyone who can change the script can also
+   change the list, so it does not constrain the configuration author.
+2. **Token data cannot pick the host.** The only untrusted inputs are token
+   claims and request attributes. With `base_url` plus relative paths and
+   `url.path_escape()`, they can only affect one escaped path segment.
+   Protocol-relative and non-http(s) URLs are rejected.
+3. **The shipped scripts are safe.** `configs/scripts/export_compliance.lua`
+   uses a configured path and sends identity data in a header, not the URL.
+   The examples now use `base_url` and `url.path_escape()`.
+
+Remaining risk is limited to scripts that concatenate untrusted input into an
+absolute URL without escaping. Follow the best practices above to avoid it.
+Credential-injecting clients enforce `https` on `base_url`, but an absolute
+`http://` URL written in a script is still sent as written. Use relative
+paths with credentialed clients.
+
 ## Limitations
 
-1. **No File System Access**: Scripts cannot read/write files
-2. **No Subprocess Execution**: Scripts cannot execute system commands
-3. **Limited Libraries**: Only provided services are available (no standard Lua libraries beyond basics)
+1. **No File System Access**: `io`, `dofile`, and `loadfile` are not available
+2. **No Subprocess Execution**: `os` is not available
+3. **Limited Libraries**: Only `base`, `table`, `string`, and `math`, plus the
+   parsec services (`http`, `json`, `config`, `url`, `base64`, `audit`)
 4. **Timeout Enforcement**: HTTP requests must complete within configured timeout
-5. **Memory Limits**: Lua states have inherent memory limits
+5. **Response Size**: HTTP bodies larger than `max_response_bytes` are rejected
 
 ## Troubleshooting
 
@@ -506,6 +636,20 @@ if response == nil then
   error("Request failed: " .. err)
 end
 ```
+
+### Response Body Exceeds max_response_bytes
+
+```
+response body exceeds max_response_bytes (limit 1048576 bytes, Content-Length 5242880)
+```
+
+The upstream returned more data than allowed. Raise `max_response_bytes` on
+the data source if the response is expected, or narrow the request.
+
+### attempt to index a non-table object(nil) with key 'execute'
+
+The script uses a standard library the sandbox removes, such as `os` or `io`.
+See [Security Model](#security-model).
 
 ### Failed to Decode JSON
 

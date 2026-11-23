@@ -162,8 +162,10 @@ parsec/
 │   │   └── LUA_DATASOURCE.md    # Lua data source documentation
 │   │
 │   ├── lua/                     # Lua runtime services
-│   │   ├── http.go              # HTTP client for Lua
+│   │   ├── sandbox.go           # Sandboxed Lua state (base/table/string/math only)
+│   │   ├── http.go              # HTTP client for Lua (scheme check, response size cap)
 │   │   ├── json.go              # JSON encoding/decoding
+│   │   ├── url.go               # URL escaping (url.encode, url.path_escape)
 │   │   └── config.go            # Configuration access
 │   │
 │   ├── cel/                     # CEL (Common Expression Language) support
@@ -255,7 +257,8 @@ This enables patterns like "service X acting on behalf of user Y" which is criti
 
 Data sources enable token enrichment by fetching data from external systems:
 
-- **Lua-scriptable**: Write data sources in Lua without recompiling
+- **Lua-scriptable**: Write data sources in Lua without recompiling. Scripts run
+  in a sandbox without `os`, `io`, or `debug`, and HTTP responses are size-capped
 - **HTTP/JSON/Config services**: Built-in services for common operations
 - **Caching**: Automatic in-memory and distributed caching
 - **Examples**: User profiles, permissions, regional data, multi-source aggregation

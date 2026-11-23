@@ -197,7 +197,7 @@ func (v *LuaValidator) Validate(ctx context.Context, credential Credential) (*Re
 
 	input := ValidatorInput{Credential: credential}
 
-	L := lua.NewState()
+	L := luaservices.NewSandboxedState()
 	defer L.Close()
 	L.SetContext(ctx)
 
@@ -301,7 +301,7 @@ func (v *CacheableLuaValidator) CacheKey(ctx context.Context, credential Credent
 
 	input := ValidatorInput{Credential: credential}
 
-	L := lua.NewState()
+	L := luaservices.NewSandboxedState()
 	defer L.Close()
 	L.SetContext(ctx)
 
