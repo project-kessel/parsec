@@ -201,10 +201,18 @@ func (r *Registry) build(clientName string, spec ClientSpec) (*http.Client, erro
 		}
 	}
 
-	return &http.Client{
+	client := &http.Client{
 		Timeout:   spec.Timeout,
 		Transport: transport,
-	}, nil
+	}
+
+	// 4. Credential-injecting transports re-add credentials on every redirect
+	//    hop, so restrict those clients to same-origin redirects.
+	if transportUsesCredentials(transport) {
+		client.CheckRedirect = SameOriginRedirectPolicy
+	}
+
+	return client, nil
 }
 
 // instrumentedTransport wraps a base [http.RoundTripper] and records metrics

@@ -766,3 +766,28 @@ func generateSelfSignedCert(t *testing.T, dir string) (certPath, keyPath string)
 
 	return certPath, keyPath
 }
+
+func TestNewHTTPClientRegistry_RedirectPolicyFollowsHTTPAuth(t *testing.T) {
+	cfgs := []HTTPClientConfig{
+		{Name: "bearer", HTTPClientSpec: HTTPClientSpec{HTTPAuth: &HTTPAuthConfig{Type: "bearer", Token: "t"}}},
+		{Name: "headers", HTTPClientSpec: HTTPClientSpec{HTTPAuth: &HTTPAuthConfig{
+			Type:    "headers",
+			Headers: map[string]any{"x-rh-apitoken": "t"},
+		}}},
+		{Name: "anonymous", HTTPClientSpec: HTTPClientSpec{Timeout: "5s"}},
+	}
+	registry, err := NewHTTPClientRegistry(cfgs, nil)
+	if err != nil {
+		t.Fatalf("NewHTTPClientRegistry: %v", err)
+	}
+
+	for name, wantPolicy := range map[string]bool{"bearer": true, "headers": true, "anonymous": false} {
+		client, err := registry.Get(httpclient.ClientName(name))
+		if err != nil {
+			t.Fatalf("Get(%s): %v", name, err)
+		}
+		if got := client.CheckRedirect != nil; got != wantPolicy {
+			t.Errorf("%s: has redirect policy = %v, want %v", name, got, wantPolicy)
+		}
+	}
+}

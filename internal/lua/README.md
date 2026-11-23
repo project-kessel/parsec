@@ -236,7 +236,11 @@ httpService, err := lua.NewHTTPService(ctx, client,
 
 #### Request Options
 
-The `RequestOptions` function allows you to modify HTTP requests before they are sent. This is useful for:
+The `RequestOptions` function allows you to modify HTTP requests before they are sent.
+Because these headers usually carry credentials, setting `WithRequestOptions`
+also requires an `https` base URL and restricts redirects to the same origin.
+Go copies custom headers to every redirect hop, so without this a redirect
+could forward them to another host. This is useful for:
 - Adding authentication headers
 - Modifying URLs (e.g., adding query parameters)
 - Setting custom headers
@@ -332,8 +336,9 @@ end
 2. **HTTP Timeout**: The HTTP service has a configurable timeout to prevent long-running requests
 3. **Response Size Limit**: Bodies are read through `io.LimitReader` and rejected above `max_response_bytes`
 4. **Scheme Restriction**: Only `http` and `https` URLs are sent
-5. **Fixed Hosts**: With `base_url` and relative paths, script input cannot change the host. Escape untrusted path values with `url.path_escape()`
-6. **Isolated State**: Each Lua script runs in its own isolated state
+5. **Same-Origin Redirects for Credentials**: When the client injects credentials (credential transport) or `WithRequestOptions` is set, `NewHTTPService` uses a copy of the client that refuses redirects to a different scheme, host, or port. Any existing `CheckRedirect` still runs, and the caller's client is not modified
+6. **Fixed Hosts**: With `base_url` and relative paths, script input cannot change the host. Escape untrusted path values with `url.path_escape()`
+7. **Isolated State**: Each Lua script runs in its own isolated state
 
 See [LUA_DATASOURCE.md](../datasource/LUA_DATASOURCE.md#security-model) for
 the full security model, including why there is no per-data-source host

@@ -574,6 +574,15 @@ top-level code.
 - **Escaping.** `url.path_escape()` keeps an untrusted value inside one path
   segment, so a `sub` claim like `../admin` or `x?role=admin` cannot change
   the path or add a query.
+- **Redirects for credentialed clients.** A client that injects
+  credentials, through `http_auth` or request options, only follows
+  redirects that keep the same scheme, host, and port. A redirect to another
+  host or port, or from `https` to `http`, fails the call with
+  `(nil, "request failed: ... redirect to a different origin refused ...")`
+  and the target is never contacted. This matters because credential
+  transports add their headers on every hop, and Go never strips custom
+  headers such as `x-rh-apitoken`. Clients without credentials keep Go's
+  default redirect behaviour.
 - **Response size.** Bodies are read through `io.LimitReader`, capped by
   `max_response_bytes` (default 1 MiB). A larger body returns
   `(nil, "response body exceeds max_response_bytes ...")`. When the upstream
@@ -597,11 +606,18 @@ reasons:
    uses a configured path and sends identity data in a header, not the URL.
    The examples now use `base_url` and `url.path_escape()`.
 
-Remaining risk is limited to scripts that concatenate untrusted input into an
-absolute URL without escaping. Follow the best practices above to avoid it.
-Credential-injecting clients enforce `https` on `base_url`, but an absolute
-`http://` URL written in a script is still sent as written. Use relative
-paths with credentialed clients.
+### Known limitations
+
+- **Unescaped absolute URLs.** A script that concatenates untrusted input into
+  an absolute URL without `url.path_escape()` can still be steered. Follow the
+  best practices above.
+- **Absolute `http://` URLs with credentials.** Credentialed clients must use
+  `https` for `base_url`, and redirects cannot downgrade to `http`. An
+  absolute `http://` URL written directly in a script is still sent as
+  written. Use relative paths with credentialed clients.
+- **Trusted upstream behaviour.** The same-origin redirect rule protects
+  credentials from redirects, but it cannot protect against a compromised
+  upstream that is itself the configured origin.
 
 ## Limitations
 

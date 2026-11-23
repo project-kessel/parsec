@@ -89,6 +89,10 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		return nil, err
 	}
 
+	if requireHTTPS {
+		client = withSameOriginRedirects(client)
+	}
+
 	maxResponseBytes, err := ResolveMaxResponseBytes(cfg.maxResponseBytes)
 	if err != nil {
 		return nil, err
@@ -102,6 +106,17 @@ func NewHTTPService(ctx context.Context, client *http.Client, opts ...HTTPServic
 		requireHTTPS:     requireHTTPS,
 		maxResponseBytes: maxResponseBytes,
 	}, nil
+}
+
+// withSameOriginRedirects returns a shallow copy of client whose redirect
+// policy refuses cross-origin redirects, keeping any existing CheckRedirect.
+// It is applied whenever credentials are in play: a credential-injecting
+// transport, or RequestOptions, whose headers net/http copies to every redirect
+// hop (custom headers are never stripped). The caller's client is not modified.
+func withSameOriginRedirects(client *http.Client) *http.Client {
+	c := *client
+	c.CheckRedirect = httpclient.WithSameOriginRedirects(client.CheckRedirect)
+	return &c
 }
 
 // ResolveMaxResponseBytes applies the default to a configured response size

@@ -556,6 +556,10 @@ http_clients:
   - `type` - Auth mechanism: `"bearer"`, `"headers"` (future: `"oauth2_client_credentials"`)
   - `token` - Static bearer token value (bearer type)
   - `headers` - Map of header name to string value, or `{env: VAR}` (headers type). Empty env vars fail at startup.
+  - Clients with `http_auth` only follow redirects that keep the same scheme,
+    host, and port. A redirect to another origin, or from `https` to `http`,
+    fails the request so the credentials are never sent there. Clients
+    without `http_auth` keep Go's default redirect behaviour.
 - `client_cert_source` - Client certificate source for mTLS
   - `type` - Source type: `"file"` (future: `"vault"`, `"k8s_secret"`)
   - `cert` - Path to client certificate PEM (file type)
@@ -847,6 +851,7 @@ Lua data source and validator scripts run in a sandbox:
   `os`, `io`, `debug`, `require`, `dofile`, and `loadfile` are not available,
   including in a script's top-level code, which runs at startup.
 - HTTP calls accept only `http` and `https` URLs.
+- Clients with `http_auth` refuse redirects to a different origin.
 - Each HTTP response body is capped by `max_response_bytes` (default 1 MiB).
   Lua validators always use the default.
 - Use `base_url` on the HTTP client with relative paths, and wrap untrusted

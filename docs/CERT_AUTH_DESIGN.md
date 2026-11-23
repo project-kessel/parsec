@@ -272,6 +272,7 @@ All secret references use `optional: true` to allow the pod to start without cer
 - **Issuer validation**: BOP checks the certificate issuer against its `TRUSTED_ISSUERS` list before resolving the CN.
 - **Cache key derivation**: Cache keys include credential type, subject, and issuer. The caching wrappers handle key hashing.
 - **Lua sandbox**: The validation script runs in a restricted Lua environment with no filesystem, OS, or debug access. Only the parsec services (`config`, `json`, `http`, `base64`, `url`, `audit`) and the `base`, `table`, `string`, and `math` standard libraries are available. See the [Lua security model](../internal/datasource/LUA_DATASOURCE.md#security-model).
+- **Redirects**: The BOP client injects credentials through `http_auth`, so it only follows redirects to the same scheme, host, and port. A cross-origin redirect fails validation instead of forwarding `x-rh-clientid` and `x-rh-apitoken`.
 - **Response size limit**: HTTP responses from BOP are capped at 1 MiB. A larger body returns an error to the script, which fails validation.
 - **Secret management**: BOP credentials are resolved from environment variables at startup. The `{env: "VAR"}` syntax in config values and `http_auth.headers` entries resolves env vars eagerly — if a required env var is empty or unset, startup fails immediately.
 
