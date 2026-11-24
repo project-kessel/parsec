@@ -282,27 +282,34 @@ func TestHermeticAuditIssuanceOutcomes(t *testing.T) {
 		scripts         []string
 		outcome, reason string
 		grpcCode        codes.Code
-		httpStatus      int
+		httpStatus      int // DeniedHttpResponse status; unused for OK and Internal (gRPC error)
 		issued          []any
 	}{
 		{"success", []string{`{"ok": true}`}, "success", "", codes.OK, 0, []any{txn}},
 		{"denial", []string{`accessDenied("denied")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, nil},
-		{"failure", []string{`fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
-		{"missing issuer", nil, "failure", "token_issuance_failed", codes.Internal, 500, nil},
+		{"failure", []string{`fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 0, nil},
+		{"missing issuer", nil, "failure", "token_issuance_failed", codes.Internal, 0, nil},
 		{"partial denial", []string{`{"ok": true}`, `accessDenied("denied")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, []any{txn}},
-		{"partial failure", []string{`{"ok": true}`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, []any{txn}},
-		{"denial then failure", []string{`accessDenied("denied")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
-		{"classified denial then failure", []string{`accessDenied("denied", "tenant_policy")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 500, nil},
+		{"partial failure", []string{`{"ok": true}`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 0, []any{txn}},
+		{"denial then failure", []string{`accessDenied("denied")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 0, nil},
+		{"classified denial then failure", []string{`accessDenied("denied", "tenant_policy")`, `fail("unavailable")`}, "failure", "token_issuance_failed", codes.Internal, 0, nil},
 		{"first denial selects terminal reason", []string{`accessDenied("denied")`, `accessDenied("denied", "tenant_policy")`}, "denied", "token_issuance_denied", codes.PermissionDenied, 403, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := newAuditAPI(t, tt.scripts)
 			resp, err := api.authz.Check(context.Background(), checkRequestWithBearer("opaque-token"))
-			require.NoError(t, err)
-			require.Equal(t, int32(tt.grpcCode), resp.Status.Code)
-			if tt.grpcCode != codes.OK {
-				require.Equal(t, tt.httpStatus, int(resp.GetDeniedResponse().Status.Code))
+			if tt.grpcCode == codes.Internal {
+				// Internal failures are returned to Envoy as a gRPC error (counted
+				// as ext_authz "error"), not as a denied CheckResponse.
+				require.Equal(t, codes.Internal, status.Code(err))
+				require.Nil(t, resp)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, int32(tt.grpcCode), resp.Status.Code)
+				if tt.grpcCode != codes.OK {
+					require.Equal(t, tt.httpStatus, int(resp.GetDeniedResponse().Status.Code))
+				}
 			}
 			record := api.output.lastRequest(t)
 			require.Equal(t, tt.outcome, record["outcome"])

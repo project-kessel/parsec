@@ -12,6 +12,7 @@ import (
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/project-kessel/parsec/internal/clock"
 	"github.com/project-kessel/parsec/internal/datasource"
@@ -314,7 +315,10 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		}
 	})
 
-	t.Run("RBAC unavailable → 500", func(t *testing.T) {
+	// An RBAC outage is a parsec-internal failure: it must surface to Envoy as
+	// a gRPC error (ext_authz "error", gateway status_on_error) rather than a
+	// denied CheckResponse, so it counts against the availability SLO.
+	t.Run("RBAC unavailable → gRPC Internal error", func(t *testing.T) {
 		client := &http.Client{
 			Transport: httpfixture.NewTransport(httpfixture.TransportConfig{
 				Provider: httpfixture.NewFuncProvider(func(req *http.Request) *httpfixture.Fixture {
@@ -333,18 +337,15 @@ func TestHermeticAuthzCrossAccount(t *testing.T) {
 		authz := newAuthz(true, false, client)
 		token := mustSignToken(t, jwksFixture, internalConsoleClaims)
 		resp, err := authz.Check(context.Background(), checkRequestWithCrossAccountCookies(token, "cross_access_account_number=999999; cross_access_org_id=target-org"))
-		if err != nil {
-			t.Fatalf("Check: %v", err)
+		if resp != nil {
+			t.Fatalf("expected no CheckResponse for RBAC outage, got %v", resp)
 		}
-		if resp.Status.Code == int32(codes.OK) {
-			t.Fatal("expected denied response for RBAC outage")
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.Internal {
+			t.Fatalf("expected gRPC Internal error, got %v", err)
 		}
-		denied := resp.GetDeniedResponse()
-		if denied == nil {
-			t.Fatal("expected DeniedHttpResponse")
-		}
-		if denied.Status.Code != 500 {
-			t.Errorf("expected HTTP 500, got %d", denied.Status.Code)
+		if !strings.Contains(st.Message(), "cross_account_check_failed") {
+			t.Errorf("message: got %q, want it to contain cross_account_check_failed", st.Message())
 		}
 	})
 
