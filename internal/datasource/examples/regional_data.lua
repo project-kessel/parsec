@@ -1,5 +1,9 @@
 -- Example Lua script that fetches region-specific data
 -- This demonstrates using request attributes for routing
+--
+-- The X-Region header and the subject are caller-controlled, so both are
+-- escaped with url.path_escape before being placed in the URL path. The host
+-- comes from the HTTP client's base_url, never from request input.
 
 function fetch(input)
   local subject = input.subject.subject
@@ -14,25 +18,22 @@ function fetch(input)
     end
   end
   
-  -- Get region-specific endpoint
-  local base_url = config.get("api_endpoint")
-  local api_key = config.get("api_key")
-  
-  -- Build region-specific URL
-  local url = string.format("%s/%s/users/%s", base_url, region, subject)
+  local escaped_subject = url.path_escape(subject)
+
+  -- Build region-specific relative URL (resolved against the client base_url)
+  local path = string.format("/%s/users/%s", url.path_escape(region), escaped_subject)
   
   local headers = {
-    ["Authorization"] = "Bearer " .. api_key,
     ["X-Region"] = region
   }
   
-  local response = http.get(url, headers)
+  local response = http.get(path, headers)
   
   if response == nil or response.status ~= 200 then
     -- Try fallback to default region
     print("Failed to fetch from " .. region .. ", trying default region")
-    url = string.format("%s/us-east-1/users/%s", base_url, subject)
-    response = http.get(url, headers)
+    path = "/us-east-1/users/" .. escaped_subject
+    response = http.get(path, headers)
     
     if response == nil or response.status ~= 200 then
       return nil
@@ -46,7 +47,6 @@ function fetch(input)
   
   -- Add region information to response
   data.region = region
-  data.fetched_at = os.time()
   
   return {
     data = json.encode(data),

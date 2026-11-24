@@ -2,6 +2,11 @@
 
 This directory contains example Lua scripts demonstrating various use cases for the LuaDataSource.
 
+Scripts run in a sandbox with only the `base`, `table`, `string`, and `math`
+standard libraries. `os`, `io`, and `debug` are not available. The examples
+are exercised by `lua_datasource_examples_test.go`, so they must keep working
+inside the sandbox. See [Security Model](../LUA_DATASOURCE.md#security-model).
+
 ## Examples
 
 ### 1. user_data.lua
@@ -16,13 +21,9 @@ Basic example demonstrating:
 
 **Use Case**: Fetch user profile data from an external API.
 
-**Configuration Required**:
-```go
-Config: map[string]interface{}{
-    "api_endpoint": "https://api.example.com",
-    "api_key": "your-api-key",
-}
-```
+**Configuration Required**: an HTTP client with `base_url` (and usually
+`http_auth`). The script builds only a relative path with `url.path_escape()`.
+See the header comment in `user_data.lua` for a YAML example.
 
 ### 2. multi_source.lua
 
@@ -53,13 +54,8 @@ Regional routing example demonstrating:
 
 **Use Case**: Fetch data from region-specific endpoints based on request headers.
 
-**Configuration Required**:
-```go
-Config: map[string]interface{}{
-    "api_endpoint": "https://api.example.com",
-    "api_key": "your-api-key",
-}
-```
+**Configuration Required**: an HTTP client with `base_url` (and usually
+`http_auth`). The region header and subject are escaped with `url.path_escape()`.
 
 ## Using These Examples
 
@@ -73,6 +69,7 @@ import (
     "net/http"
     "time"
     "github.com/project-kessel/parsec/internal/datasource"
+    "github.com/project-kessel/parsec/internal/httpclient"
     luaservices "github.com/project-kessel/parsec/internal/lua"
 )
 
@@ -93,7 +90,11 @@ func main() {
         Name:         "user-data",
         Script:       string(script),
         ConfigSource: configSource,
-        HTTPClient: &http.Client{Timeout: 30 * time.Second},
+        HTTP: httpclient.LuaClient{
+            Client:  &http.Client{Timeout: 30 * time.Second},
+            BaseURL: "https://api.example.com",
+        },
+        MaxResponseBytes: 64 << 10, // optional; default 1 MiB
         RequestOptions: func(req *http.Request) error {
             apiKey, _ := configSource.Get("api_key")
             req.Header.Set("Authorization", "Bearer "+apiKey.(string))
@@ -226,20 +227,29 @@ end
 
 ### 5. Dynamic URLs
 
+Keep the host fixed with the HTTP client's `base_url` and escape every
+untrusted value:
+
 ```lua
-local url = string.format("%s/users/%s/data", base_url, subject)
-local url = base_url .. "/users/" .. subject .. "/data"
+local path = string.format("/users/%s/data", url.path_escape(subject))
+local response, err = http.get(path)
 ```
+
+Do not concatenate token claims or request headers into a URL without
+`url.path_escape()`. A `sub` claim like `../admin` or `x?role=admin` would
+otherwise change the path or query.
 
 ## Best Practices
 
 1. **Validate Config**: Check for required config values at the start of fetch()
 2. **Handle Errors Gracefully**: Use error() for fatal errors, return nil for non-fatal
-3. **Add Context**: Enrich response data with metadata (fetched_at, source, etc.)
+3. **Add Context**: Enrich response data with metadata (source, issuer, etc.)
 4. **Use Helper Functions**: Extract common logic into helper functions
 5. **Cache Wisely**: Only include fields in fetch_cache_key that affect the result
 6. **Log Debug Info**: Use print() to output debug information
 7. **Test Thoroughly**: Write tests for your scripts before deployment
+8. **Escape URL Input**: Use `url.path_escape()` for any token or request value in a URL path
+9. **Bound Responses**: Set `max_response_bytes` near the largest expected response
 
 ## Troubleshooting
 

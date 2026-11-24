@@ -398,7 +398,9 @@ trust_store:
 - `jwt_validator` - Validates JWT tokens with JWKS
 - `json_validator` - Validates unsigned JSON credentials in `trust.Result` shape
 - `unsigned_json_validator` - Validates IETF unsigned JSON subject tokens (`{"sub": "..."}`). Production MUST ForActor-filter this validator; without a filter any caller can assert any `sub`.
-- `lua_validator` - Validates credentials with a Lua `validate(input)` script
+- `lua_validator` - Validates credentials with a Lua `validate(input)` script.
+  Runs in the same Lua sandbox as Lua data sources, and its HTTP responses are
+  capped at 1 MiB (see [Lua Script Sandbox](#lua-script-sandbox))
 - `stub_validator` - Testing validator (accepts any non-empty token)
 
 **Lua Validator Example:**
@@ -554,6 +556,10 @@ http_clients:
   - `type` - Auth mechanism: `"bearer"`, `"headers"` (future: `"oauth2_client_credentials"`)
   - `token` - Static bearer token value (bearer type)
   - `headers` - Map of header name to string value, or `{env: VAR}` (headers type). Empty env vars fail at startup.
+  - Clients with `http_auth` only follow redirects that keep the same scheme,
+    host, and port. A redirect to another origin, or from `https` to `http`,
+    fails the request so the credentials are never sent there. Clients
+    without `http_auth` keep Go's default redirect behaviour.
 - `client_cert_source` - Client certificate source for mTLS
   - `type` - Source type: `"file"` (future: `"vault"`, `"k8s_secret"`)
   - `cert` - Path to client certificate PEM (file type)
@@ -623,6 +629,7 @@ data_sources:
       http_auth:
         type: "bearer"
         token: "partner-token"
+    max_response_bytes: 65536  # Optional; default 1048576 (1 MiB)
 ```
 
 **HTTP Client Configuration:**
@@ -630,6 +637,12 @@ data_sources:
 - `http_client` - Name of a client from the `http_clients` registry
 - `http` - Inline client definition (mutually exclusive with `http_client`)
 - When neither is set, the `"default"` client is used
+
+**Response Size Limit:**
+
+- `max_response_bytes` - Maximum size of each HTTP response body a Lua data
+  source script reads. Unset or `0` means 1 MiB. Negative values fail startup.
+  A larger response returns `(nil, error)` to the script instead of a body.
 
 **Caching Types:**
 
@@ -829,6 +842,23 @@ Restrict access to configuration files:
 chmod 600 /etc/parsec/config.yaml
 chown parsec:parsec /etc/parsec/config.yaml
 ```
+
+### Lua Script Sandbox
+
+Lua data source and validator scripts run in a sandbox:
+
+- Only the `base`, `table`, `string`, and `math` standard libraries are loaded.
+  `os`, `io`, `debug`, `require`, `dofile`, and `loadfile` are not available,
+  including in a script's top-level code, which runs at startup.
+- HTTP calls accept only `http` and `https` URLs.
+- Clients with `http_auth` refuse redirects to a different origin.
+- Each HTTP response body is capped by `max_response_bytes` (default 1 MiB).
+  Lua validators always use the default.
+- Use `base_url` on the HTTP client with relative paths, and wrap untrusted
+  values placed in a URL path with `url.path_escape()`.
+
+See the [Lua security model](../internal/datasource/LUA_DATASOURCE.md#security-model)
+for details.
 
 ### Environment Variables
 

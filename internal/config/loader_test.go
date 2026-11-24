@@ -246,3 +246,34 @@ http_clients:
 		t.Errorf("HTTPClients[0].BaseURL = %q, want env overlay value", got)
 	}
 }
+
+func TestNewLoader_DataSourceMaxResponseBytes(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "parsec.yaml")
+	const yamlConfig = `
+data_sources:
+  - name: limited
+    type: lua
+    script: "function fetch(input) return nil end"
+    max_response_bytes: 2048
+`
+	if err := os.WriteFile(configPath, []byte(yamlConfig), 0o600); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	loader, err := NewLoader(configPath)
+	if err != nil {
+		t.Fatalf("NewLoader: %v", err)
+	}
+	cfg, err := loader.Get()
+	if err != nil {
+		t.Fatalf("loader.Get(): %v", err)
+	}
+
+	if len(cfg.DataSources) != 1 {
+		t.Fatalf("len(DataSources) = %d, want 1", len(cfg.DataSources))
+	}
+	if got := cfg.DataSources[0].MaxResponseBytes; got != 2048 {
+		t.Errorf("DataSources[0].MaxResponseBytes = %d, want 2048", got)
+	}
+}

@@ -674,7 +674,6 @@ function fetch(input)
 		local userData = json.decode(response.body)
 		
 		-- Add some extra data
-		userData.fetched_at = os.time()
 		userData.source = "lua-datasource"
 		
 		-- Return as JSON

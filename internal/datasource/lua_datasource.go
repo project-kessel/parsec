@@ -16,7 +16,9 @@ import (
 const fetchCacheKeyFuncName = "fetch_cache_key"
 
 // LuaDataSource executes a Lua script to fetch data.
-// The script has access to http, config, and json services.
+// The script has access to http, config, json, base64, url, and audit
+// services, plus only the base, table, string, and math standard libraries
+// (see [luaservices.NewSandboxedState]).
 //
 // The Lua script is compiled once at construction time; each call to
 // [LuaDataSource.Fetch] loads the pre-compiled bytecode into a fresh
@@ -27,6 +29,7 @@ type LuaDataSource struct {
 	configSource   luaservices.ConfigSource
 	http           httpclient.LuaClient
 	requestOptions luaservices.RequestOptions
+	maxRespBytes   int64
 	observer       LuaObserver
 }
 
@@ -41,7 +44,7 @@ type LuaDataSourceConfig struct {
 	//
 	// Example:
 	//   function fetch(input)
-	//     local response = http.get("https://api.example.com/user/" .. input.subject.subject)
+	//     local response = http.get("/user/" .. url.path_escape(input.subject.subject))
 	//     if response.status == 200 then
 	//       return {data = response.body, content_type = "application/json"}
 	//     end
@@ -60,6 +63,10 @@ type LuaDataSourceConfig struct {
 	// RequestOptions is a programmatic hook that augments outgoing HTTP requests
 	// (e.g. injecting headers or query params from Go context). Optional.
 	RequestOptions luaservices.RequestOptions
+
+	// MaxResponseBytes caps the size of each HTTP response body the script can
+	// read. Zero uses [luaservices.DefaultMaxResponseBytes]. Negative is invalid.
+	MaxResponseBytes int64
 
 	// Observer for Lua-specific execution events. If nil, defaults to NoOpObserver.
 	Observer LuaObserver
@@ -81,6 +88,11 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		config.ConfigSource = luaservices.NewMapConfigSource(nil)
 	}
 
+	maxRespBytes, err := luaservices.ResolveMaxResponseBytes(config.MaxResponseBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	proto, err := luaservices.CompileScript(config.Script, config.Name)
 	if err != nil {
 		return nil, err
@@ -100,6 +112,7 @@ func NewLuaDataSource(config LuaDataSourceConfig) (*LuaDataSource, error) {
 		configSource:   config.ConfigSource,
 		http:           config.HTTP,
 		requestOptions: config.RequestOptions,
+		maxRespBytes:   maxRespBytes,
 		observer:       obs,
 	}, nil
 }
@@ -118,11 +131,13 @@ func (ds *LuaDataSource) Fetch(ctx context.Context, input *service.DataSourceInp
 		return nil, fmt.Errorf("nil input")
 	}
 
-	L := lua.NewState()
+	L := luaservices.NewSandboxedState()
 	defer L.Close()
 	L.SetContext(ctx)
 
-	var httpOpts []luaservices.HTTPServiceOption
+	httpOpts := []luaservices.HTTPServiceOption{
+		luaservices.WithMaxResponseBytes(ds.maxRespBytes),
+	}
 	if ds.requestOptions != nil {
 		httpOpts = append(httpOpts, luaservices.WithRequestOptions(ds.requestOptions))
 	}
@@ -405,6 +420,10 @@ type CacheableLuaDataSourceConfig struct {
 	// RequestOptions is a programmatic hook that augments outgoing HTTP requests. Optional.
 	RequestOptions luaservices.RequestOptions
 
+	// MaxResponseBytes caps the size of each HTTP response body the script can
+	// read. Zero uses [luaservices.DefaultMaxResponseBytes]. Negative is invalid.
+	MaxResponseBytes int64
+
 	// Observer for Lua-specific execution events on the inner Lua data source.
 	// If nil, NewLuaDataSource substitutes NoOpDataSourceObserver{}.
 	Observer LuaObserver
@@ -433,7 +452,7 @@ func (ds *CacheableLuaDataSource) CacheKey(ctx context.Context, input *service.D
 		return service.DataSourceInput{}, false
 	}
 
-	L := lua.NewState()
+	L := luaservices.NewSandboxedState()
 	defer L.Close()
 	L.SetContext(ctx)
 

@@ -20,8 +20,8 @@ function fetch_admin_data(subject)
   local base_url = config.get("api_endpoint")
   
   -- Fetch both user profile and admin permissions
-  local profile = fetch_json(base_url .. "/users/" .. subject, api_key)
-  local permissions = fetch_json(base_url .. "/admin/permissions/" .. subject, api_key)
+  local profile = fetch_json(base_url .. "/users/" .. url.path_escape(subject), api_key)
+  local permissions = fetch_json(base_url .. "/admin/permissions/" .. url.path_escape(subject), api_key)
   
   if profile == nil or permissions == nil then
     return nil
@@ -45,7 +45,7 @@ function fetch_service_data(subject)
   local base_url = config.get("api_endpoint")
   
   -- Service accounts need different data
-  local service_info = fetch_json(base_url .. "/services/" .. subject, api_key)
+  local service_info = fetch_json(base_url .. "/services/" .. url.path_escape(subject), api_key)
   
   if service_info == nil then
     return nil
@@ -63,7 +63,7 @@ function fetch_standard_user_data(subject)
   local api_key = config.get("api_key")
   local base_url = config.get("api_endpoint")
   
-  local profile = fetch_json(base_url .. "/users/" .. subject, api_key)
+  local profile = fetch_json(base_url .. "/users/" .. url.path_escape(subject), api_key)
   
   if profile == nil then
     return nil
@@ -78,13 +78,13 @@ function fetch_standard_user_data(subject)
 end
 
 -- Helper function to fetch and parse JSON
-function fetch_json(url, api_key)
+function fetch_json(request_url, api_key)
   local headers = {
     ["Authorization"] = "Bearer " .. api_key,
     ["Accept"] = "application/json"
   }
   
-  local response, err = http.get(url, headers)
+  local response, err = http.get(request_url, headers)
   
   if response == nil then
     print("HTTP error: " .. err)

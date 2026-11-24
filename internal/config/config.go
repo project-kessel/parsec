@@ -259,6 +259,11 @@ type DataSourceConfig struct {
 	// covered by the removed legacy http config.
 	HTTPClientSpec *HTTPClientSpec `koanf:"http"`
 
+	// MaxResponseBytes caps each HTTP response body a Lua script can read.
+	// Responses larger than this return (nil, error) to the script.
+	// Zero or unset uses the default of 1 MiB. Negative values are rejected.
+	MaxResponseBytes int64 `koanf:"max_response_bytes"`
+
 	// Caching configuration
 	Caching *CachingConfig `koanf:"caching"`
 }

@@ -2,6 +2,18 @@
 
 This package provides Lua services for use with the LuaDataSource. These services expose Go functionality to Lua scripts in a safe and controlled manner.
 
+## Sandboxed Lua States
+
+Always create Lua states that run configuration-supplied scripts with
+`NewSandboxedState()`, never `lua.NewState()`. It uses
+`lua.Options{SkipOpenLibs: true}` and opens only `base`, `table`, `string`,
+and `math`. It also removes `dofile`, `loadfile`, `require`, `module`, and
+`_printregs` from the base library. `os`, `io`, `debug`, `package`,
+`coroutine`, and `channel` are not available.
+
+`ValidateFunction` uses a sandboxed state too, because loading a script runs
+its top-level code.
+
 ## Available Services
 
 ### HTTP Service
@@ -27,6 +39,15 @@ start with `/` so the joined URL is `{base}/path`. If the Lua URL has a scheme,
 it is used as-is even when `base_url` is set. A relative URL with no `base_url`
 returns `(nil, error)` and does not hit the network.
 
+Only `http` and `https` schemes are accepted. Any other scheme returns
+`(nil, error)` without sending a request.
+
+Response bodies are capped by `WithMaxResponseBytes` (default
+`DefaultMaxResponseBytes`, 1 MiB). A larger body returns
+`(nil, "response body exceeds max_response_bytes ...")`, never a truncated
+body. If the upstream sends `Content-Length`, the check happens before any of
+the body is read.
+
 #### Example
 
 ```lua
@@ -47,6 +68,29 @@ local response = http.post("https://api.example.com/create", body, headers)
 
 -- Generic request
 local response = http.request("PUT", "https://api.example.com/update", body, headers)
+```
+
+### URL Service
+
+The URL service escapes values for use in URLs.
+
+#### Functions
+
+- `url.path_escape(string)` - Escape a value for use as a single URL path segment
+  - Encodes `/`, `?`, `#`, spaces and other reserved characters, plus the dot
+    segments `.` and `..`. Use this for any token or request value placed in a path.
+  - Returns: `escaped_string`
+
+- `url.encode(string)` - Apply Go's `url.PathEscape`
+  - Does not encode `.` or `..`. Kept for compatibility; prefer `url.path_escape`
+    for untrusted input.
+  - Returns: `escaped_string`
+
+#### Example
+
+```lua
+-- base_url on the HTTP client fixes the host; the subject stays in one segment
+local response = http.get("/users/" .. url.path_escape(input.subject.subject))
 ```
 
 ### JSON Service
@@ -176,6 +220,11 @@ httpService, err := lua.NewHTTPService(ctx, client,
     lua.WithBaseURL("https://entitlements.internal.example.com"),
 )
 
+// Cap response bodies (optional; default DefaultMaxResponseBytes = 1 MiB)
+httpService, err := lua.NewHTTPService(ctx, client,
+    lua.WithMaxResponseBytes(64 << 10),
+)
+
 // With request options (per-request hooks applied before sending)
 httpService, err := lua.NewHTTPService(ctx, client,
     lua.WithRequestOptions(func(req *http.Request) error {
@@ -187,7 +236,11 @@ httpService, err := lua.NewHTTPService(ctx, client,
 
 #### Request Options
 
-The `RequestOptions` function allows you to modify HTTP requests before they are sent. This is useful for:
+The `RequestOptions` function allows you to modify HTTP requests before they are sent.
+Because these headers usually carry credentials, setting `WithRequestOptions`
+also requires an `https` base URL and restricts redirects to the same origin.
+Go copies custom headers to every redirect hop, so without this a redirect
+could forward them to another host. This is useful for:
 - Adding authentication headers
 - Modifying URLs (e.g., adding query parameters)
 - Setting custom headers
@@ -279,10 +332,17 @@ end
 
 ## Security Considerations
 
-1. **HTTP Timeout**: The HTTP service has a configurable timeout to prevent long-running requests
-2. **No File System Access**: Services don't provide file system access
-3. **Sandboxed Execution**: Each Lua script runs in its own isolated state
-4. **No Subprocess Execution**: Services don't allow executing system commands
+1. **Standard Library Sandbox**: `NewSandboxedState()` loads only `base`, `table`, `string`, and `math`. There is no `os`, `io`, `debug`, or module loading
+2. **HTTP Timeout**: The HTTP service has a configurable timeout to prevent long-running requests
+3. **Response Size Limit**: Bodies are read through `io.LimitReader` and rejected above `max_response_bytes`
+4. **Scheme Restriction**: Only `http` and `https` URLs are sent
+5. **Same-Origin Redirects for Credentials**: When the client injects credentials (credential transport) or `WithRequestOptions` is set, `NewHTTPService` uses a copy of the client that refuses redirects to a different scheme, host, or port. Any existing `CheckRedirect` still runs, and the caller's client is not modified
+6. **Fixed Hosts**: With `base_url` and relative paths, script input cannot change the host. Escape untrusted path values with `url.path_escape()`
+7. **Isolated State**: Each Lua script runs in its own isolated state
+
+See [LUA_DATASOURCE.md](../datasource/LUA_DATASOURCE.md#security-model) for
+the full security model, including why there is no per-data-source host
+allowlist.
 
 ## Best Practices
 
@@ -309,15 +369,16 @@ function fetch(input)
     ["Content-Type"] = "application/json"
   }
   
-  local response = http.get(apiEndpoint .. "/user/" .. subject, headers)
+  -- Escape the untrusted subject so it stays in one path segment
+  local response = http.get(apiEndpoint .. "/user/" .. url.path_escape(subject), headers)
   
-  if response.status ~= 200 then
+  if response == nil or response.status ~= 200 then
     return nil  -- Data source has nothing to contribute
   end
   
   -- Parse and enhance response
   local userData = json.decode(response.body)
-  userData.fetched_at = os.time()
+  userData.source = "lua-datasource"
   
   -- Return result
   return {

@@ -80,7 +80,7 @@ The credential type is `forwarded_client_cert`. The subject contains the raw hea
 
 ### Lua Validator Script (`forwarded_client_cert_auth.lua`)
 
-Validates `ForwardedClientCertCredential` by calling BOP's `/v1/auth` endpoint. The script runs inside parsec's Lua sandbox with access to `config`, `json`, `http`, and `os` modules.
+Validates `ForwardedClientCertCredential` by calling BOP's `/v1/auth` endpoint. The script runs inside parsec's Lua sandbox with access to the `config`, `json`, `http`, `base64`, `url`, and `audit` services and the `base`, `table`, `string`, and `math` standard libraries. `os`, `io`, and `debug` are not available.
 
 **`validate(input)` steps:**
 1. Read `bop_url`, `trust_domain`, `bop_env` from `config.get()`
@@ -271,7 +271,9 @@ All secret references use `optional: true` to allow the pod to start without cer
 - **Proxy proof**: BOP validates `x-rh-insights-certauth-secret` matches its `PROXY_PROOF` config, ensuring only authorized proxies can trigger cert auth.
 - **Issuer validation**: BOP checks the certificate issuer against its `TRUSTED_ISSUERS` list before resolving the CN.
 - **Cache key derivation**: Cache keys include credential type, subject, and issuer. The caching wrappers handle key hashing.
-- **Lua sandbox**: The validation script runs in a restricted Lua environment — only `config`, `json`, `http`, and `os` modules are available.
+- **Lua sandbox**: The validation script runs in a restricted Lua environment with no filesystem, OS, or debug access. Only the parsec services (`config`, `json`, `http`, `base64`, `url`, `audit`) and the `base`, `table`, `string`, and `math` standard libraries are available. See the [Lua security model](../internal/datasource/LUA_DATASOURCE.md#security-model).
+- **Redirects**: The BOP client injects credentials through `http_auth`, so it only follows redirects to the same scheme, host, and port. A cross-origin redirect fails validation instead of forwarding `x-rh-clientid` and `x-rh-apitoken`.
+- **Response size limit**: HTTP responses from BOP are capped at 1 MiB. A larger body returns an error to the script, which fails validation.
 - **Secret management**: BOP credentials are resolved from environment variables at startup. The `{env: "VAR"}` syntax in config values and `http_auth.headers` entries resolves env vars eagerly — if a required env var is empty or unset, startup fails immediately.
 
 ## Testing
