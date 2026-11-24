@@ -1464,7 +1464,7 @@ data:
                 "h": 8,
                 "w": 12,
                 "x": 0,
-                "y": 24
+                "y": 72
               },
               "id": 130,
               "options": {
@@ -1621,7 +1621,7 @@ data:
                 "h": 11,
                 "w": 8,
                 "x": 0,
-                "y": 25
+                "y": 73
               },
               "id": 120,
               "interval": "5s",
@@ -1699,7 +1699,7 @@ data:
                 "h": 11,
                 "w": 24,
                 "x": 0,
-                "y": 36
+                "y": 84
               },
               "id": 118,
               "interval": "5s",
@@ -1852,7 +1852,7 @@ data:
                 "h": 11,
                 "w": 8,
                 "x": 0,
-                "y": 47
+                "y": 95
               },
               "id": 113,
               "interval": "5s",
@@ -1983,7 +1983,7 @@ data:
                 "h": 11,
                 "w": 8,
                 "x": 8,
-                "y": 47
+                "y": 95
               },
               "id": 116,
               "interval": "5s",
@@ -2114,7 +2114,7 @@ data:
                 "h": 11,
                 "w": 8,
                 "x": 16,
-                "y": 47
+                "y": 95
               },
               "id": 117,
               "interval": "5s",
@@ -2243,7 +2243,7 @@ data:
                 "h": 11,
                 "w": 8,
                 "x": 0,
-                "y": 58
+                "y": 106
               },
               "id": 121,
               "interval": "5s",
@@ -2346,7 +2346,7 @@ data:
                 "h": 11,
                 "w": 8,
                 "x": 8,
-                "y": 58
+                "y": 106
               },
               "id": 122,
               "interval": "5s",
@@ -2489,7 +2489,7 @@ data:
                 "h": 11,
                 "w": 8,
                 "x": 16,
-                "y": 58
+                "y": 106
               },
               "id": 123,
               "options": {
@@ -2698,7 +2698,7 @@ data:
                 "h": 9,
                 "w": 12,
                 "x": 0,
-                "y": 59
+                "y": 107
               },
               "id": 106,
               "interval": "5s",
@@ -2889,7 +2889,7 @@ data:
                 "h": 9,
                 "w": 12,
                 "x": 12,
-                "y": 59
+                "y": 107
               },
               "id": 104,
               "interval": "5s",
@@ -3011,7 +3011,7 @@ data:
                 "h": 9,
                 "w": 12,
                 "x": 0,
-                "y": 68
+                "y": 116
               },
               "id": 128,
               "options": {
@@ -3116,7 +3116,7 @@ data:
                 "h": 9,
                 "w": 12,
                 "x": 12,
-                "y": 68
+                "y": 116
               },
               "id": 129,
               "options": {
@@ -3158,6 +3158,84 @@ data:
             }
           ],
           "title": "Resource Usage",
+          "type": "row"
+        },
+        {
+          "collapsed": true,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 26
+          },
+          "id": 201,
+          "panels": [
+            {
+              "datasource": {
+                "type": "cloudwatch",
+                "uid": "P1A97A9592CB7F392"
+              },
+              "description": "Error-level log lines emitted by parsec (zerolog JSON, level=\"error\"), from CloudWatch Logs Insights. Limited to the 200 most recent lines in the selected time range.",
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": []
+              },
+              "gridPos": {
+                "h": 12,
+                "w": 24,
+                "x": 0,
+                "y": 27
+              },
+              "id": 200,
+              "options": {
+                "dedupStrategy": "none",
+                "enableInfiniteScrolling": false,
+                "enableLogDetails": true,
+                "prettifyLogMessage": false,
+                "showCommonLabels": false,
+                "showLabels": false,
+                "showTime": true,
+                "sortOrder": "Descending",
+                "wrapLogMessage": true
+              },
+              "pluginVersion": "11.6.11",
+              "targets": [
+                {
+                  "datasource": {
+                    "type": "cloudwatch",
+                    "uid": "P1A97A9592CB7F392"
+                  },
+                  "dimensions": {},
+                  "expression": "fields @timestamp, message\n| filter level in [\"error\", \"fatal\", \"panic\"]\n| sort @timestamp desc\n| limit 1000",
+                  "id": "",
+                  "label": "",
+                  "logGroups": [
+                    {
+                      "accountId": "744086762512",
+                      "arn": "arn:aws:logs:us-east-1:744086762512:log-group:hccp01ue1.parsec-prod:*",
+                      "name": "hccp01ue1.parsec-prod"
+                    }
+                  ],
+                  "matchExact": true,
+                  "metricEditorMode": 0,
+                  "metricName": "",
+                  "metricQueryType": 0,
+                  "namespace": "",
+                  "period": "",
+                  "queryLanguage": "CWLI",
+                  "queryMode": "Logs",
+                  "refId": "A",
+                  "region": "us-east-1",
+                  "sqlExpression": "",
+                  "statistic": "Average",
+                  "statsGroups": []
+                }
+              ],
+              "title": "Error logs",
+              "type": "logs"
+            }
+          ],
+          "title": "Logs",
           "type": "row"
         }
       ],
@@ -3212,12 +3290,12 @@ data:
       "timezone": "UTC",
       "title": "HCC Parsec Dashboard",
       "uid": "hcc-parsec",
-      "version": 35
+      "version": 36
     }
 kind: ConfigMap
 metadata:
-  name: grafana-dashboard-parsec
-  labels:
-    grafana_dashboard: "true"
   annotations:
     grafana-folder: /grafana-dashboard-definitions/Insights
+  labels:
+    grafana_dashboard: "true"
+  name: grafana-dashboard-parsec
